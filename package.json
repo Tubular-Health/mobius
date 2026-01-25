@@ -1,5 +1,5 @@
 {
-  "name": "mobius",
+  "name": "@tubular/mobius",
   "version": "1.0.0",
   "description": "AI-Powered Development Workflow Tool - Execute Linear/Jira issues with Claude",
   "type": "module",
@@ -23,7 +23,11 @@
     "workflow",
     "cli"
   ],
-  "author": "",
+  "author": "Dustin Verzal <dustin@tubular.health>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tubular-Health/mobius.git"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"

@@ -13,14 +13,14 @@
 
 **Define issues in Linear. Let Claude implement them. Review and ship.**
 
-[![npm version](https://img.shields.io/npm/v/mobius?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/mobius)
+[![npm version](https://img.shields.io/npm/v/@tubular/mobius?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/@tubular/mobius)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 
 <br>
 
 ```bash
-npm install -g mobius && mobius setup
+npm install -g @tubular/mobius && mobius setup
 ```
 
 **Works on Mac, Windows, and Linux.**
@@ -85,7 +85,7 @@ Mobius uses **your existing Linear issues** as the source of truth. No new syste
 Get from zero to executing your first issue:
 
 ```bash
-npm install -g mobius
+npm install -g @tubular/mobius
 mobius setup
 mobius ABC-123
 ```
@@ -100,7 +100,7 @@ mobius ABC-123
 ### Manual Installation
 
 ```bash
-git clone https://github.com/your-username/mobius.git
+git clone https://github.com/Tubular-Health/mobius.git
 cd mobius
 ./install.sh
 ```
@@ -155,7 +155,7 @@ do {
 | Feature | Mobius | GSD | Beads |
 |---------|--------|-----|-------|
 | **State management** | Linear (existing tracker) | PROJECT.md, STATE.md files | .beads/ SQLite + daemon |
-| **Setup** | `npm install -g mobius` | Clone + configure file structure | Clone + daemon + database |
+| **Setup** | `npm install -g @tubular/mobius` | Clone + configure file structure | Clone + daemon + database |
 | **Team workflow** | Works with existing process | Requires learning new system | Requires syncing database |
 | **Merge conflicts** | None — state is external | Frequent on state files | Database sync issues |
 | **Resumability** | Stop/resume anytime | Manual state management | Daemon must be running |
@@ -453,5 +453,5 @@ Claude will retry the failed task.
 </p>
 
 <p align="center">
-  <code>npm install -g mobius && mobius setup</code>
+  <code>npm install -g @tubular/mobius && mobius setup</code>
 </p>
