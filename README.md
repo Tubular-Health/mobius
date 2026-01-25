@@ -1,22 +1,31 @@
-<p align="center">
-  <img src="mobius.svg" alt="Mobius" width="180" />
-</p>
+<div align="center">
 
-<h1 align="center">Mobius</h1>
+```
+███╗   ███╗ ██████╗ ██████╗ ██╗██╗   ██╗███████╗
+████╗ ████║██╔═══██╗██╔══██╗██║██║   ██║██╔════╝
+██╔████╔██║██║   ██║██████╔╝██║██║   ██║███████╗
+██║╚██╔╝██║██║   ██║██╔══██╗██║██║   ██║╚════██║
+██║ ╚═╝ ██║╚██████╔╝██████╔╝██║╚██████╔╝███████║
+╚═╝     ╚═╝ ╚═════╝ ╚═════╝ ╚═╝ ╚═════╝ ╚══════╝
+```
 
-<p align="center">
-  <strong>Autonomous AI development that works with your existing workflow</strong>
-</p>
+**Autonomous AI development that works with your existing workflow.**
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/mobius"><img src="https://img.shields.io/npm/v/mobius?style=flat-square" alt="npm version"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License: MIT"></a>
-  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" alt="Node.js 18+"></a>
-</p>
+**Define issues in Linear. Let Claude implement them. Review and ship.**
 
-<p align="center">
-  Define issues in Linear. Let Claude implement them. Review and ship.
-</p>
+[![npm version](https://img.shields.io/npm/v/mobius?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/mobius)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+
+<br>
+
+```bash
+npm install -g mobius && mobius setup
+```
+
+**Works on Mac, Windows, and Linux.**
+
+</div>
 
 ---
 
