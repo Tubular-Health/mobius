@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { createRequire } from 'module';
 import { program } from 'commander';
 import { doctor } from '../commands/doctor.js';
 import { setup } from '../commands/setup.js';
@@ -7,7 +8,9 @@ import { run } from '../commands/run.js';
 import { showConfig } from '../commands/config.js';
 import type { Backend, Model } from '../types.js';
 
-const version = '1.0.0';
+const require = createRequire(import.meta.url);
+const pkg = require('../../package.json') as { version: string };
+const version = pkg.version;
 
 program
   .name('mobius')
