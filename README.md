@@ -1,203 +1,229 @@
 <p align="center">
-  <img src="mobius.svg" alt="Mobius Logo" width="200" />
+  <img src="mobius.svg" alt="Mobius" width="180" />
 </p>
 
-# Mobius
+<h1 align="center">Mobius</h1>
 
-AI-powered autonomous development workflow tool. Mobius orchestrates Claude-powered development cycles with pluggable issue tracker backends.
+<p align="center">
+  <strong>Autonomous AI development that works with your existing workflow</strong>
+</p>
 
-## What is Mobius?
+<p align="center">
+  <a href="https://www.npmjs.com/package/mobius"><img src="https://img.shields.io/npm/v/mobius?style=flat-square" alt="npm version"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License: MIT"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=flat-square" alt="Node.js 18+"></a>
+</p>
 
-Mobius automates the **Define → Refine → Execute → Verify** workflow for software development:
+<p align="center">
+  Define issues in Linear. Let Claude implement them. Review and ship.
+</p>
+
+---
+
+## The Problem
+
+AI-assisted coding has a coordination problem:
+
+- **Context amnesia** — Every session starts from scratch, losing prior decisions
+- **Manual orchestration** — You become the glue between AI and your issue tracker
+- **Team blindness** — No visibility into what AI is doing or has done
+- **Scope creep** — Without guardrails, AI changes spiral beyond the original ask
+- **Risky autonomy** — Letting AI run unattended feels dangerous
+
+---
+
+## The Solution
+
+Mobius uses **your existing Linear issues** as the source of truth. No new systems to learn. No state files to merge. Your team already knows how to use Linear.
+
+| What You Do | What Mobius Does |
+|-------------|------------------|
+| Create a Linear issue | Break it into focused sub-tasks |
+| Run `mobius ABC-123` | Execute each sub-task autonomously |
+| Review the PR | Validate against acceptance criteria |
+
+---
+
+## How It Works
 
 ```mermaid
-graph LR
-    A[📝 Define] --> B[🔍 Refine]
-    B --> C[⚡ Execute]
-    C --> D[✅ Verify]
-    D -.->|New issues| A
+flowchart LR
+    subgraph You["<b>You</b>"]
+        A["Define issue"]
+        E["Review PR"]
+    end
 
-    style A fill:#e1f5fe
-    style B fill:#fff3e0
-    style C fill:#e8f5e9
-    style D fill:#f3e5f5
+    subgraph Mobius["<b>Mobius</b>"]
+        B["Refine into sub-tasks"]
+        C["Execute loop"]
+        D["Verify completion"]
+    end
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+
+    style A fill:#3B82F6,color:#fff,stroke:#2563EB
+    style B fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style C fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style D fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style E fill:#10B981,color:#fff,stroke:#059669
 ```
 
-| Step | Description |
-|------|-------------|
-| **Define** | Create well-defined issues with clear acceptance criteria |
-| **Refine** | Break down issues into small, focused sub-tasks |
-| **Execute** | Autonomously implement sub-tasks one at a time |
-| **Verify** | Validate implementation against acceptance criteria |
+---
 
-### Execution Loop
+## Quick Start
 
-Mobius runs Claude in a continuous loop, executing sub-tasks until an issue is complete:
-
-```mermaid
-flowchart TD
-    Start([Start]) --> Find[Find next ready sub-task]
-    Find --> Check{Sub-task<br/>available?}
-    Check -->|Yes| Implement[Implement change]
-    Implement --> Validate[Run validation<br/>tests, typecheck, lint]
-    Validate --> Pass{Passed?}
-    Pass -->|Yes| Commit[Commit changes]
-    Commit --> Mark[Mark sub-task complete]
-    Mark --> Find
-    Pass -->|No| Fix[Fix issues]
-    Fix --> Validate
-    Check -->|No| Done([All tasks complete])
-```
-
-## Installation
-
-### npm (Recommended)
+Get from zero to executing your first issue in 2 minutes:
 
 ```bash
-# Install globally
 npm install -g mobius
-
-# Run interactive setup
 mobius setup
-
-# Verify installation
-mobius doctor
+mobius ABC-123
 ```
 
-The setup wizard will configure:
-- Installation type (global or per-project)
-- Issue tracker backend (Linear, Jira)
-- Claude model and execution settings
-- Skills and commands
+<details>
+<summary>Alternative installation methods</summary>
 
 ### Manual Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/your-username/mobius.git
 cd mobius
-
-# Run the installer
 ./install.sh
 ```
 
-The installer will:
-- Install the `mobius` command to `~/.local/bin/`
-- Create configuration at `~/.config/mobius/config.yaml`
-- Install Claude skills to `~/.claude/skills/`
+The installer places:
+- `mobius` command in `~/.local/bin/`
+- Config at `~/.config/mobius/config.yaml`
+- Claude skills in `~/.claude/skills/`
 
-Make sure `~/.local/bin` is in your PATH:
+Ensure `~/.local/bin` is in your PATH:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-### Requirements
+</details>
 
-- **Node.js 18+** - For npm installation
-- **Claude Code CLI** - Install from [claude.ai/code](https://claude.ai/code)
-- **Linear MCP tools** - Auto-configured via Claude Code (for Linear backend)
-- **Docker** (optional) - For sandbox mode
+---
 
-## Usage
+## The Execution Loop
 
-```bash
-# Execute sub-tasks of an issue
-mobius VER-159
+When you run `mobius ABC-123`, here's what happens:
 
-# Limit iterations
-mobius VER-159 10
+```
+do {
+    task = findNextReady(issue)      // Respects blockedBy dependencies
 
-# Run locally (bypass sandbox)
-mobius VER-159 --local
+    implement(task)                   // Single-file focus per sub-task
 
-# Use a different model
-mobius VER-159 --model=sonnet
+    validate()                        // Tests, typecheck, lint
 
-# Show current configuration
-mobius config
+    commit()                          // Descriptive message, push
 
-# Edit configuration
-mobius config --edit
+    markComplete(task)                // Update Linear status
 
-# Check system requirements
-mobius doctor
-
-# Re-run setup wizard
-mobius setup
-
-# Get help
-mobius --help
+} while (hasReadyTasks(issue))
 ```
 
-## The 4-Step Workflow
+**Stop anytime. Resume later.** State lives in Linear, not local files.
 
-### 1. Define (`/linear:define`)
+---
 
-Create a well-defined issue through Socratic questioning:
+## Why Mobius?
+
+| Feature | Mobius | GSD | Beads |
+|---------|--------|-----|-------|
+| **State management** | Linear (existing tracker) | PROJECT.md, STATE.md files | .beads/ SQLite + daemon |
+| **Setup** | `npm install -g mobius` | Clone + configure file structure | Clone + daemon + database |
+| **Team workflow** | Works with existing process | Requires learning new system | Requires syncing database |
+| **Merge conflicts** | None — state is external | Frequent on state files | Database sync issues |
+| **Resumability** | Stop/resume anytime | Manual state management | Daemon must be running |
+| **Sandbox mode** | Docker isolation built-in | None | None |
+
+---
+
+## The 4 Skills
+
+<details>
+<summary><code>/linear:define</code> — Create well-defined issues</summary>
+
+Through Socratic questioning, Claude helps you create issues with:
+- Clear title and description
+- Measurable acceptance criteria
+- Appropriate labels and priority
 
 ```bash
 claude "/linear:define"
 ```
 
-Claude will ask questions to clarify requirements and create an issue with:
-- Clear title and description
-- Acceptance criteria
-- Appropriate labels and priority
+</details>
 
-### 2. Refine (`/linear:refine`)
+<details>
+<summary><code>/linear:refine</code> — Break into sub-tasks</summary>
 
-Break down the issue into implementable sub-tasks:
-
-```bash
-claude "/linear:refine VER-159"
-```
-
-This analyzes your codebase and creates sub-tasks that are:
-- Small enough for a single focus area
+Analyzes your codebase and creates sub-tasks that are:
+- Small enough for single-file focus
 - Ordered with blocking dependencies
 - Detailed with specific files and changes
 
-### 3. Execute (`mobius`)
-
-Run the autonomous loop to implement sub-tasks:
-
 ```bash
-mobius VER-159
+claude "/linear:refine ABC-123"
 ```
 
-Each iteration:
-1. Finds the next ready sub-task (not blocked)
+</details>
+
+<details>
+<summary><code>/linear:execute</code> — Implement one sub-task</summary>
+
+Executes the next ready sub-task:
+1. Reads parent issue context
 2. Implements the change
-3. Runs validation commands from `AGENTS.md`
-4. Commits with a descriptive message
-5. Marks the sub-task complete
-6. Continues until all sub-tasks are done
-
-### 4. Verify (`/linear:verify`)
-
-Review the implementation against acceptance criteria:
+3. Runs validation commands
+4. Commits and pushes
+5. Marks sub-task complete
 
 ```bash
-claude "/linear:verify VER-159"
+claude "/linear:execute ABC-123"
 ```
 
-Claude will:
-- Compare implementation to acceptance criteria
-- Run final validation
-- Add review notes as a comment on the issue
-- Mark the issue complete if everything passes
+Or use the CLI for continuous execution:
+```bash
+mobius ABC-123
+```
+
+</details>
+
+<details>
+<summary><code>/linear:verify</code> — Validate completion</summary>
+
+Reviews implementation against acceptance criteria:
+- Compares changes to requirements
+- Runs final validation
+- Adds review notes as Linear comment
+- Marks issue complete if passing
+
+```bash
+claude "/linear:verify ABC-123"
+```
+
+</details>
+
+---
 
 ## Configuration
+
+<details>
+<summary>View configuration options</summary>
 
 ### Config File
 
 Edit `~/.config/mobius/config.yaml`:
 
 ```yaml
-# Issue tracker backend: linear | jira
 backend: linear
 
-# Execution settings
 execution:
   delay_seconds: 3
   max_iterations: 50
@@ -208,7 +234,7 @@ execution:
 
 ### Environment Variables
 
-Override config settings with environment variables:
+Override any setting with environment variables:
 
 ```bash
 export MOBIUS_BACKEND=linear
@@ -218,134 +244,108 @@ export MOBIUS_MODEL=sonnet
 export MOBIUS_SANDBOX_ENABLED=false
 ```
 
-### Project Setup: AGENTS.md
+### Commands
 
-Copy the `AGENTS.md` template to your project root and customize it:
+```bash
+mobius config          # Show current configuration
+mobius config --edit   # Open config in editor
+```
+
+</details>
+
+---
+
+## Project Setup: AGENTS.md
+
+Copy the template to your project root to provide context each iteration:
 
 ```bash
 cp /path/to/mobius/AGENTS.md ./AGENTS.md
 ```
 
-This file provides project-specific context to Claude each iteration:
+This file tells Claude about your project:
 - Build and validation commands
 - Codebase patterns and conventions
 - Common issues and solutions
-- Project structure
+- Files that should not be modified
 
-## Supported Backends
+<details>
+<summary>Example AGENTS.md</summary>
 
-```mermaid
-graph TB
-    subgraph Mobius
-        CLI[mobius CLI]
-        Loop[Execution Loop]
-    end
+```markdown
+## Build & Validation
 
-    subgraph Backends
-        Linear[(Linear)]
-        Jira[(Jira)]
-    end
+- **Tests:** `npm test`
+- **Typecheck:** `npm run typecheck`
+- **Lint:** `npm run lint`
 
-    subgraph Claude
-        CC[Claude Code]
-        MCP[MCP Tools]
-    end
+## Codebase Patterns
 
-    CLI --> Loop
-    Loop --> CC
-    CC --> MCP
-    MCP --> Linear
-    MCP -.->|Planned| Jira
+- Components: `src/components/` - React, PascalCase
+- Services: `src/services/` - Business logic
+- Tests: `__tests__/` directories, `.spec.ts` suffix
 
-    style Linear fill:#5E6AD2,color:#fff
-    style Jira fill:#0052CC,color:#fff,stroke-dasharray: 5 5
+## Common Issues
+
+- Always reset mocks in `beforeEach`
+- Use absolute imports from `@/`
 ```
 
-### Linear (Default)
+</details>
 
-Uses Linear MCP tools via Claude Code. No additional configuration required.
-
-**Skills provided:**
-- `/linear:define` - Create issues
-- `/linear:refine` - Break down into sub-tasks
-- `/linear:execute` - Execute next sub-task
-- `/linear:verify` - Verify implementation
-
-### Jira (Planned)
-
-Future support for Jira integration.
-
-```yaml
-backend: jira
-jira:
-  base_url: https://yourcompany.atlassian.net
-  project_key: PROJ
-```
+---
 
 ## Sandbox Mode
 
-By default, Mobius runs Claude in a Docker sandbox for safer autonomous execution. This isolates file system changes and prevents accidental damage.
+By default, Mobius runs Claude in a Docker container for safer autonomous execution. This isolates file system changes and prevents accidental damage to your system.
 
-To bypass sandbox mode:
 ```bash
-mobius VER-159 --local
+# Run in sandbox (default)
+mobius ABC-123
+
+# Run locally (bypass sandbox)
+mobius ABC-123 --local
 ```
 
-Or disable in config:
+To disable sandbox permanently:
 ```yaml
 execution:
   sandbox: false
 ```
 
-## Example Workflow
+---
 
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant Claude as Claude CLI
-    participant Mobius as Mobius
-    participant Linear as Linear
+## Requirements
 
-    Dev->>Claude: /linear:define
-    Claude->>Linear: Create VER-160
-    Linear-->>Dev: Issue created
+| Requirement | Notes |
+|-------------|-------|
+| **Node.js 18+** | For npm installation |
+| **Claude Code CLI** | Install from [claude.ai/code](https://claude.ai/code) |
+| **Linear account** | With MCP tools configured |
+| **Docker** (optional) | For sandbox mode |
 
-    Dev->>Claude: /linear:refine VER-160
-    Claude->>Linear: Create 5 sub-tasks
-    Linear-->>Dev: Sub-tasks with dependencies
+---
 
-    Dev->>Mobius: mobius VER-160
-    loop For each sub-task
-        Mobius->>Linear: Get next ready task
-        Mobius->>Mobius: Implement & validate
-        Mobius->>Linear: Mark complete
-    end
-    Mobius-->>Dev: All tasks done
-
-    Dev->>Claude: /linear:verify VER-160
-    Claude->>Linear: Add review comment
-    Linear-->>Dev: Issue verified ✓
-```
+## CLI Reference
 
 ```bash
-# 1. Define a new feature
-claude "/linear:define"
-# → Creates VER-160: "Add user authentication"
+mobius <issue-id> [iterations]   # Execute sub-tasks
+mobius ABC-123                   # Run until complete
+mobius ABC-123 10                # Limit to 10 iterations
+mobius ABC-123 --local           # Bypass sandbox
+mobius ABC-123 --model=sonnet    # Use specific model
 
-# 2. Break it down into sub-tasks
-claude "/linear:refine VER-160"
-# → Creates 5 sub-tasks with dependencies
-
-# 3. Execute the implementation
-mobius VER-160
-# → Implements each sub-task autonomously
-
-# 4. Verify the implementation
-claude "/linear:verify VER-160"
-# → Reviews and marks complete
+mobius setup                     # Interactive setup wizard
+mobius config                    # Show configuration
+mobius config --edit             # Edit configuration
+mobius doctor                    # Check system requirements
+mobius --help                    # Show help
 ```
 
-## Troubleshooting
+---
+
+<details>
+<summary>Troubleshooting</summary>
 
 ### "Claude CLI not found"
 
@@ -353,21 +353,29 @@ Install Claude Code CLI from [claude.ai/code](https://claude.ai/code).
 
 ### "cclean not found"
 
-The `cclean` utility formats Claude's JSON output. Mobius will still work without it, but output will be less readable.
+The `cclean` utility formats Claude's JSON output. Mobius works without it, but output will be less readable.
 
 ### Mobius stops unexpectedly
 
-Check the iteration limit in your config:
+Check iteration limit:
 ```bash
-mobius --config
+mobius config
 ```
 
-Increase `max_iterations` if needed, or set to `0` for unlimited.
+Increase `max_iterations` or set to `0` for unlimited.
 
 ### Sub-tasks not executing in order
 
-Ensure sub-tasks have proper `blockedBy` relationships set during refinement. The loop respects these dependencies.
+Ensure sub-tasks have proper `blockedBy` relationships. Run `/linear:refine` again if dependencies are missing.
 
-## License
+</details>
 
-MIT
+---
+
+<p align="center">
+  <strong>MIT License</strong>
+</p>
+
+<p align="center">
+  <code>npm install -g mobius && mobius setup</code>
+</p>
