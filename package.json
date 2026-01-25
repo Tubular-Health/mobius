@@ -1,0 +1,51 @@
+{
+  "name": "mobius",
+  "version": "1.0.0",
+  "description": "AI-Powered Development Workflow Tool - Execute Linear/Jira issues with Claude",
+  "type": "module",
+  "main": "dist/bin/mobius.js",
+  "bin": {
+    "mobius": "dist/bin/mobius.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/bin/mobius.js",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "claude",
+    "linear",
+    "jira",
+    "ai",
+    "automation",
+    "workflow",
+    "cli"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "scripts",
+    ".claude",
+    "mobius.config.yaml",
+    "AGENTS.md"
+  ],
+  "dependencies": {
+    "@inquirer/prompts": "^7.0.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "execa": "^8.0.0",
+    "which": "^4.0.0",
+    "yaml": "^2.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/which": "^3.0.0",
+    "typescript": "^5.0.0"
+  }
+}

@@ -1,0 +1,38 @@
+# Mobius Configuration
+# Copy to ~/.config/mobius/config.yaml and customize
+#
+# Environment variables override these settings:
+#   MOBIUS_BACKEND, MOBIUS_DELAY_SECONDS, etc.
+
+# Issue tracker backend: linear | jira
+backend: linear
+
+# Backend-specific settings
+linear:
+  # Uses Linear MCP tools (auto-configured via Claude Code)
+  # No additional configuration required
+
+jira:
+  # Future Jira integration
+  # Uncomment and configure when using Jira backend:
+  # base_url: https://yourcompany.atlassian.net
+  # project_key: PROJ
+  # auth_method: api_token  # api_token | oauth
+
+# Execution settings
+execution:
+  # Seconds to wait between loop iterations
+  delay_seconds: 3
+
+  # Maximum iterations (0 = unlimited)
+  max_iterations: 50
+
+  # Claude model to use: opus | sonnet | haiku
+  model: opus
+
+  # Run in Docker sandbox by default (safer for autonomous execution)
+  # Set to false or use --local flag to run directly
+  sandbox: true
+
+  # Docker container name for sandbox mode
+  container_name: mobius-sandbox
