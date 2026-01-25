@@ -1,5 +1,5 @@
 {
-  "name": "@tubular/mobius",
+  "name": "mobius-loop",
   "version": "1.0.0",
   "description": "AI-Powered Development Workflow Tool - Execute Linear/Jira issues with Claude",
   "type": "module",
