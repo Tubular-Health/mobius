@@ -1,0 +1,32 @@
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#8B5CF6', 'primaryTextColor': '#fff', 'primaryBorderColor': '#7C3AED', 'lineColor': '#6366F1', 'secondaryColor': '#3B82F6', 'tertiaryColor': '#10B981'}}}%%
+flowchart TB
+    subgraph CLI["<b>Mobius CLI</b>"]
+        M[mobius ABC-123]
+    end
+
+    subgraph Skills["<b>Skill Interface</b>"]
+        direction LR
+        D[define]
+        R[refine]
+        E[execute]
+        V[verify]
+    end
+
+    subgraph Backends["<b>Backends</b>"]
+        direction LR
+        L["<b>Linear</b><br/><i>Primary</i>"]
+        J["Jira<br/><i>Planned</i>"]
+        G["GitHub Issues<br/><i>Planned</i>"]
+    end
+
+    M --> Skills
+    Skills --> Backends
+
+    style M fill:#3B82F6,color:#fff,stroke:#2563EB
+    style D fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style R fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style E fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style V fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style L fill:#10B981,color:#fff,stroke:#059669
+    style J fill:#374151,color:#9CA3AF,stroke:#4B5563
+    style G fill:#374151,color:#9CA3AF,stroke:#4B5563

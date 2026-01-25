@@ -1,0 +1,23 @@
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#8B5CF6', 'primaryTextColor': '#fff', 'primaryBorderColor': '#7C3AED', 'lineColor': '#6366F1', 'secondaryColor': '#3B82F6', 'tertiaryColor': '#10B981'}}}%%
+flowchart LR
+    subgraph You["<b>You</b>"]
+        A["Define issue"]
+        E["Review PR"]
+    end
+
+    subgraph Mobius["<b>Mobius</b>"]
+        B["Refine into sub-tasks"]
+        C["Execute loop"]
+        D["Verify completion"]
+    end
+
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+
+    style A fill:#3B82F6,color:#fff,stroke:#2563EB
+    style B fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style C fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style D fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style E fill:#10B981,color:#fff,stroke:#059669

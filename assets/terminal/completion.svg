@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 280">
+  <defs>
+    <linearGradient id="termBg3" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2d2d2d"/>
+      <stop offset="100%" style="stop-color:#1a1a1a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Terminal window -->
+  <rect width="700" height="280" rx="10" fill="url(#termBg3)"/>
+
+  <!-- Title bar -->
+  <rect width="700" height="32" rx="10" fill="#3d3d3d"/>
+  <rect y="22" width="700" height="10" fill="#3d3d3d"/>
+
+  <!-- Window buttons -->
+  <circle cx="20" cy="16" r="6" fill="#ff5f56"/>
+  <circle cx="40" cy="16" r="6" fill="#ffbd2e"/>
+  <circle cx="60" cy="16" r="6" fill="#27ca40"/>
+
+  <!-- Title -->
+  <text x="350" y="21" fill="#999" font-family="SF Mono, Menlo, Monaco, monospace" font-size="13" text-anchor="middle">mobius ABC-123 — complete</text>
+
+  <!-- Terminal content -->
+  <g font-family="SF Mono, Menlo, Monaco, Consolas, monospace" font-size="13">
+    <!-- Success header -->
+    <text x="20" y="60" fill="#27ca40">✓</text>
+    <text x="40" y="60" fill="#27ca40">All sub-tasks completed!</text>
+
+    <!-- Summary box -->
+    <rect x="20" y="80" width="660" height="100" rx="5" fill="#1a1a1a" stroke="#3d3d3d"/>
+
+    <text x="40" y="105" fill="#8B5CF6">Summary</text>
+    <text x="40" y="130" fill="#999">• 5 sub-tasks executed</text>
+    <text x="40" y="150" fill="#999">• 12 files modified</text>
+    <text x="40" y="170" fill="#27ca40">• All tests passing</text>
+
+    <!-- Status updates -->
+    <text x="20" y="205" fill="#666">Issue</text>
+    <text x="65" y="205" fill="#3B82F6">ABC-123</text>
+    <text x="130" y="205" fill="#666">marked as</text>
+    <text x="210" y="205" fill="#27ca40">Done</text>
+
+    <text x="20" y="230" fill="#666">Branch:</text>
+    <text x="80" y="230" fill="#999">feat/abc-123-user-auth</text>
+
+    <!-- Next step -->
+    <text x="20" y="260" fill="#ffbd2e">→</text>
+    <text x="40" y="260" fill="#e0e0e0">Review changes and create PR</text>
+  </g>
+</svg>

@@ -20,6 +20,25 @@
 
 ---
 
+## Table of Contents
+
+- [The Problem](#the-problem)
+- [The Solution](#the-solution)
+- [How It Works](#how-it-works)
+- [Quick Start](#quick-start)
+- [The Execution Loop](#the-execution-loop)
+- [Why Mobius?](#why-mobius)
+- [The 4 Skills](#the-4-skills)
+- [Configuration](#configuration)
+- [Backend Architecture](#backend-architecture)
+- [Project Setup](#project-setup-agentsmd)
+- [Sandbox Mode](#sandbox-mode)
+- [Requirements](#requirements)
+- [CLI Reference](#cli-reference)
+- [Troubleshooting](#troubleshooting)
+
+---
+
 ## The Problem
 
 AI-assisted coding has a coordination problem:
@@ -46,42 +65,25 @@ Mobius uses **your existing Linear issues** as the source of truth. No new syste
 
 ## How It Works
 
-```mermaid
-flowchart LR
-    subgraph You["<b>You</b>"]
-        A["Define issue"]
-        E["Review PR"]
-    end
-
-    subgraph Mobius["<b>Mobius</b>"]
-        B["Refine into sub-tasks"]
-        C["Execute loop"]
-        D["Verify completion"]
-    end
-
-    A --> B
-    B --> C
-    C --> D
-    D --> E
-
-    style A fill:#3B82F6,color:#fff,stroke:#2563EB
-    style B fill:#8B5CF6,color:#fff,stroke:#7C3AED
-    style C fill:#8B5CF6,color:#fff,stroke:#7C3AED
-    style D fill:#8B5CF6,color:#fff,stroke:#7C3AED
-    style E fill:#10B981,color:#fff,stroke:#059669
-```
+<p align="center">
+  <img src="assets/diagrams/workflow.svg" alt="Mobius Workflow" width="700" />
+</p>
 
 ---
 
 ## Quick Start
 
-Get from zero to executing your first issue in 2 minutes:
+Get from zero to executing your first issue:
 
 ```bash
 npm install -g mobius
 mobius setup
 mobius ABC-123
 ```
+
+<p align="center">
+  <img src="assets/terminal/setup.svg" alt="Mobius Setup" width="700" />
+</p>
 
 <details>
 <summary>Alternative installation methods</summary>
@@ -112,6 +114,10 @@ export PATH="$HOME/.local/bin:$PATH"
 
 When you run `mobius ABC-123`, here's what happens:
 
+<p align="center">
+  <img src="assets/diagrams/execution-loop.svg" alt="Execution Loop" width="600" />
+</p>
+
 ```
 do {
     task = findNextReady(issue)      // Respects blockedBy dependencies
@@ -126,6 +132,10 @@ do {
 
 } while (hasReadyTasks(issue))
 ```
+
+<p align="center">
+  <img src="assets/terminal/execution.svg" alt="Mobius Execution" width="800" />
+</p>
 
 **Stop anytime. Resume later.** State lives in Linear, not local files.
 
@@ -145,6 +155,8 @@ do {
 ---
 
 ## The 4 Skills
+
+Mobius provides four skills for the complete issue lifecycle. Currently implemented for Linear; the architecture supports additional backends.
 
 <details>
 <summary><code>/linear:define</code> — Create well-defined issues</summary>
@@ -255,6 +267,24 @@ mobius config --edit   # Open config in editor
 
 ---
 
+## Backend Architecture
+
+<p align="center">
+  <img src="assets/diagrams/architecture.svg" alt="Backend Architecture" width="600" />
+</p>
+
+Mobius uses a skill-based architecture that abstracts the issue tracker. While **Linear is the primary supported backend**, the architecture is designed for extensibility.
+
+Each backend has corresponding skills at `.claude/skills/<backend>/`. The pattern supports adding new backends (Jira, GitHub Issues, etc.) by implementing the skill interface:
+
+| Backend | Status | Skills Location |
+|---------|--------|-----------------|
+| **Linear** | Supported | `.claude/skills/*-linear-issue/` |
+| Jira | Planned | `.claude/skills/*-jira-issue/` |
+| GitHub Issues | Planned | `.claude/skills/*-github-issue/` |
+
+---
+
 ## Project Setup: AGENTS.md
 
 Copy the template to your project root to provide context each iteration:
@@ -321,7 +351,7 @@ execution:
 |-------------|-------|
 | **Node.js 18+** | For npm installation |
 | **Claude Code CLI** | Install from [claude.ai/code](https://claude.ai/code) |
-| **Linear account** | With MCP tools configured |
+| **Linear account** | Primary supported backend; architecture supports additional backends |
 | **Docker** (optional) | For sandbox mode |
 
 ---
@@ -344,8 +374,10 @@ mobius --help                    # Show help
 
 ---
 
+## Troubleshooting
+
 <details>
-<summary>Troubleshooting</summary>
+<summary>Common issues and solutions</summary>
 
 ### "Claude CLI not found"
 
@@ -367,6 +399,41 @@ Increase `max_iterations` or set to `0` for unlimited.
 ### Sub-tasks not executing in order
 
 Ensure sub-tasks have proper `blockedBy` relationships. Run `/linear:refine` again if dependencies are missing.
+
+### Linear MCP not configured
+
+Ensure Linear MCP tools are configured in your Claude settings. Check with:
+```bash
+mobius doctor
+```
+
+### Docker sandbox fails to start
+
+Verify Docker is running:
+```bash
+docker info
+```
+
+If issues persist, run without sandbox:
+```bash
+mobius ABC-123 --local
+```
+
+### Permission denied errors
+
+Ensure `~/.local/bin` is in your PATH and mobius is executable:
+```bash
+chmod +x ~/.local/bin/mobius
+```
+
+### Sub-task implementation fails validation
+
+The task will remain incomplete. Fix the issue manually or run:
+```bash
+claude "/linear:execute ABC-123"
+```
+
+Claude will retry the failed task.
 
 </details>
 
