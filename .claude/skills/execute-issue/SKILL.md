@@ -481,6 +481,154 @@ If you discover issues outside scope:
 </scope_discipline>
 </implementation_phase>
 
+<tdd_option>
+**Test-Driven Development workflow is optional** and should be used when explicitly requested or when sub-tasks have highly testable acceptance criteria.
+
+<when_to_use>
+**Use TDD when ANY of these apply**:
+
+1. **Explicit directive**: Sub-task description contains "Use TDD" or "TDD workflow"
+2. **Complex business logic**: Algorithm implementations, data transformations, validation rules
+3. **Refactoring existing code**: When changing implementation while preserving behavior
+4. **Bug fixes with reproducible steps**: Write test that reproduces bug first
+5. **Well-defined input/output**: Functions with clear contracts and edge cases
+
+**Skip TDD when**:
+- Simple configuration changes
+- UI/layout modifications without logic
+- Adding imports or wiring up existing components
+- Documentation-only changes
+- Sub-task explicitly says "Do NOT use TDD"
+
+**Detection heuristic**: If sub-task has >3 specific, testable acceptance criteria (not just "implement X"), consider TDD.
+</when_to_use>
+
+<tdd_workflow>
+When TDD is appropriate, follow the **red-green-refactor** cycle instead of the standard implementation flow:
+
+### Red Phase: Write Failing Tests First
+
+1. **Analyze acceptance criteria** - Convert each criterion to a test case
+2. **Create/update test file** - Write tests that define expected behavior
+3. **Run tests to confirm failure** - Tests MUST fail (proves tests are meaningful)
+4. **Commit failing tests** (optional) - Some teams prefer this for traceability
+
+```bash
+# Example: Run tests to verify they fail
+just test-file {test-file-pattern}
+# Expected: Tests should FAIL at this point
+```
+
+**Red phase checklist**:
+- [ ] Each acceptance criterion has a corresponding test
+- [ ] Tests cover edge cases mentioned in sub-task
+- [ ] Tests are isolated and independent
+- [ ] Tests fail for the right reason (missing implementation, not syntax errors)
+
+### Green Phase: Implement Minimal Code to Pass
+
+1. **Focus on passing tests** - Write just enough code to make tests green
+2. **Don't optimize prematurely** - Correctness first, elegance later
+3. **Run tests after each change** - Verify progress incrementally
+4. **All tests must pass** before proceeding
+
+```bash
+# Verify tests pass
+just test-file {test-file-pattern}
+# Expected: All tests should PASS
+```
+
+**Green phase checklist**:
+- [ ] All previously failing tests now pass
+- [ ] No new test failures introduced
+- [ ] Implementation addresses acceptance criteria
+- [ ] Code compiles without type errors
+
+### Refactor Phase: Improve Code Quality
+
+1. **Clean up implementation** - Remove duplication, improve naming
+2. **Maintain passing tests** - Run tests after each refactor step
+3. **Apply code patterns** - Match existing codebase conventions
+4. **Don't add new behavior** - Only restructure existing code
+
+```bash
+# Verify tests still pass after refactoring
+just test-file {test-file-pattern}
+# Expected: All tests should still PASS
+```
+
+**Refactor phase checklist**:
+- [ ] Code follows project patterns and conventions
+- [ ] No code duplication
+- [ ] Clear naming and structure
+- [ ] All tests still pass
+- [ ] Typecheck passes
+</tdd_workflow>
+
+<tdd_vs_standard_flow>
+**When to use each approach**:
+
+| Scenario | Approach | Why |
+|----------|----------|-----|
+| "Use TDD" in description | TDD | Explicit request |
+| Algorithm implementation | TDD | Complex logic benefits from test-first |
+| Bug fix with repro steps | TDD | Test captures the bug |
+| UI component wiring | Standard | Tests come after implementation |
+| Config/env changes | Standard | Not meaningfully testable |
+| >3 testable criteria | Consider TDD | High specificity suggests test-first value |
+
+**Switching mid-task**: If you start with standard flow and realize TDD would help, you can switch. Write tests for remaining criteria, verify they fail, then continue with green-refactor.
+</tdd_vs_standard_flow>
+
+<tdd_commit_strategy>
+**Commit points in TDD workflow**:
+
+Option A: Single commit at end (recommended for small sub-tasks)
+- Complete full red-green-refactor cycle
+- Single commit with all changes
+
+Option B: Multiple commits (for larger sub-tasks)
+- Commit 1: Failing tests (optional, documents intent)
+- Commit 2: Passing implementation + refactored code
+
+**Commit message for TDD**:
+```
+feat(scope): implement feature using TDD
+
+Red: Added tests for {criteria}
+Green: Implemented {functionality}
+Refactor: {what was cleaned up}
+
+Implements: {sub-task-id}
+Part-of: {parent-issue-id}
+```
+</tdd_commit_strategy>
+
+<tdd_anti_patterns>
+**Avoid these TDD mistakes**:
+
+- **Testing implementation details**: Test behavior, not internal structure
+  - BAD: `expect(obj._privateMethod).toBeCalled()`
+  - GOOD: `expect(result).toEqual(expectedOutput)`
+
+- **Writing tests that can't fail**: Tests must be meaningful
+  - BAD: `expect(true).toBe(true)`
+  - GOOD: `expect(calculate(input)).toBe(expectedResult)`
+
+- **Skipping the refactor phase**: Refactoring is essential for maintainability
+  - BAD: Green tests → commit immediately
+  - GOOD: Green tests → refactor → verify still green → commit
+
+- **Over-testing**: Don't test framework behavior or trivial code
+  - BAD: Testing that React renders a div
+  - GOOD: Testing that component displays correct data
+
+- **Forcing TDD on unsuitable tasks**: Not everything benefits from test-first
+  - BAD: TDD for a CSS color change
+  - GOOD: Standard flow for styling, TDD for logic
+</tdd_anti_patterns>
+</tdd_option>
+
 <verification_phase>
 <full_validation>
 Run all three verification steps:
