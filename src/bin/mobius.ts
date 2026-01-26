@@ -6,6 +6,7 @@ import { doctor } from '../commands/doctor.js';
 import { setup } from '../commands/setup.js';
 import { run } from '../commands/run.js';
 import { showConfig } from '../commands/config.js';
+import { submit } from '../commands/submit.js';
 import type { Backend, Model } from '../types.js';
 
 const require = createRequire(import.meta.url);
@@ -56,6 +57,20 @@ program
     });
   });
 
+program
+  .command('submit <task-id>')
+  .description('Create a pull request for a completed task')
+  .option('-b, --backend <backend>', 'Backend: linear or jira')
+  .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
+  .option('-d, --draft', 'Create as draft PR')
+  .action(async (taskId: string, options) => {
+    await submit(taskId, {
+      backend: options.backend as Backend | undefined,
+      model: options.model as Model | undefined,
+      draft: options.draft,
+    });
+  });
+
 // Default command: treat first arg as task ID if no command specified
 program
   .argument('[task-id]', 'Task ID to execute (shorthand for "run")')
@@ -72,7 +87,7 @@ program
     }
 
     // If task ID looks like a command, let commander handle it
-    if (['setup', 'doctor', 'config', 'run', 'help'].includes(taskId)) {
+    if (['setup', 'doctor', 'config', 'run', 'submit', 'help'].includes(taskId)) {
       return;
     }
 

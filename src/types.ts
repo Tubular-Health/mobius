@@ -7,6 +7,11 @@ export interface ExecutionConfig {
   model: Model;
   sandbox: boolean;
   container_name: string;
+  // Parallel execution and worktree isolation
+  max_parallel_agents?: number;
+  worktree_path?: string;
+  cleanup_on_success?: boolean;
+  base_branch?: string;
 }
 
 export interface LinearConfig {
@@ -49,6 +54,11 @@ export const DEFAULT_CONFIG: LoopConfig = {
     model: 'opus',
     sandbox: true,
     container_name: 'mobius-sandbox',
+    // Parallel execution defaults
+    max_parallel_agents: 3,
+    worktree_path: '../<repo>-worktrees/',
+    cleanup_on_success: true,
+    base_branch: 'main',
   },
 };
 
