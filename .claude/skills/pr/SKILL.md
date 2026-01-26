@@ -27,14 +27,198 @@ Key behaviors:
 <workflow>
 1. **Detect current state** - Get branch name, base branch, changed files
 2. **Parse issue references** - Extract from branch name and commit messages
-3. **Gather changes** - Get file list and diff statistics
-4. **Infer PR type** - Determine feat/fix/refactor from changes
-5. **Generate PR content** - Title, summary, changes, test plan, agent context
-6. **Review with user** - Show PR preview before creation
-7. **Execute creation** - Run `gh pr create` with formatted body
-8. **Report result** - Show PR URL and next steps
+3. **Validate issues** - If issues detected, validate they exist via backend MCP tools
+4. **Gather changes** - Get file list and diff statistics
+5. **Infer PR type** - Determine feat/fix/refactor from changes
+6. **Generate PR content** - Title, summary, changes, test plan, agent context
+7. **Review with user** - Show PR preview before creation
+8. **Execute creation** - Run `gh pr create` with formatted body
+9. **Link to issues** - Add PR link and comment to detected issues
+10. **Report result** - Show PR URL, issue links, and next steps
 </workflow>
 </quick_start>
+
+<backend_detection>
+**Detect the issue tracker backend** before attempting to link PRs to issues.
+
+Read `~/.config/mobius/config.yaml` or `mobius.config.yaml` in the project root:
+
+```yaml
+backend: linear  # or 'jira'
+```
+
+**Default**: If no backend is specified, default to `linear`.
+
+The detected backend determines which MCP tools to use for issue linking. See `<backend_context>` for available tools per backend.
+
+**When backend detection is needed**:
+- Issue references are detected from branch name or commits
+- User wants to link PR back to issue tracker
+- Validating issue existence before creating PR
+
+**When backend detection can be skipped**:
+- No issue references found
+- User explicitly opts out of issue linking
+</backend_detection>
+
+<backend_context>
+<linear>
+**MCP Tools for Linear Issue Linking**:
+
+- **Validate issue exists**: `mcp__plugin_linear_linear__get_issue`
+  - Parameters: `id` (issue identifier, e.g., "MOB-123")
+  - Returns: Issue details including title, description, status
+  - Use before PR creation to validate issue reference is valid
+
+- **Add PR link to issue**: `mcp__plugin_linear_linear__update_issue`
+  - Parameters: `id` (issue identifier), `links` (array of link objects)
+  - Link object format: `{ "url": "https://github.com/...", "title": "PR: Title here" }`
+  - Attaches PR URL as an external link on the Linear issue
+
+- **Add comment to issue**: `mcp__plugin_linear_linear__create_comment`
+  - Parameters: `issueId`, `body` (markdown content)
+  - Use to document that a PR was created for this issue
+  - Example body: `"🔗 **PR Created**: [#123 - feat(auth): add OAuth login](https://github.com/...)"`
+
+**Linear issue ID formats**:
+- `MOB-123`, `PROJ-456`, `ABC-789` (uppercase prefix + number)
+- Regex: `/^[A-Z]{2,10}-\d+$/`
+</linear>
+
+<jira>
+**MCP Tools for Jira Issue Linking**:
+
+- **Validate issue exists**: `mcp__plugin_jira_jira__get_issue`
+  - Parameters: `issueIdOrKey` (e.g., "PROJ-123")
+  - Returns: Issue details including summary, description, status
+  - Use before PR creation to validate issue reference is valid
+
+- **Add PR link to issue**: `mcp__plugin_jira_jira__add_link`
+  - Parameters: `issueIdOrKey`, `url`, `title`
+  - Adds the PR as a remote link (web link) on the Jira issue
+  - Title format: `"PR #123: feat(auth): add OAuth login"`
+
+- **Add comment to issue**: `mcp__plugin_jira_jira__add_comment`
+  - Parameters: `issueIdOrKey`, `body` (Jira wiki markup or markdown)
+  - Use to document that a PR was created for this issue
+  - Example body: `"🔗 *PR Created*: [#123 - feat(auth): add OAuth login|https://github.com/...]"`
+
+**Jira issue ID formats**:
+- `PROJ-123`, `JIRA-456`, `KEY-789` (uppercase prefix + number)
+- Regex: `/^[A-Z]{2,10}-\d+$/`
+</jira>
+</backend_context>
+
+<issue_linking>
+<when_to_link>
+Link PR back to issue tracker when:
+- Issue reference detected from branch name (e.g., `drverzal/mob-123-feature`)
+- Issue reference found in commit messages
+- User explicitly provides issue ID
+
+**Do NOT attempt to link when**:
+- No issue references detected
+- Issue validation fails (invalid ID)
+- Backend MCP tools are not available
+</when_to_link>
+
+<validation_step>
+**Before creating PR**, validate that detected issue IDs exist:
+
+```
+For each detected issue ID:
+1. Call backend-appropriate get_issue tool
+2. If successful: Confirm issue exists, capture title for context
+3. If failed: Warn user but continue with PR creation
+```
+
+**Linear validation**:
+```
+mcp__plugin_linear_linear__get_issue(id: "MOB-123")
+```
+
+**Jira validation**:
+```
+mcp__plugin_jira_jira__get_issue(issueIdOrKey: "PROJ-123")
+```
+
+If validation fails:
+- Issue may not exist or may be private
+- Warn user: "Could not validate issue MOB-123 - continuing without issue link"
+- Do NOT block PR creation for validation failures
+</validation_step>
+
+<linking_workflow>
+**After successful PR creation**, link back to issue tracker:
+
+**Step 1: Add PR as link attachment**
+
+For **Linear**:
+```
+mcp__plugin_linear_linear__update_issue(
+  id: "MOB-123",
+  links: [{
+    url: "https://github.com/owner/repo/pull/456",
+    title: "PR #456: feat(scope): description"
+  }]
+)
+```
+
+For **Jira**:
+```
+mcp__plugin_jira_jira__add_link(
+  issueIdOrKey: "PROJ-123",
+  url: "https://github.com/owner/repo/pull/456",
+  title: "PR #456: feat(scope): description"
+)
+```
+
+**Step 2: Add comment documenting PR creation**
+
+For **Linear**:
+```
+mcp__plugin_linear_linear__create_comment(
+  issueId: "MOB-123",
+  body: "🔗 **Pull Request Created**\n\n[#456 - feat(scope): description](https://github.com/owner/repo/pull/456)\n\nReady for review."
+)
+```
+
+For **Jira**:
+```
+mcp__plugin_jira_jira__add_comment(
+  issueIdOrKey: "PROJ-123",
+  body: "🔗 *Pull Request Created*\n\n[#456 - feat(scope): description|https://github.com/owner/repo/pull/456]\n\nReady for review."
+)
+```
+</linking_workflow>
+
+<linking_errors>
+**Handle linking failures gracefully**:
+
+If linking fails after PR is created:
+- PR creation was successful - do NOT attempt to delete/undo
+- Report the error to user
+- Provide manual linking instructions
+
+**Example error output**:
+```markdown
+## PR Created Successfully
+URL: https://github.com/owner/repo/pull/456
+
+⚠️ **Issue Linking Failed**
+Could not link PR to MOB-123: [error message]
+
+**Manual linking**:
+1. Open https://linear.app/team/issue/MOB-123
+2. Add link: https://github.com/owner/repo/pull/456
+```
+
+**Common linking errors**:
+- Issue not found (deleted or wrong ID)
+- Permission denied (private issue)
+- MCP tool unavailable (backend not configured)
+</linking_errors>
+</issue_linking>
 
 <context_gathering>
 <detect_branch>
@@ -309,6 +493,30 @@ Build reference string:
 - Additional issues from commits: `Refs: MOB-123, MOB-124`
 </step_2_detect_issues>
 
+<step_2b_validate_issues>
+If issue references were detected, validate they exist before proceeding.
+
+**For each detected issue ID**:
+
+1. Read backend from `mobius.config.yaml` or `~/.config/mobius/config.yaml`
+2. Call appropriate validation tool:
+   - **Linear**: `mcp__plugin_linear_linear__get_issue(id: "MOB-123")`
+   - **Jira**: `mcp__plugin_jira_jira__get_issue(issueIdOrKey: "PROJ-123")`
+3. On success: Store issue title for enhanced PR context
+4. On failure: Warn but continue - don't block PR creation
+
+**Example validation output**:
+```markdown
+Detected issues:
+- MOB-72: "Add PR skill for structured pull request creation" ✓
+- MOB-123: Could not validate (issue may not exist) ⚠️
+```
+
+**Store validated issues** for use in:
+- PR body `Refs:` section (confirmed references)
+- Post-creation linking (only link confirmed issues)
+</step_2b_validate_issues>
+
 <step_3_infer_type_scope>
 Analyze changes to determine:
 - **Type**: feat, fix, docs, refactor, test, etc.
@@ -397,6 +605,58 @@ gh pr create --draft ...
 ```
 </step_6_create_pr>
 
+<step_6b_link_to_issues>
+After successful PR creation, link the PR back to validated issues.
+
+**For each validated issue from step 2b**:
+
+1. **Add PR as link attachment** (connects PR to issue in tracker):
+
+   For **Linear**:
+   ```
+   mcp__plugin_linear_linear__update_issue(
+     id: "MOB-72",
+     links: [{
+       url: "https://github.com/owner/repo/pull/123",
+       title: "PR #123: feat(skills): add PR creation skill"
+     }]
+   )
+   ```
+
+   For **Jira**:
+   ```
+   mcp__plugin_jira_jira__add_link(
+     issueIdOrKey: "PROJ-123",
+     url: "https://github.com/owner/repo/pull/123",
+     title: "PR #123: feat(skills): add PR creation skill"
+   )
+   ```
+
+2. **Add comment to issue** (documents PR creation):
+
+   For **Linear**:
+   ```
+   mcp__plugin_linear_linear__create_comment(
+     issueId: "MOB-72",
+     body: "🔗 **Pull Request Created**\n\n[#123 - feat(skills): add PR creation skill](https://github.com/owner/repo/pull/123)"
+   )
+   ```
+
+   For **Jira**:
+   ```
+   mcp__plugin_jira_jira__add_comment(
+     issueIdOrKey: "PROJ-123",
+     body: "🔗 *Pull Request Created*\n\n[#123 - feat(skills): add PR creation skill|https://github.com/owner/repo/pull/123]"
+   )
+   ```
+
+**Error handling**:
+- If linking fails, PR was still created successfully
+- Report the linking error to user
+- Provide manual linking instructions
+- Do NOT attempt to delete or rollback the PR
+</step_6b_link_to_issues>
+
 <step_7_report>
 After successful creation:
 
@@ -408,10 +668,20 @@ After successful creation:
 **Base**: main <- feature-branch
 **Status**: Open (or Draft)
 
+### Issue Links
+- MOB-72: Linked ✓ ([view in Linear](https://linear.app/team/issue/MOB-72))
+
 ### Next Steps
 - Request reviewers if needed: `gh pr edit 123 --add-reviewer @username`
 - Add labels: `gh pr edit 123 --add-label "enhancement"`
 - Mark ready (if draft): `gh pr ready 123`
+```
+
+**If issue linking failed**, include in report:
+
+```markdown
+### Issue Links
+- MOB-72: ⚠️ Link failed - [manual link instructions]
 ```
 </step_7_report>
 </execution_flow>
@@ -658,6 +928,7 @@ A successful PR creation achieves:
 - [ ] Branch has commits relative to base
 - [ ] Branch is pushed to remote
 - [ ] Issue references detected from branch/commits
+- [ ] Detected issues validated via backend MCP tools (if available)
 - [ ] PR title follows conventional commit format
 - [ ] Type correctly reflects the nature of changes
 - [ ] Summary is 1-2 sentences, user-impact focused
@@ -668,5 +939,7 @@ A successful PR creation achieves:
 - [ ] Files changed list has paths and descriptions
 - [ ] User confirmed before creation
 - [ ] PR created successfully with `gh pr create`
-- [ ] PR URL reported to user
+- [ ] PR linked to validated issues via backend MCP tools
+- [ ] Comment added to linked issues documenting PR creation
+- [ ] PR URL and issue link status reported to user
 </success_criteria>
