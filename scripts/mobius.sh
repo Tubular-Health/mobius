@@ -37,7 +37,7 @@ WORKTREE_PATH="${MOBIUS_WORKTREE_PATH:-../<repo>-worktrees/}"
 CLEANUP_ON_SUCCESS="${MOBIUS_CLEANUP_ON_SUCCESS:-true}"
 BASE_BRANCH="${MOBIUS_BASE_BRANCH:-main}"
 
-# State file for TUI dashboard
+# State file for TUI monitoring
 STATE_DIR="${MOBIUS_STATE_DIR:-$HOME/.mobius/state}"
 
 # Backend skill mappings
@@ -322,150 +322,152 @@ show_config() {
 log() { echo "[mobius] $1"; }
 
 # ============================================================================
-# State file management for TUI dashboard
+# State File Management for TUI Monitoring
 # ============================================================================
+# The state file allows a separate TUI process to monitor execution progress.
+# Location: ~/.mobius/state/<parent-id>.json
+#
+# Schema:
+# {
+#   "parentId": "MOB-11",
+#   "parentTitle": "Parent issue title",
+#   "activeTasks": [{ "id": "MOB-126", "pid": 12345, "pane": "%0", "startedAt": "ISO-8601" }],
+#   "completedTasks": ["MOB-124", "MOB-125"],
+#   "failedTasks": [],
+#   "startedAt": "ISO-8601",
+#   "updatedAt": "ISO-8601"
+# }
 
-# Global state variables
 STATE_FILE=""
-LOOP_START_TIME=""
-PARENT_TITLE=""
-ACTIVE_TASKS_JSON="[]"
+STATE_STARTED_AT=""
 COMPLETED_TASKS_JSON="[]"
 FAILED_TASKS_JSON="[]"
+ACTIVE_TASKS_JSON="[]"
 
-# Ensure state directory exists
-ensure_state_dir() {
+# Initialize state directory and file
+init_state_file() {
+    local parent_id="$1"
+    local parent_title="${2:-}"
+
+    # Create state directory if it doesn't exist
     mkdir -p "$STATE_DIR"
-}
 
-# Get state file path for a task
-get_state_file() {
-    echo "$STATE_DIR/${TASK_ID}.json"
+    STATE_FILE="$STATE_DIR/${parent_id}.json"
+    STATE_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+    COMPLETED_TASKS_JSON="[]"
+    FAILED_TASKS_JSON="[]"
+    ACTIVE_TASKS_JSON="[]"
+
+    write_state_file "$parent_id" "$parent_title"
+    log "State file: $STATE_FILE"
 }
 
 # Write state file atomically (temp file + rename)
 write_state_file() {
-    local state_json="$1"
-    local temp_file="${STATE_FILE}.tmp.$$"
+    local parent_id="$1"
+    local parent_title="${2:-}"
+    local updated_at
+    updated_at=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
 
-    echo "$state_json" > "$temp_file"
+    # Escape the title for JSON (handle quotes and backslashes)
+    local escaped_title
+    escaped_title=$(echo "$parent_title" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+    local json
+    json=$(cat <<EOF
+{
+  "parentId": "${parent_id}",
+  "parentTitle": "${escaped_title}",
+  "activeTasks": ${ACTIVE_TASKS_JSON},
+  "completedTasks": ${COMPLETED_TASKS_JSON},
+  "failedTasks": ${FAILED_TASKS_JSON},
+  "startedAt": "${STATE_STARTED_AT}",
+  "updatedAt": "${updated_at}"
+}
+EOF
+)
+
+    # Atomic write: write to temp file, then rename
+    local temp_file="${STATE_FILE}.tmp"
+    echo "$json" > "$temp_file"
     mv "$temp_file" "$STATE_FILE"
 }
 
-# Initialize state file at loop start
-init_state_file() {
-    ensure_state_dir
-    STATE_FILE="$(get_state_file)"
-    LOOP_START_TIME="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-
-    # Fetch parent title from Linear if possible (fallback to task ID)
-    PARENT_TITLE="$TASK_ID"
-
-    local state_json
-    state_json=$(cat << EOF
-{
-  "parentId": "$TASK_ID",
-  "parentTitle": "$PARENT_TITLE",
-  "activeTasks": [],
-  "completedTasks": [],
-  "failedTasks": [],
-  "startedAt": "$LOOP_START_TIME",
-  "updatedAt": "$LOOP_START_TIME"
-}
-EOF
-)
-
-    write_state_file "$state_json"
-    log "State file initialized: $STATE_FILE"
-}
-
-# Update state file with current task status
-update_state_file() {
-    local now
-    now="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-
-    local state_json
-    state_json=$(cat << EOF
-{
-  "parentId": "$TASK_ID",
-  "parentTitle": "$PARENT_TITLE",
-  "activeTasks": $ACTIVE_TASKS_JSON,
-  "completedTasks": $COMPLETED_TASKS_JSON,
-  "failedTasks": $FAILED_TASKS_JSON,
-  "startedAt": "$LOOP_START_TIME",
-  "updatedAt": "$now"
-}
-EOF
-)
-
-    write_state_file "$state_json"
-}
-
-# Add task to active tasks (called when agent starts)
-# Usage: add_active_task "MOB-126" "12345" "%0"
+# Add a task to activeTasks when agent spawns
 add_active_task() {
     local task_id="$1"
     local pid="$2"
     local pane="${3:-}"
-    local now
-    now="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+    local worktree="${4:-}"
+    local started_at
+    started_at=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
 
-    # Build the active task JSON object
-    local task_json
-    if [ -n "$pane" ]; then
-        task_json="{\"id\": \"$task_id\", \"pid\": $pid, \"pane\": \"$pane\", \"startedAt\": \"$now\"}"
+    # Build new task JSON
+    local task_json="{\"id\":\"${task_id}\",\"pid\":${pid},\"pane\":\"${pane}\",\"startedAt\":\"${started_at}\""
+    if [ -n "$worktree" ]; then
+        task_json="${task_json},\"worktree\":\"${worktree}\""
+    fi
+    task_json="${task_json}}"
+
+    # Append to activeTasks array
+    if [ "$ACTIVE_TASKS_JSON" = "[]" ]; then
+        ACTIVE_TASKS_JSON="[${task_json}]"
     else
-        task_json="{\"id\": \"$task_id\", \"pid\": $pid, \"startedAt\": \"$now\"}"
+        # Remove trailing ] and append new task
+        ACTIVE_TASKS_JSON="${ACTIVE_TASKS_JSON%]},${task_json}]"
     fi
 
-    # For single-agent mode, we just replace with a single-item array
-    ACTIVE_TASKS_JSON="[$task_json]"
-
-    update_state_file
+    write_state_file "$TASK_ID" ""
 }
 
-# Remove task from active tasks and add to completed
-# Usage: complete_active_task "MOB-126"
-complete_active_task() {
+# Remove a task from activeTasks and add to completedTasks
+complete_task() {
     local task_id="$1"
 
-    # Clear active tasks (single-agent mode)
-    ACTIVE_TASKS_JSON="[]"
+    # Remove from activeTasks using a simple approach
+    # This works for arrays with single or multiple entries
+    if command -v jq &> /dev/null; then
+        ACTIVE_TASKS_JSON=$(echo "$ACTIVE_TASKS_JSON" | jq -c "[.[] | select(.id != \"$task_id\")]")
+    else
+        # Fallback: if jq not available, reset to empty (less accurate but functional)
+        ACTIVE_TASKS_JSON="[]"
+    fi
 
-    # Add to completed tasks array
+    # Add to completedTasks
     if [ "$COMPLETED_TASKS_JSON" = "[]" ]; then
-        COMPLETED_TASKS_JSON="[\"$task_id\"]"
+        COMPLETED_TASKS_JSON="[\"${task_id}\"]"
     else
-        # Remove trailing ] and append
-        COMPLETED_TASKS_JSON="${COMPLETED_TASKS_JSON%]}, \"$task_id\"]"
+        COMPLETED_TASKS_JSON="${COMPLETED_TASKS_JSON%]},\"${task_id}\"]"
     fi
 
-    update_state_file
+    write_state_file "$TASK_ID" ""
 }
 
-# Remove task from active tasks and add to failed
-# Usage: fail_active_task "MOB-126"
-fail_active_task() {
+# Remove a task from activeTasks and add to failedTasks
+fail_task() {
     local task_id="$1"
 
-    # Clear active tasks (single-agent mode)
-    ACTIVE_TASKS_JSON="[]"
-
-    # Add to failed tasks array
-    if [ "$FAILED_TASKS_JSON" = "[]" ]; then
-        FAILED_TASKS_JSON="[\"$task_id\"]"
+    # Remove from activeTasks
+    if command -v jq &> /dev/null; then
+        ACTIVE_TASKS_JSON=$(echo "$ACTIVE_TASKS_JSON" | jq -c "[.[] | select(.id != \"$task_id\")]")
     else
-        # Remove trailing ] and append
-        FAILED_TASKS_JSON="${FAILED_TASKS_JSON%]}, \"$task_id\"]"
+        ACTIVE_TASKS_JSON="[]"
     fi
 
-    update_state_file
+    # Add to failedTasks
+    if [ "$FAILED_TASKS_JSON" = "[]" ]; then
+        FAILED_TASKS_JSON="[\"${task_id}\"]"
+    else
+        FAILED_TASKS_JSON="${FAILED_TASKS_JSON%]},\"${task_id}\"]"
+    fi
+
+    write_state_file "$TASK_ID" ""
 }
 
-# Clear all active tasks (called on clean exit)
+# Clear all active tasks (used on clean shutdown)
 clear_active_tasks() {
     ACTIVE_TASKS_JSON="[]"
-    update_state_file
+    write_state_file "$TASK_ID" ""
 }
 
 # ============================================================================
@@ -517,10 +519,7 @@ should_stop_execution() {
 
 # The main loop
 run_loop() {
-    # Initialize state file before starting
-    init_state_file
-
-    # Clean up state on exit
+    # Clean up state file on exit
     trap 'echo ""; clear_active_tasks; log "Stopped"; exit 0' INT TERM
 
     local skill="${BACKEND_SKILLS[$BACKEND]}"
@@ -540,11 +539,15 @@ run_loop() {
         log "Max iterations: unlimited"
     fi
     log "Delay: ${DELAY_SECONDS}s between iterations"
-    log "State file: $STATE_FILE"
     log "Press Ctrl+C to stop"
     echo ""
 
+    # Initialize state file for TUI monitoring
+    init_state_file "$TASK_ID" ""
+
     local iteration=0
+    local current_subtask_id=""
+    local claude_pid=""
 
     while true; do
         # Check max iterations
@@ -566,45 +569,69 @@ run_loop() {
             chrome_flag="--chrome"
         fi
 
-        # Mark task as active (using iteration as pseudo-subtask ID until we parse output)
-        # In single-agent mode, we use the iteration number as a placeholder
-        # The actual sub-task ID will be extracted from Claude's output
-        add_active_task "iteration-$iteration" "$$" ""
-
-        # Capture Claude output for status parsing
+        # Create a temp file to capture the output for parsing
         local output_file
         output_file=$(mktemp)
 
         # The skill will find the next ready sub-task and execute it
         # If no sub-tasks remain, Claude will indicate completion
+        # Run in background to get PID, then wait
         echo "$skill $TASK_ID" | claude -p \
             --dangerously-skip-permissions \
             --verbose \
             --output-format=stream-json \
             --model "$MODEL" \
-            $chrome_flag | tee "$output_file" | cclean
+            $chrome_flag 2>&1 | tee "$output_file" | cclean &
+        claude_pid=$!
 
-        local claude_exit_code=${PIPESTATUS[0]}
-        local output
-        output=$(cat "$output_file")
+        # Try to detect the current sub-task from the output
+        # The skill outputs "STATUS: SUBTASK_COMPLETE" and "## {Sub-task ID}:" in the completion report
+        # For now, we track the Claude process as the active task
+        # In parallel mode, more sophisticated tracking would be needed
+        add_active_task "$TASK_ID" "$claude_pid" "" ""
+
+        # Wait for Claude to finish
+        wait $claude_pid || true
+        local exit_code=$?
+
+        # Parse output for completion status
+        # Look for STATUS markers in the output
+        local status_line
+        status_line=$(grep -E "^STATUS:|STATUS:" "$output_file" 2>/dev/null | tail -1 || true)
+
+        # Extract completed sub-task ID if present (from "EXECUTION_COMPLETE: MOB-XX")
+        local completed_id
+        completed_id=$(grep -oE "EXECUTION_COMPLETE: [A-Z]+-[0-9]+" "$output_file" 2>/dev/null | tail -1 | cut -d' ' -f2 || true)
+
+        # Extract failed sub-task ID if present (from "Sub-task Failed: MOB-XX")
+        local failed_id
+        failed_id=$(grep -oE "Sub-task Failed: [A-Z]+-[0-9]+" "$output_file" 2>/dev/null | head -1 | sed 's/Sub-task Failed: //' || true)
+
+        # Clean up temp file
         rm -f "$output_file"
 
-        # Parse output to determine what happened
-        local completed_task
-        if completed_task=$(extract_completed_subtask "$output"); then
-            log "Sub-task completed: $completed_task"
-            complete_active_task "$completed_task"
-        elif should_stop_execution "$output"; then
-            log "Execution complete - stopping loop"
+        # Update state based on status
+        if [[ "$status_line" == *"SUBTASK_COMPLETE"* ]] && [ -n "$completed_id" ]; then
+            complete_task "$completed_id"
+            log "Sub-task completed: $completed_id"
+        elif [[ "$status_line" == *"VERIFICATION_FAILED"* ]]; then
+            if [ -n "$failed_id" ]; then
+                fail_task "$failed_id"
+                log "Sub-task failed: $failed_id"
+            else
+                clear_active_tasks
+            fi
+        elif [[ "$status_line" == *"ALL_COMPLETE"* ]]; then
             clear_active_tasks
+            log "All sub-tasks completed!"
             break
-        elif [ "$claude_exit_code" -ne 0 ]; then
-            log "Claude exited with error code: $claude_exit_code"
-            fail_active_task "iteration-$iteration"
+        elif [[ "$status_line" == *"ALL_BLOCKED"* ]] || [[ "$status_line" == *"NO_SUBTASKS"* ]]; then
+            clear_active_tasks
+            log "No more sub-tasks to execute"
+            break
         else
-            # No clear status - clear active task and continue
-            ACTIVE_TASKS_JSON="[]"
-            update_state_file
+            # Unknown status or no status marker - just clear active tasks
+            clear_active_tasks
         fi
 
         echo ""
