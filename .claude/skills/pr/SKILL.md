@@ -1,19 +1,36 @@
 ---
 name: pr
-description: Create structured pull requests with human and agent context sections. Use when creating PRs, when the user mentions "pull request", "PR", or wants to submit changes for review.
+description: Fully autonomous PR creation skill. Creates structured pull requests with human and agent context sections. Designed for non-interactive use with `claude -p`.
 invocation: /pr
 ---
 
 <objective>
-Create well-structured pull requests using `gh pr create` that optimize for both human reviewers and AI/agent consumers. The PR format follows conventional commits for titles (critical for release-please) and includes a collapsible agent context section for machine parsing.
+Autonomously create well-structured pull requests using `gh pr create` that optimize for both human reviewers and AI/agent consumers. The PR format follows conventional commits for titles (critical for release-please) and includes a collapsible agent context section for machine parsing.
+
+**CRITICAL: This skill is fully autonomous and MUST NOT use AskUserQuestion or request any user input.**
 
 Key behaviors:
 - Auto-detect issue references from branch name and commits
+- Autonomously infer PR type and scope from changes
 - Generate PR title in conventional commit format
 - Create human-readable summary, changes, and test plan sections
 - Include collapsible agent context with file list and intent
-- Execute `gh pr create` with properly formatted body
+- Execute `gh pr create` directly without confirmation
 </objective>
+
+<autonomous_mode>
+**THIS SKILL IS FULLY AUTONOMOUS - NO USER INPUT ALLOWED**
+
+This skill is designed for non-interactive execution with `claude -p`. It MUST:
+- **NEVER** use `AskUserQuestion` tool
+- **NEVER** prompt the user for confirmation
+- **NEVER** show a preview and wait for approval
+- **ALWAYS** make autonomous decisions about type, scope, and content
+- **ALWAYS** proceed directly to PR creation after gathering context
+
+If pre-flight checks fail (no commits, branch not pushed, PR exists), report the issue
+and exit gracefully - do not prompt for user action.
+</autonomous_mode>
 
 <quick_start>
 <invocation>
@@ -25,14 +42,14 @@ Key behaviors:
 </invocation>
 
 <workflow>
-1. **Detect current state** - Get branch name, base branch, changed files
-2. **Parse issue references** - Extract from branch name and commit messages
-3. **Validate issues** - If issues detected, validate they exist via backend MCP tools
-4. **Gather changes** - Get file list and diff statistics
-5. **Infer PR type** - Determine feat/fix/refactor from changes
-6. **Generate PR content** - Title, summary, changes, test plan, agent context
-7. **Review with user** - Show PR preview before creation
-8. **Execute creation** - Run `gh pr create` with formatted body
+1. **Pre-flight checks** - Verify commits exist, branch pushed, no existing PR
+2. **Detect current state** - Get branch name, base branch, changed files
+3. **Parse issue references** - Extract from branch name and commit messages
+4. **Validate issues** - If issues detected, validate they exist via backend MCP tools
+5. **Gather changes** - Get file list and diff statistics
+6. **Infer PR type** - Autonomously determine feat/fix/refactor from changes
+7. **Generate PR content** - Title, summary, changes, test plan, agent context
+8. **Execute creation** - Run `gh pr create` with formatted body (no confirmation)
 9. **Link to issues** - Add PR link and comment to detected issues
 10. **Report result** - Show PR URL, issue links, and next steps
 </workflow>
@@ -521,57 +538,44 @@ Detected issues:
 </step_2b_validate_issues>
 
 <step_3_infer_type_scope>
-Analyze changes to determine:
+Autonomously analyze changes to determine:
 - **Type**: feat, fix, docs, refactor, test, etc.
 - **Scope**: Component/area affected
 
-If ambiguous, ask user with AskUserQuestion:
+**Autonomous type inference priority** (DO NOT ask user):
+1. Explicit type in branch name: `fix/mob-123` -> `fix`
+2. Commit message prefixes: `feat: add login` -> `feat`
+3. File pattern analysis:
+   - New files in `src/` -> `feat`
+   - Test files only -> `test`
+   - Docs files only -> `docs`
+   - Config/build changes -> `build` or `ci`
+4. **Default fallback**: If still ambiguous, use `feat` for new code or `fix` for modifications
 
-Question: "What type of change is this PR?"
-Options:
-1. **feat** - New feature or capability
-2. **fix** - Bug fix
-3. **refactor** - Code restructuring without behavior change
-4. **docs** - Documentation only
+**Never ask user for type clarification** - make the best autonomous decision.
 </step_3_infer_type_scope>
 
 <step_4_generate_content>
-Build PR content using the template:
+Build PR content autonomously using the template:
 
-1. **Title**: `{type}({scope}): {description}`
-2. **Summary**: 1-2 sentences from commit messages or ask user
-3. **Changes**: Bullet points from file changes
-4. **Test Plan**: Default automated + ask for manual steps
-5. **Refs**: Issue references detected
-6. **Agent Context**: File list, intent, dependencies
+1. **Title**: `{type}({scope}): {description}` - infer from branch/commits
+2. **Summary**: Generate 1-2 sentences from commit messages and diff analysis
+3. **Changes**: Bullet points derived from file changes and commit messages
+4. **Test Plan**: Generate from test files changed, include `npm test` or equivalent
+5. **Refs**: Issue references detected from branch/commits
+6. **Agent Context**: File list with descriptions, intent from commits, dependency analysis
+
+**Do NOT ask user for any content** - generate everything autonomously.
 </step_4_generate_content>
 
-<step_5_preview>
-Show user the complete PR before creation:
+<step_5_execute>
+**Execute PR creation immediately** - no preview or confirmation required.
 
-```markdown
-**Title**: feat(skills): add PR creation skill with structured template
+Proceed directly to `gh pr create` with the generated content.
 
-**Base**: main <- current-branch
-
-**Body**:
-## Summary
-Add /pr skill for creating well-structured pull requests...
-
-## Changes
-- Add SKILL.md with PR creation workflow
-- Include conventional commit title generation
-...
-
-Ready to create this PR?
-```
-
-Use AskUserQuestion:
-- **Create PR** - Looks good, create it
-- **Edit title** - I want to change the title
-- **Edit body** - I want to modify the description
-- **Cancel** - Don't create the PR
-</step_5_preview>
+**This skill is autonomous** - do not show preview, do not ask for confirmation,
+do not use AskUserQuestion. Create the PR directly.
+</step_5_execute>
 
 <step_6_create_pr>
 Execute PR creation with `gh`:
@@ -689,38 +693,19 @@ After successful creation:
 </step_7_report>
 </execution_flow>
 
-<user_interaction>
-<when_to_ask>
-Use AskUserQuestion in these situations:
+<autonomous_operation>
+**This skill MUST NOT use AskUserQuestion or request any user input.**
 
-1. **Type unclear**: Multiple possible types (feat vs refactor)
-2. **Scope ambiguous**: Changes span multiple areas
-3. **Summary needed**: Can't infer from commits
-4. **Test plan specifics**: Need manual verification steps
-5. **Before creation**: Final confirmation
-</when_to_ask>
+All decisions are made autonomously:
+- **Type**: Inferred from branch name, commits, and file patterns
+- **Scope**: Inferred from changed file paths
+- **Summary**: Generated from commit messages and diff analysis
+- **Test plan**: Generated from test files and standard commands
+- **Confirmation**: NOT REQUIRED - create PR directly
 
-<interaction_examples>
-**Type selection**:
-Question: "What type of change is this PR?"
-- **feat** - New feature (Recommended based on new files)
-- **fix** - Bug fix
-- **refactor** - Code restructuring
-- **other** - Let me specify
-
-**Summary input**:
-Question: "What should the PR summary say?"
-- Provide a text input for custom summary
-- Or offer to generate from commit messages
-
-**Final confirmation**:
-Question: "Ready to create this PR?"
-- **Create PR** - Create with current content
-- **Edit** - I want to make changes
-- **Create as draft** - Create as draft PR
-- **Cancel** - Don't create
-</interaction_examples>
-</user_interaction>
+If any information is ambiguous, make the best autonomous decision and proceed.
+Do not block on missing information - use sensible defaults.
+</autonomous_operation>
 
 <examples>
 <feature_pr_example>
@@ -840,9 +825,8 @@ Create as draft when:
 - CI needs to run before marking ready
 - Dependent on another PR being merged
 
-**User indicates draft**:
-- `/pr --draft`
-- User selects "Create as draft" option
+**Draft is indicated by**:
+- `/pr --draft` argument passed to skill
 </when_to_use_draft>
 
 <draft_commands>
@@ -932,11 +916,8 @@ Detected when `git diff --name-only origin/main...HEAD` returns empty:
 Detected by `gh pr list --head {branch}`:
 1. Report: "A pull request already exists for this branch."
 2. Show existing PR URL and title
-3. Offer options:
-   - **View PR** - Open existing PR in browser
-   - **Update PR** - Modify the existing PR description
-   - **Cancel** - Abort operation
-4. Do NOT create a duplicate PR
+3. Exit gracefully - do NOT create a duplicate PR
+4. Suggest next steps in output (view with `gh pr view`, edit with `gh pr edit`)
 </pr_already_exists>
 
 <lowercase_issue_ids>
@@ -970,9 +951,9 @@ Branch names often use lowercase (e.g., `drverzal/mob-72-feature`):
 - BAD: Human section only
 - GOOD: Include collapsible agent context with file list and intent
 
-**Don't create without confirmation**:
-- BAD: Immediately run `gh pr create`
-- GOOD: Show preview, get user approval first
+**Don't ask for user input** (this is an autonomous skill):
+- BAD: Use AskUserQuestion for type/scope/confirmation
+- GOOD: Infer everything autonomously and create PR directly
 
 **Don't ignore existing PRs**:
 - BAD: Create duplicate PR for same branch
@@ -980,12 +961,12 @@ Branch names often use lowercase (e.g., `drverzal/mob-72-feature`):
 </anti_patterns>
 
 <success_criteria>
-A successful PR creation achieves:
+A successful autonomous PR creation achieves:
 
 **Pre-flight checks**:
 - [ ] Branch has commits relative to base (or graceful exit if none)
-- [ ] Branch is pushed to remote (or auto-push offered)
-- [ ] No existing PR for this branch (or offer to update/view)
+- [ ] Branch is pushed to remote (or auto-push with `git push -u origin`)
+- [ ] No existing PR for this branch (or report existing PR URL)
 - [ ] GitHub CLI authenticated (`gh auth status`)
 
 **Issue detection**:
@@ -995,19 +976,19 @@ A successful PR creation achieves:
 - [ ] Detected issues validated via backend MCP tools (if available)
 - [ ] Graceful handling when no issues detected (PR created without linking)
 
-**PR content**:
+**PR content** (all generated autonomously):
 - [ ] PR title follows conventional commit format
-- [ ] Type correctly reflects the nature of changes
-- [ ] Summary is 1-2 sentences, user-impact focused
+- [ ] Type autonomously inferred from changes
+- [ ] Summary generated from commits and diff analysis
 - [ ] Changes section has clear bullet points
-- [ ] Test plan includes verification steps
+- [ ] Test plan generated from test files and standard commands
 - [ ] Issue references included with `Refs:` or `Closes:` (if detected)
 - [ ] Agent context section is collapsible
 - [ ] Files changed list has paths and descriptions
 
-**Execution**:
-- [ ] User confirmed before creation
-- [ ] PR created successfully with `gh pr create`
+**Execution** (fully autonomous):
+- [ ] NO user confirmation requested
+- [ ] PR created directly with `gh pr create`
 - [ ] PR linked to validated issues via backend MCP tools
 - [ ] Comment added to linked issues documenting PR creation
 - [ ] PR URL and issue link status reported to user
