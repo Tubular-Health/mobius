@@ -52,6 +52,10 @@ function AgentPanelImpl({
   const [output, setOutput] = useState<string[]>([]);
   const prevContentRef = useRef<string>('');
 
+  // Extract pane ID for explicit dependency tracking
+  // This ensures we re-subscribe when pane ID becomes available after agent spawn
+  const paneId = activeTask?.pane;
+
   useEffect(() => {
     if (!activeTask) {
       if (prevContentRef.current !== '') {
@@ -61,15 +65,18 @@ function AgentPanelImpl({
       return;
     }
 
-    // Skip capture if pane ID is empty (tmux not available)
-    if (!activeTask.pane) {
-      setOutput(['(live output not available - tmux required)']);
+    // Skip capture if pane ID is empty (agent starting, pane not yet assigned)
+    if (!paneId) {
+      setOutput(['(starting agent...)']);
       return;
     }
 
+    // Reset previous content when pane changes to show fresh output immediately
+    prevContentRef.current = '';
+
     // Fetch and only update if content changed
     const fetchOutput = async () => {
-      const content = await captureTmuxPane(activeTask.pane, lines);
+      const content = await captureTmuxPane(paneId, lines);
 
       // Skip update if content hasn't changed
       if (content === prevContentRef.current) {
@@ -90,7 +97,7 @@ function AgentPanelImpl({
     const interval = setInterval(fetchOutput, refreshMs);
 
     return () => clearInterval(interval);
-  }, [activeTask, lines, refreshMs]);
+  }, [activeTask, paneId, lines, refreshMs]);
 
   // Header text - task identifier or "(available)"
   const headerText = activeTask ? activeTask.id : '(available)';
