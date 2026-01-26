@@ -59,26 +59,21 @@ export async function sessionExists(sessionName: string): Promise<boolean> {
 /**
  * Create a new tmux session for the loop
  *
+ * Always creates a fresh session by killing any existing one first.
+ * This ensures we start with a clean state and known pane configuration.
+ *
  * @param sessionName - Name for the session (e.g., "mobius-MOB-123")
  * @returns TmuxSession handle
  */
 export async function createSession(sessionName: string): Promise<TmuxSession> {
-  // Check if session already exists
+  // Kill any existing session to start fresh
+  // This avoids issues with stale panes from previous runs
   if (await sessionExists(sessionName)) {
-    // Get existing session ID and current pane
-    const { stdout } = await execa('tmux', [
-      'display-message',
-      '-t',
-      sessionName,
-      '-p',
-      '#{session_id}:#{pane_id}',
-    ]);
-    const [sessionId, paneId] = stdout.trim().split(':');
-    return {
-      name: sessionName,
-      id: sessionId,
-      initialPaneId: paneId,
-    };
+    try {
+      await execa('tmux', ['kill-session', '-t', sessionName]);
+    } catch {
+      // Session may have died between check and kill, ignore
+    }
   }
 
   // Create new detached session

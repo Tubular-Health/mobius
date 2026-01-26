@@ -6,7 +6,7 @@
  */
 
 // Task status types mapped from Linear states
-export type TaskStatus = 'pending' | 'ready' | 'in_progress' | 'done' | 'blocked';
+export type TaskStatus = 'pending' | 'ready' | 'in_progress' | 'done' | 'blocked' | 'failed';
 
 /**
  * Represents a sub-task in the dependency graph
@@ -138,12 +138,15 @@ function calculateTaskStatus(task: SubTask, allTasks: Map<string, SubTask>): Tas
 
 /**
  * Get all tasks that are ready for execution (no unresolved blockers)
+ *
+ * Includes both 'ready' tasks and 'in_progress' tasks that haven't completed yet.
+ * This allows mobius to resume tasks that were started but not finished.
  */
 export function getReadyTasks(graph: TaskGraph): SubTask[] {
   const ready: SubTask[] = [];
 
   for (const task of graph.tasks.values()) {
-    if (task.status === 'ready') {
+    if (task.status === 'ready' || task.status === 'in_progress') {
       ready.push(task);
     }
   }

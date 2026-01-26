@@ -12,10 +12,13 @@ import type { ActiveTask, CompletedTask, ExecutionState } from '../../types.js';
 import { normalizeCompletedTask, getCompletedTaskId } from '../../lib/execution-state.js';
 import { TaskNode } from './TaskNode.js';
 import { STRUCTURE_COLORS } from '../theme.js';
+import { getElapsedMs } from '../utils/formatDuration.js';
 
 export interface TaskTreeProps {
   graph: TaskGraph;
   executionState?: ExecutionState;  // For live status updates
+  /** Tick counter from parent - drives elapsed time recalculation */
+  tick?: number;
 }
 
 /**
@@ -93,6 +96,20 @@ function getStatusOverrides(
     }
   }
 
+  // Mark failed tasks as failed
+  for (const entry of executionState.failedTasks) {
+    const taskIdentifier = getCompletedTaskId(entry);
+    for (const task of graph.tasks.values()) {
+      if (task.identifier === taskIdentifier) {
+        // Don't override if already marked done (task may have succeeded after retry)
+        if (!overrides.has(task.id)) {
+          overrides.set(task.id, 'failed');
+        }
+        break;
+      }
+    }
+  }
+
   return overrides;
 }
 
@@ -136,6 +153,18 @@ function buildTimingMaps(
 }
 
 /**
+ * Build elapsed time map for active tasks
+ * Separated from buildTimingMaps so it can recalculate on tick without rebuilding other maps
+ */
+function buildElapsedMap(activeTaskMap: Map<string, ActiveTask>): Map<string, number> {
+  const elapsedMap = new Map<string, number>();
+  for (const [id, task] of activeTaskMap) {
+    elapsedMap.set(id, getElapsedMs(task.startedAt));
+  }
+  return elapsedMap;
+}
+
+/**
  * Create a task with potentially overridden status
  */
 function applyStatusOverride(task: SubTask, overrides: Map<string, TaskStatus>): SubTask {
@@ -152,7 +181,7 @@ interface TaskTreeNodeProps {
   childrenMap: Map<string, SubTask[]>;
   statusOverrides: Map<string, TaskStatus>;
   completedTaskMap: Map<string, CompletedTask>;
-  activeTaskMap: Map<string, ActiveTask>;
+  activeElapsedMap: Map<string, number>;
   failedTaskMap: Map<string, CompletedTask>;
   prefix: string;
   isLast: boolean;
@@ -168,7 +197,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
   childrenMap,
   statusOverrides,
   completedTaskMap,
-  activeTaskMap,
+  activeElapsedMap,
   failedTaskMap,
   prefix,
   isLast,
@@ -184,7 +213,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
 
   // Get timing info for this task (use task.identifier to look up)
   const completedTaskInfo = completedTaskMap.get(task.identifier) ?? failedTaskMap.get(task.identifier);
-  const activeTaskInfo = activeTaskMap.get(task.identifier);
+  const activeElapsedMs = activeElapsedMap.get(task.identifier);
 
   return (
     <Box flexDirection="column">
@@ -194,7 +223,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
         prefix={prefix}
         connector={connector}
         completedTaskInfo={completedTaskInfo}
-        activeTaskInfo={activeTaskInfo}
+        activeElapsedMs={activeElapsedMs}
       />
       {children.map((child, index) => {
         const childIsLast = index === children.length - 1;
@@ -206,7 +235,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
             childrenMap={childrenMap}
             statusOverrides={statusOverrides}
             completedTaskMap={completedTaskMap}
-            activeTaskMap={activeTaskMap}
+            activeElapsedMap={activeElapsedMap}
             failedTaskMap={failedTaskMap}
             prefix={childPrefix}
             isLast={childIsLast}
@@ -219,6 +248,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
 
 /**
  * TaskTree component renders the full dependency tree.
+ * Memoized to prevent re-renders when props haven't changed.
  *
  * Output format:
  * ```
@@ -231,7 +261,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
  * └── [·] MOB-129: Integration tests (blocked by: 126, 128)
  * ```
  */
-export function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element {
+export const TaskTree = memo(function TaskTree({ graph, executionState, tick }: TaskTreeProps): JSX.Element {
   // Memoize expensive computations to avoid recalculating on every render
   const childrenMap = useMemo(() => buildChildrenMap(graph), [graph]);
   const rootTasks = useMemo(() => getRootTasks(graph), [graph]);
@@ -244,6 +274,14 @@ export function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element 
   const { completedTaskMap, activeTaskMap, failedTaskMap } = useMemo(
     () => buildTimingMaps(executionState),
     [executionState]
+  );
+
+  // Build elapsed time map - recalculates on each tick
+  // This consolidates the timers that were previously in each TaskNode
+  const activeElapsedMap = useMemo(
+    () => buildElapsedMap(activeTaskMap),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- tick drives updates
+    [activeTaskMap, tick]
   );
 
   return (
@@ -261,7 +299,7 @@ export function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element 
             childrenMap={childrenMap}
             statusOverrides={statusOverrides}
             completedTaskMap={completedTaskMap}
-            activeTaskMap={activeTaskMap}
+            activeElapsedMap={activeElapsedMap}
             failedTaskMap={failedTaskMap}
             prefix=""
             isLast={isLast}
@@ -270,6 +308,6 @@ export function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element 
       })}
     </Box>
   );
-}
+});
 
 export default TaskTree;

@@ -13,7 +13,7 @@ import { BACKEND_ID_PATTERNS } from '../types.js';
 import type { Backend, Model, ExecutionConfig } from '../types.js';
 import { createWorktree, removeWorktree } from '../lib/worktree.js';
 import { fetchLinearIssue, fetchLinearSubTasks, type ParentIssue } from '../lib/linear.js';
-import { fetchJiraIssue, fetchJiraSubTasks, postJiraDiagram } from '../lib/jira.js';
+import { fetchJiraIssue, fetchJiraSubTasks } from '../lib/jira.js';
 import {
   buildTaskGraph,
   getReadyTasks,
@@ -23,7 +23,6 @@ import {
   type TaskGraph,
 } from '../lib/task-graph.js';
 import { renderFullTreeOutput } from '../lib/tree-renderer.js';
-import { renderMermaidWithTitle } from '../lib/mermaid-renderer.js';
 import {
   createSession,
   createStatusPane,
@@ -151,9 +150,6 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
   console.log('');
   console.log(renderFullTreeOutput(graph));
   console.log('');
-
-  // Post Mermaid diagram to parent issue
-  await postMermaidDiagram(taskId, graph, backend);
 
   // Track loop state
   const startTime = Date.now();
@@ -464,50 +460,6 @@ async function buildInitialGraph(
   } catch (error) {
     console.error(chalk.gray(`Failed to build task graph: ${error instanceof Error ? error.message : String(error)}`));
     return null;
-  }
-}
-
-/**
- * Post Mermaid diagram as comment on parent issue (Linear or Jira)
- */
-async function postMermaidDiagram(
-  taskId: string,
-  graph: TaskGraph,
-  backend: Backend
-): Promise<void> {
-  const diagram = renderMermaidWithTitle(graph);
-
-  if (backend === 'jira') {
-    await postJiraDiagram(taskId, diagram);
-    return;
-  }
-
-  if (backend !== 'linear') {
-    return;
-  }
-
-  const { getLinearClient } = await import('../lib/linear.js');
-  const client = getLinearClient();
-  if (!client) {
-    return;
-  }
-
-  try {
-    // Find the issue by identifier
-    const issue = await client.issue(taskId);
-    if (!issue) {
-      return;
-    }
-
-    await client.createComment({
-      issueId: issue.id,
-      body: diagram,
-    });
-
-    console.log(chalk.gray('Posted task dependency diagram to Linear'));
-  } catch (error) {
-    // Non-fatal error
-    console.log(chalk.gray('Could not post diagram to Linear'));
   }
 }
 

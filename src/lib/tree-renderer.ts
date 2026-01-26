@@ -56,6 +56,7 @@ const STATUS_COLORS: Record<TaskStatus, string> = {
   blocked: NORD.nord13,    // yellow
   in_progress: NORD.nord12, // orange
   pending: NORD.nord3,     // gray
+  failed: NORD.nord11,     // red
 };
 
 /**
@@ -69,6 +70,7 @@ function getStatusIcon(status: TaskStatus): string {
     blocked: '[·]',
     in_progress: '[!]',
     pending: '[·]',
+    failed: '[✗]',
   };
   return chalk.hex(color)(icons[status]);
 }

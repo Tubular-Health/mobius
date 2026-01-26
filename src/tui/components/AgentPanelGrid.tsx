@@ -6,6 +6,7 @@
  */
 
 import { Box } from 'ink';
+import { memo } from 'react';
 import { AgentPanel } from './AgentPanel.js';
 import type { ActiveTask } from '../../types.js';
 
@@ -13,11 +14,13 @@ export interface AgentPanelGridProps {
   activeTasks: ActiveTask[];
   maxPanels?: number; // default: 4
   panelLines?: number; // default: 8
-  refreshMs?: number; // default: 300
+  /** Pre-fetched output lines per task (keyed by task id) */
+  panelOutputs?: Map<string, string[]>;
 }
 
 /**
  * AgentPanelGrid component - displays up to 4 agent panels in a 2x2 grid
+ * Memoized to prevent re-renders when props haven't changed.
  *
  * Layout:
  * ┌─ MOB-126 ─────────────────┬─ MOB-128 ─────────────────┐
@@ -26,11 +29,11 @@ export interface AgentPanelGridProps {
  * │ (available)               │ (available)               │
  * └───────────────────────────┴───────────────────────────┘
  */
-export function AgentPanelGrid({
+export const AgentPanelGrid = memo(function AgentPanelGrid({
   activeTasks,
   maxPanels = 4,
   panelLines = 8,
-  refreshMs = 300,
+  panelOutputs,
 }: AgentPanelGridProps): JSX.Element {
   // Create slots array with tasks or undefined for empty slots
   const slots: (ActiveTask | undefined)[] = [];
@@ -55,7 +58,7 @@ export function AgentPanelGrid({
               <AgentPanel
                 activeTask={task}
                 lines={panelLines}
-                refreshMs={refreshMs}
+                outputLines={task ? panelOutputs?.get(task.id) : undefined}
               />
             </Box>
           ))}
@@ -63,6 +66,6 @@ export function AgentPanelGrid({
       ))}
     </Box>
   );
-}
+});
 
 export default AgentPanelGrid;

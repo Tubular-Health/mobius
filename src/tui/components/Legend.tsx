@@ -33,7 +33,9 @@ export function Legend({ visible = true }: LegendProps): JSX.Element | null {
       <Text color={STATUS_COLORS.blocked}>{STATUS_ICONS.blocked}</Text>
       <Text> Blocked  </Text>
       <Text color={STATUS_COLORS.in_progress}>{STATUS_ICONS.in_progress}</Text>
-      <Text> In Progress</Text>
+      <Text> In Progress  </Text>
+      <Text color={STATUS_COLORS.failed}>{STATUS_ICONS.failed}</Text>
+      <Text> Failed</Text>
     </Box>
   );
 }

@@ -1,7 +1,10 @@
-import { existsSync } from 'node:fs';
-import { basename, resolve } from 'node:path';
+import { existsSync, symlinkSync, lstatSync } from 'node:fs';
+import { basename, resolve, join } from 'node:path';
 import { execa } from 'execa';
 import type { ExecutionConfig } from '../types.js';
+
+/** Directories to symlink from source repo to worktree (gitignored but needed) */
+const SYMLINK_DIRS = ['.claude'];
 
 export interface WorktreeInfo {
   path: string;
@@ -88,6 +91,53 @@ async function branchExists(branchName: string): Promise<{ local: boolean; remot
 }
 
 /**
+ * Symlink gitignored directories from source repo to worktree
+ *
+ * This ensures directories like .claude (which are typically gitignored)
+ * are available in the worktree for Claude Code to use.
+ */
+function symlinkGitignored(sourceRepo: string, worktreePath: string): void {
+  for (const dir of SYMLINK_DIRS) {
+    const sourcePath = join(sourceRepo, dir);
+    const targetPath = join(worktreePath, dir);
+
+    // Only symlink if source exists and target doesn't
+    if (existsSync(sourcePath) && !existsSync(targetPath)) {
+      try {
+        // Check if source is a directory
+        const stat = lstatSync(sourcePath);
+        if (stat.isDirectory()) {
+          symlinkSync(sourcePath, targetPath, 'dir');
+        }
+      } catch {
+        // Non-fatal - continue without symlink
+      }
+    }
+  }
+}
+
+/**
+ * Get the actual default branch name from the repo
+ */
+async function getDefaultBranchName(): Promise<string | null> {
+  try {
+    // Try to get from origin HEAD reference
+    const { stdout } = await execa('git', ['symbolic-ref', 'refs/remotes/origin/HEAD']);
+    return stdout.trim().replace('refs/remotes/origin/', '');
+  } catch {
+    // Fall back to checking common branch names
+    const commonBranches = ['main', 'master', 'develop'];
+    for (const branch of commonBranches) {
+      const exists = await branchExists(branch);
+      if (exists.local || exists.remote) {
+        return branch;
+      }
+    }
+    return null;
+  }
+}
+
+/**
  * Create a worktree for the given task
  */
 export async function createWorktree(
@@ -96,7 +146,6 @@ export async function createWorktree(
   config: ExecutionConfig
 ): Promise<WorktreeInfo> {
   const worktreePath = await getWorktreePath(taskId, config);
-  const baseBranch = config.base_branch ?? 'main';
 
   // Check if worktree already exists (resume scenario)
   if (existsSync(worktreePath)) {
@@ -118,9 +167,48 @@ export async function createWorktree(
     // Branch exists on remote, create worktree tracking remote
     await execa('git', ['worktree', 'add', worktreePath, branchName]);
   } else {
+    // Need to create a new branch - determine the base branch
+    let baseBranch = config.base_branch;
+
+    if (!baseBranch) {
+      // Try to auto-detect the default branch
+      const detected = await getDefaultBranchName();
+      if (detected) {
+        baseBranch = detected;
+      } else {
+        // Could not detect - provide helpful error
+        throw new Error(
+          `Could not determine base branch for worktree creation.\n\n` +
+          `This repository does not have a 'main' branch, and the default branch could not be detected.\n\n` +
+          `Please set 'base_branch' in your mobius config:\n` +
+          `  1. Run: mobius config -e\n` +
+          `  2. Add under [execution]:\n` +
+          `     base_branch = "master"  # or your default branch name\n`
+        );
+      }
+    }
+
+    // Verify the base branch exists before attempting to create worktree
+    const baseExists = await branchExists(baseBranch);
+    if (!baseExists.local && !baseExists.remote) {
+      const detected = await getDefaultBranchName();
+      const suggestion = detected ? `\n\nDetected '${detected}' as a possible default branch.` : '';
+
+      throw new Error(
+        `Base branch '${baseBranch}' does not exist in this repository.${suggestion}\n\n` +
+        `Please update 'base_branch' in your mobius config:\n` +
+        `  1. Run: mobius config -e\n` +
+        `  2. Update under [execution]:\n` +
+        `     base_branch = "${detected ?? 'your-default-branch'}"\n`
+      );
+    }
+
     // Create new branch off base branch
     await execa('git', ['worktree', 'add', worktreePath, '-b', branchName, baseBranch]);
   }
+
+  // Symlink gitignored directories (like .claude) from source repo
+  symlinkGitignored(process.cwd(), worktreePath);
 
   return {
     path: worktreePath,
