@@ -131,6 +131,7 @@ Uncover hidden requirements, edge cases, and ambiguities through targeted questi
 - "Are there labels that should be applied?"
 - "Does this relate to any existing issues?"
 - "Should this be part of a project?"
+- "How will we verify each criterion is met?" (test command, manual step, or observable outcome)
 </universal_questions>
 </question_categories>
 
@@ -176,8 +177,11 @@ A well-structured description includes:
 
 ## Acceptance Criteria
 - [ ] Criterion 1 with verifiable outcome
+  - **Verification**: `test command` | manual step | observable
 - [ ] Criterion 2 with test method
+  - **Verification**: `test command` | manual step | observable
 - [ ] Criterion 3 with manual verification step
+  - **Verification**: `test command` | manual step | observable
 
 ## Additional Context
 [Screenshots, logs, related issues]
@@ -377,9 +381,13 @@ Schedule deactivates successfully with confirmation message.
 
 ## Acceptance Criteria
 - [ ] User can deactivate schedule without error
+  - **Verification**: Manual test - click Deactivate, observe success toast
 - [ ] Schedule status updates to 'inactive'
+  - **Verification**: `npm test -- --grep 'schedule deactivation'`
 - [ ] Team members see schedule status change
-- [ ] Error logs capture root cause for monitoring"
+  - **Verification**: Manual test - check team view after deactivation
+- [ ] Error logs capture root cause for monitoring
+  - **Verification**: Observable - check logs after fix deployment"
   labels: ["Bug"]
   priority: 1
   state: "Todo"
@@ -418,10 +426,15 @@ Add dark mode support with system preference detection and manual toggle.
 
 ## Acceptance Criteria
 - [ ] Theme follows system preference by default
+  - **Verification**: `npm test -- --grep 'theme system preference'`
 - [ ] Settings screen has theme toggle (Light/Dark/System)
+  - **Verification**: Manual test - navigate to Settings, verify toggle exists
 - [ ] All text maintains 4.5:1 contrast ratio in both modes
+  - **Verification**: `npm run test:a11y` or Lighthouse accessibility audit
 - [ ] Theme preference persists across app restarts
-- [ ] No flash of wrong theme on app launch"
+  - **Verification**: Manual test - set theme, restart app, verify theme persists
+- [ ] No flash of wrong theme on app launch
+  - **Verification**: Observable - launch app in dark mode, no white flash"
 ```
 </feature_example>
 </examples>
@@ -446,6 +459,12 @@ Add dark mode support with system preference detection and manual toggle.
 **Don't create compound issues**:
 - BAD: "Fix deactivation and add team sync and improve UI"
 - GOOD: Create separate issues for each concern
+
+**Don't write untestable acceptance criteria**:
+- BAD: "System should be faster" (unmeasurable)
+- BAD: "UI should look better" (subjective)
+- GOOD: "Page load time < 2 seconds" with `Verification: Lighthouse performance score > 90`
+- GOOD: "Button uses primary color from design system" with `Verification: Visual regression test`
 </anti_patterns>
 
 <success_criteria>
