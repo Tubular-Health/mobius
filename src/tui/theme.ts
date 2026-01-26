@@ -47,6 +47,7 @@ export const STATUS_COLORS: Record<TaskStatus, string> = {
   blocked: POLAR_NIGHT.nord3, // #4C566A (muted)
   in_progress: AURORA.yellow, // #EBCB8B
   pending: POLAR_NIGHT.nord3, // #4C566A (muted)
+  failed: AURORA.red,       // #BF616A
 } as const;
 
 /**
@@ -58,6 +59,7 @@ export const STATUS_ICONS: Record<TaskStatus, string> = {
   blocked: '[·]',
   in_progress: '[⟳]',
   pending: '[·]',
+  failed: '[✗]',
 } as const;
 
 /**

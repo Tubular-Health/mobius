@@ -7,7 +7,7 @@
  * Uses fs.watch() for instant file change detection with debouncing.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, watch, type FSWatcher } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ActiveTask, CompletedTask, ExecutionState } from '../types.js';
@@ -230,7 +230,11 @@ export function writeExecutionState(
     updatedAt: new Date().toISOString(),
   };
 
-  writeFileSync(filePath, JSON.stringify(stateWithTimestamp, null, 2), 'utf-8');
+  // Atomic write: write to temp file first, then rename
+  // This prevents readers from seeing partial/corrupted JSON
+  const tmpPath = `${filePath}.tmp`;
+  writeFileSync(tmpPath, JSON.stringify(stateWithTimestamp, null, 2), 'utf-8');
+  renameSync(tmpPath, filePath);
 }
 
 /**

@@ -6,7 +6,7 @@
  */
 
 // Task status types mapped from Linear states
-export type TaskStatus = 'pending' | 'ready' | 'in_progress' | 'done' | 'blocked';
+export type TaskStatus = 'pending' | 'ready' | 'in_progress' | 'done' | 'blocked' | 'failed';
 
 /**
  * Represents a sub-task in the dependency graph

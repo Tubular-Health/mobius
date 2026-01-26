@@ -15,6 +15,7 @@ const STATUS_ICONS: Record<TaskStatus, string> = {
   blocked: '·',
   in_progress: '!',
   pending: '·',
+  failed: '✗',
 };
 
 /**
@@ -26,6 +27,7 @@ const STATUS_COLORS: Record<TaskStatus, string> = {
   blocked: '#D3D3D3', // Light gray
   in_progress: '#FFE4B5', // Moccasin (yellow-ish)
   pending: '#D3D3D3', // Light gray
+  failed: '#FF6B6B', // Light red
 };
 
 /**
