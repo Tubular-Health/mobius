@@ -1,17 +1,18 @@
 ---
-name: execute-linear-issue
-description: Execute the next ready sub-task from a Linear issue. Primes context from parent issue and completed dependencies, implements the change, verifies with tests/typecheck/lint, commits, pushes, and updates Linear status. Use when ready to implement a refined Linear issue, when the user mentions "execute", "implement", or "work on" a Linear issue.
+name: execute-issue
+description: Execute a single sub-task with context priming. Supports both Linear and Jira backends via progressive disclosure. Use when ready to implement a refined issue, when the user mentions "execute", "implement", or "work on" an issue.
+invocation: /execute
 ---
 
 <objective>
-Execute EXACTLY ONE sub-task from a refined Linear issue, then STOP. This skill is designed to run in a loop where each invocation completes one sub-task.
+Execute EXACTLY ONE sub-task from a refined issue, then STOP. This skill is designed to run in a loop where each invocation completes one sub-task.
 
 Key behavior:
 - Find ONE ready sub-task (no unresolved blockers)
 - Implement it completely
 - Verify with tests/typecheck/lint
 - Commit and push
-- Update Linear status
+- Update issue status
 - Report completion and STOP IMMEDIATELY
 
 **CRITICAL**: After completing one sub-task (or determining none are ready), you MUST stop and end your response. Do NOT continue to the next sub-task. The calling loop will invoke you again for the next sub-task.
@@ -22,9 +23,9 @@ Key behavior:
 
 The workflow for each invocation:
 1. Find the next ready sub-task
-2. If none ready → output STATUS and STOP
-3. If found → implement, verify, commit, push
-4. Update Linear status
+2. If none ready -> output STATUS and STOP
+3. If found -> implement, verify, commit, push
+4. Update issue status
 5. Output completion STATUS and STOP
 
 **NEVER**:
@@ -36,15 +37,71 @@ The workflow for each invocation:
 The loop script handles iteration. This skill handles ONE task.
 </one_subtask_rule>
 
-<context>
-This skill is the execution phase of the Linear workflow:
+<backend_detection>
+**FIRST**: Detect the backend from mobius config before proceeding.
 
-1. **define-linear-issue** - Creates well-defined issues with acceptance criteria
-2. **refine-linear-issue** - Breaks issues into single-file-focused sub-tasks with dependencies
-3. **execute-linear-issue** (this skill) - Implements ONE sub-task, then stops
+Read `~/.config/mobius/config.yaml` or `mobius.config.yaml` in the project root:
+
+```yaml
+backend: linear  # or 'jira'
+```
+
+**Default**: If no backend is specified, default to `linear`.
+
+The detected backend determines which MCP tools to use throughout this skill. All subsequent tool references use the backend-specific tools from the `<backend_context>` section below.
+</backend_detection>
+
+<backend_context>
+<linear>
+**MCP Tools for Linear**:
+
+- **Fetch issue**: `mcp__plugin_linear_linear__get_issue`
+  - Parameters: `id` (issue ID), `includeRelations` (boolean)
+  - Returns: Issue with status, description, blockedBy relations
+
+- **List sub-tasks**: `mcp__plugin_linear_linear__list_issues`
+  - Parameters: `parentId`, `includeArchived`
+  - Returns: Array of child issues
+
+- **Update status**: `mcp__plugin_linear_linear__update_issue`
+  - Parameters: `id`, `state` (e.g., "In Progress", "Done")
+  - Transitions: Backlog -> In Progress -> Done
+
+- **Add comment**: `mcp__plugin_linear_linear__create_comment`
+  - Parameters: `issueId`, `body` (markdown)
+  - Use for: Work started, completion notes, progress updates
+</linear>
+
+<jira>
+**MCP Tools for Jira**:
+
+- **Fetch issue**: `mcp__plugin_jira_jira__get_issue`
+  - Parameters: `issueIdOrKey` (e.g., "PROJ-123")
+  - Returns: Issue with status, description, links (blocking relationships)
+
+- **List sub-tasks**: `mcp__plugin_jira_jira__list_issues`
+  - Parameters: `jql` (e.g., "parent = PROJ-123")
+  - Returns: Array of child issues
+
+- **Update status**: `mcp__plugin_jira_jira__transition_issue`
+  - Parameters: `issueIdOrKey`, `transitionId` or `transitionName`
+  - Transitions: To Do -> In Progress -> Done
+
+- **Add comment**: `mcp__plugin_jira_jira__add_comment`
+  - Parameters: `issueIdOrKey`, `body` (markdown or Jira wiki markup)
+  - Use for: Work started, completion notes, progress updates
+</jira>
+</backend_context>
+
+<context>
+This skill is the execution phase of the issue workflow:
+
+1. **define-issue** - Creates well-defined issues with acceptance criteria
+2. **refine-issue** - Breaks issues into single-file-focused sub-tasks with dependencies
+3. **execute-issue** (this skill) - Implements ONE sub-task, then stops
 
 **Loop-Based Execution Model**:
-This skill is designed to be called repeatedly by a loop script (e.g., `linear-loop.sh`). Each invocation:
+This skill is designed to be called repeatedly by a loop script (e.g., `mobius loop`). Each invocation:
 1. Finds the NEXT ready sub-task
 2. Executes it completely
 3. Reports completion
@@ -68,25 +125,26 @@ Each sub-task is designed to:
 Pass an issue ID (either parent or subtask):
 
 ```
-/execute-linear-issue VRZ-123    # Parent issue - finds next ready subtask
-/execute-linear-issue VRZ-124    # Subtask - executes this specific task
+/execute PROJ-123    # Parent issue - finds next ready subtask
+/execute PROJ-124    # Subtask - executes this specific task
 ```
 
 When running in parallel mode, each agent receives a specific subtask ID to prevent race conditions.
 </invocation>
 
 <workflow>
-1. **Detect issue type** - Check if passed ID is a subtask (has parent) or parent issue
-2. **Load parent issue** - Get high-level context and acceptance criteria
-3. **Find ready sub-task** - If parent was passed, find first ready subtask (skip if subtask was passed)
-4. **Mark In Progress** - Move sub-task to "In Progress" immediately before starting work
-5. **Prime context** - Load completed dependent tasks for implementation context
-6. **Implement changes** - Execute the single-file-focused work
-7. **Verify** - Run tests, typecheck, and lint
-8. **Fix if needed** - Attempt automatic fixes on verification failures
-9. **Commit and push** - Create commit with conventional message, push
-10. **Update Linear** - Move sub-task to "Done" if all criteria met
-11. **Report completion** - Show what was done and what's next
+1. **Detect backend** - Read backend from config (linear or jira)
+2. **Detect issue type** - Check if passed ID is a subtask (has parent) or parent issue
+3. **Load parent issue** - Get high-level context and acceptance criteria
+4. **Find ready sub-task** - If parent was passed, find first ready subtask (skip if subtask was passed)
+5. **Mark In Progress** - Move sub-task to "In Progress" immediately before starting work
+6. **Prime context** - Load completed dependent tasks for implementation context
+7. **Implement changes** - Execute the single-file-focused work
+8. **Verify** - Run tests, typecheck, and lint
+9. **Fix if needed** - Attempt automatic fixes on verification failures
+10. **Commit and push** - Create commit with conventional message, push
+11. **Update status** - Move sub-task to "Done" if all criteria met
+12. **Report completion** - Show what was done and what's next
 </workflow>
 </quick_start>
 
@@ -94,39 +152,31 @@ When running in parallel mode, each agent receives a specific subtask ID to prev
 <detect_issue_type>
 **FIRST**: Determine if the passed issue ID is a subtask or a parent issue.
 
-```
-mcp__plugin_linear_linear__get_issue
-  id: "{issue-id}"
-  includeRelations: true
-```
+Use the backend-appropriate fetch tool:
+- **Linear**: `mcp__plugin_linear_linear__get_issue` with `includeRelations: true`
+- **Jira**: `mcp__plugin_jira_jira__get_issue`
 
 **Check the `parent` field in the response**:
 
-1. **If `parent` field EXISTS** → This is a **SUBTASK**
-   - The passed ID is the specific subtask to execute (e.g., "MOB-124")
+1. **If `parent` field EXISTS** -> This is a **SUBTASK**
+   - The passed ID is the specific subtask to execute (e.g., "PROJ-124")
    - Skip the "find ready subtask" phase entirely
    - Use this subtask directly for implementation
    - Load the parent issue for context (the `parent.id` from response)
 
-2. **If `parent` field is NULL/MISSING** → This is a **PARENT ISSUE**
-   - The passed ID is the parent (e.g., "MOB-123")
-   - Continue with the legacy "find ready subtask" flow below
+2. **If `parent` field is NULL/MISSING** -> This is a **PARENT ISSUE**
+   - The passed ID is the parent (e.g., "PROJ-123")
+   - Continue with the "find ready subtask" flow below
    - This is the fallback for backward compatibility
 
-**Why this matters**: When running in parallel mode (`mobius loop MOB-123 --parallel=3`), each agent receives a specific subtask ID to prevent race conditions. The orchestrator assigns tasks upfront, so each agent should execute exactly the task it was given.
+**Why this matters**: When running in parallel mode (`mobius loop PROJ-123 --parallel=3`), each agent receives a specific subtask ID to prevent race conditions. The orchestrator assigns tasks upfront, so each agent should execute exactly the task it was given.
 </detect_issue_type>
 
 <load_parent_issue>
 If the issue is a subtask, fetch its parent for high-level context.
 If the issue is a parent, this is the issue itself.
 
-```
-mcp__plugin_linear_linear__get_issue
-  id: "{parent-issue-id}"
-  includeRelations: true
-```
-
-Extract and retain:
+Use the backend-appropriate fetch tool to get:
 - **Goal**: What the overall feature/fix achieves
 - **Acceptance criteria**: High-level success conditions
 - **Context**: Any technical notes or constraints
@@ -136,17 +186,13 @@ Extract and retain:
 <find_ready_subtask>
 **Skip this section if executing a specific subtask (issue had `parent` field).**
 
-If a parent issue was passed (legacy mode), list all sub-tasks of the parent:
-
-```
-mcp__plugin_linear_linear__list_issues
-  parentId: "{parent-issue-id}"
-  includeArchived: false
-```
+If a parent issue was passed, list all sub-tasks:
+- **Linear**: `mcp__plugin_linear_linear__list_issues` with `parentId`
+- **Jira**: `mcp__plugin_jira_jira__list_issues` with JQL `parent = {issue-key}`
 
 For each sub-task, check:
 1. State is not "Done" or "Canceled"
-2. All `blockedBy` issues are in "Done" state
+2. All blocking issues are in "Done" state
 
 Select the FIRST sub-task where all blockers are resolved.
 
@@ -170,7 +216,7 @@ Select the FIRST sub-task where all blockers are resolved.
    ```
    STATUS: NO_SUBTASKS
    Issue {parent-id} has no sub-tasks.
-   Consider running /refine-linear-issue first.
+   Consider running /refine first.
    ```
 
 If any stop condition is met, output the status message and STOP. Do not continue.
@@ -179,22 +225,10 @@ If any stop condition is met, output the status message and STOP. Do not continu
 <mark_in_progress>
 **IMMEDIATELY** after selecting a sub-task to work on, move it to "In Progress":
 
-```
-mcp__plugin_linear_linear__update_issue
-  id: "{sub-task-id}"
-  state: "In Progress"
-```
+- **Linear**: `mcp__plugin_linear_linear__update_issue` with `state: "In Progress"`
+- **Jira**: `mcp__plugin_jira_jira__transition_issue` to "In Progress"
 
-Add a comment indicating work has started:
-
-```
-mcp__plugin_linear_linear__create_comment
-  issueId: "{sub-task-id}"
-  body: |
-    🚀 **Work Started**
-
-    Agent beginning implementation of this sub-task.
-```
+Add a comment indicating work has started using the backend-appropriate comment tool.
 
 **Why this matters**: Moving to "In Progress" immediately ensures:
 - Other agents (in parallel mode) won't pick up the same task
@@ -203,13 +237,7 @@ mcp__plugin_linear_linear__create_comment
 </mark_in_progress>
 
 <load_dependency_context>
-For each completed blocker of the selected sub-task:
-
-```
-mcp__plugin_linear_linear__get_issue
-  id: "{blocker-id}"
-  includeRelations: false
-```
+For each completed blocker of the selected sub-task, fetch the issue details.
 
 Extract from each completed dependency:
 - **What was implemented**: Summary of changes
@@ -366,7 +394,7 @@ STATUS: VERIFICATION_FAILED
 - {file2}
 
 The loop will stop. Review the errors and either:
-- Fix manually and run `/execute-linear-issue {parent-id}` again
+- Fix manually and run `/execute {parent-id}` again
 - Or rollback with `git checkout -- .`
 ```
 
@@ -402,11 +430,11 @@ Part-of: {parent-issue-id}
 ```
 
 **Type mapping**:
-- New file created → `feat`
-- Bug fix → `fix`
-- Modification/enhancement → `feat` or `refactor`
-- Test only → `test`
-- Types only → `types`
+- New file created -> `feat`
+- Bug fix -> `fix`
+- Modification/enhancement -> `feat` or `refactor`
+- Test only -> `test`
+- Types only -> `types`
 
 **Example**:
 ```
@@ -416,8 +444,8 @@ feat(theme): add ThemeContext provider
 - Persist theme preference to localStorage
 - Add useTheme hook for consuming context
 
-Implements: VRZ-125
-Part-of: VRZ-100
+Implements: PROJ-125
+Part-of: PROJ-100
 ```
 </commit_message>
 
@@ -456,15 +484,12 @@ Confirm:
 </commit_verification>
 </commit_phase>
 
-<linear_update_phase>
+<status_update_phase>
 <update_subtask_status_done>
 After successful commit with all acceptance criteria met, move sub-task to "Done":
 
-```
-mcp__plugin_linear_linear__update_issue
-  id: "{sub-task-id}"
-  state: "Done"
-```
+- **Linear**: `mcp__plugin_linear_linear__update_issue` with `state: "Done"`
+- **Jira**: `mcp__plugin_jira_jira__transition_issue` to "Done"
 
 **Criteria for moving to "Done"**:
 - All acceptance criteria from the sub-task are implemented
@@ -474,60 +499,54 @@ mcp__plugin_linear_linear__update_issue
 </update_subtask_status_done>
 
 <add_completion_comment>
-Add comment documenting the implementation:
+Add comment documenting the implementation using the backend-appropriate comment tool:
 
-```
-mcp__plugin_linear_linear__create_comment
-  issueId: "{sub-task-id}"
-  body: |
-    ## ✅ Implementation Complete
+```markdown
+## Implementation Complete
 
-    **Commit**: {commit-hash}
-    **Files modified**:
-    - {file1}
-    - {file2}
+**Commit**: {commit-hash}
+**Files modified**:
+- {file1}
+- {file2}
 
-    **Changes**:
-    {brief summary of what was implemented}
+**Changes**:
+{brief summary of what was implemented}
 
-    **Verification**:
-    - Typecheck: PASS
-    - Tests: PASS
-    - Lint: PASS
+**Verification**:
+- Typecheck: PASS
+- Tests: PASS
+- Lint: PASS
 
-    **Acceptance Criteria**:
-    - [x] {criterion 1}
-    - [x] {criterion 2}
-    - [x] {criterion 3}
+**Acceptance Criteria**:
+- [x] {criterion 1}
+- [x] {criterion 2}
+- [x] {criterion 3}
 ```
 </add_completion_comment>
 
 <partial_completion_handling>
 If the agent must wrap up before completing all work (context limits, time constraints, or blocking issues discovered), keep the task "In Progress" and add a detailed progress comment:
 
-```
-mcp__plugin_linear_linear__create_comment
-  issueId: "{sub-task-id}"
-  body: |
-    ## ⏸️ Partial Progress - Continuing Next Loop
+```markdown
+## Partial Progress - Continuing Next Loop
 
-    **Progress Made**:
-    - {what was accomplished}
-    - {files modified so far}
+**Progress Made**:
+- {what was accomplished}
+- {files modified so far}
 
-    **Remaining Work**:
-    - {what still needs to be done}
-    - {specific acceptance criteria not yet met}
+**Remaining Work**:
+- {what still needs to be done}
+- {specific acceptance criteria not yet met}
 
-    **Current State**:
-    - Committed: {yes/no - if yes, include commit hash}
-    - Verification: {status of typecheck/tests/lint}
+**Current State**:
+- Committed: {yes/no - if yes, include commit hash}
+- Verification: {status of typecheck/tests/lint}
 
-    **Blockers/Issues Discovered** (if any):
-    - {any issues that need attention}
+**Blockers/Issues Discovered** (if any):
+- {any issues that need attention}
 
-    **Next Steps**:
-    - {what the next loop iteration should focus on}
+**Next Steps**:
+- {what the next loop iteration should focus on}
 ```
 
 **CRITICAL**: Do NOT move to "Done" if:
@@ -538,7 +557,7 @@ mcp__plugin_linear_linear__create_comment
 
 Leave the task "In Progress" so the next loop iteration can continue the work.
 </partial_completion_handling>
-</linear_update_phase>
+</status_update_phase>
 
 <completion_report>
 <report_format>
@@ -550,7 +569,7 @@ After successful execution, report and STOP:
 STATUS: SUBTASK_COMPLETE
 
 ## {Sub-task ID}: {Title}
-**Status**: Moved to Done ✅
+**Status**: Moved to Done
 **Commit**: {hash} on {branch}
 
 ### Files Modified
@@ -640,36 +659,37 @@ Consider creating separate issues for these.
 
 <examples>
 <execution_example>
-**Input**: `/execute-linear-issue VRZ-100`
+**Input**: `/execute PROJ-100`
 
 **Flow**:
 
-1. Load VRZ-100 (parent: "Add dark mode support")
-2. Find sub-tasks:
-   - VRZ-124: Define types (Done)
-   - VRZ-125: Create ThemeProvider (blockedBy: VRZ-124 ✓) ← **Ready**
-   - VRZ-126: Add useTheme hook (blockedBy: VRZ-125) - Blocked
-   - VRZ-127: Update Header (blockedBy: VRZ-126) - Blocked
+1. Detect backend from config (e.g., `linear`)
+2. Load PROJ-100 (parent: "Add dark mode support")
+3. Find sub-tasks:
+   - PROJ-124: Define types (Done)
+   - PROJ-125: Create ThemeProvider (blockedBy: PROJ-124) <- **Ready**
+   - PROJ-126: Add useTheme hook (blockedBy: PROJ-125) - Blocked
+   - PROJ-127: Update Header (blockedBy: PROJ-126) - Blocked
 
-3. Select VRZ-125 (first ready task)
+4. Select PROJ-125 (first ready task)
 
-4. **Immediately mark VRZ-125 as "In Progress"** and add start comment
+5. **Immediately mark PROJ-125 as "In Progress"** and add start comment
 
-5. Load context from VRZ-124:
+6. Load context from PROJ-124:
    - Created `src/types/theme.ts`
    - Exports: `Theme`, `ThemeMode`, `ThemeContextValue`
 
-6. Implement VRZ-125:
+7. Implement PROJ-125:
    - Create `src/contexts/ThemeContext.tsx`
    - Import types from completed dependency
    - Follow existing context patterns in codebase
 
-7. Verify:
-   - `just typecheck` → PASS
-   - `just test-file ThemeContext` → PASS
-   - `just lint` → PASS
+8. Verify:
+   - `just typecheck` -> PASS
+   - `just test-file ThemeContext` -> PASS
+   - `just lint` -> PASS
 
-8. Commit and push:
+9. Commit and push:
    ```
    feat(theme): create ThemeProvider context
 
@@ -677,27 +697,27 @@ Consider creating separate issues for these.
    - Persist preference to localStorage
    - Detect system preference changes
 
-   Implements: VRZ-125
-   Part-of: VRZ-100
+   Implements: PROJ-125
+   Part-of: PROJ-100
    ```
 
-9. Update Linear:
-   - VRZ-125 → "Done" (all criteria met)
-   - Add completion comment with commit hash and acceptance criteria
+10. Update status:
+    - PROJ-125 -> "Done" (all criteria met)
+    - Add completion comment with commit hash and acceptance criteria
 
-10. Report and STOP:
+11. Report and STOP:
     ```
     STATUS: SUBTASK_COMPLETE
 
-    ## VRZ-125: Create ThemeProvider
-    **Status**: Moved to Done ✅
+    ## PROJ-125: Create ThemeProvider
+    **Status**: Moved to Done
     Completed: 2 of 4 sub-tasks
-    Ready next: VRZ-126
+    Ready next: PROJ-126
 
-    EXECUTION_COMPLETE: VRZ-125
+    EXECUTION_COMPLETE: PROJ-125
     ```
 
-11. **STOP** - Do not continue to VRZ-126. The loop will invoke again.
+12. **STOP** - Do not continue to PROJ-126. The loop will invoke again.
 </execution_example>
 </examples>
 
@@ -728,7 +748,7 @@ Consider creating separate issues for these.
 - BAD: Push despite test failures
 - GOOD: Fix issues or output VERIFICATION_FAILED and stop
 
-**Don't forget Linear updates**:
+**Don't forget status updates**:
 - BAD: Complete work but leave sub-task in Backlog
 - GOOD: Update status and add completion comment
 
@@ -748,6 +768,7 @@ Consider creating separate issues for these.
 <success_criteria>
 A successful execution achieves:
 
+- [ ] Backend detected from config
 - [ ] Parent issue context loaded and understood
 - [ ] Correct ready sub-task selected (no unresolved blockers)
 - [ ] Sub-task moved to "In Progress" immediately when starting work
@@ -759,7 +780,7 @@ A successful execution achieves:
 - [ ] Lint passes
 - [ ] Commit created with conventional message
 - [ ] Changes pushed to remote
-- [ ] Sub-task moved to "Done" in Linear (if fully complete)
+- [ ] Sub-task moved to "Done" (if fully complete)
 - [ ] Or: Sub-task kept "In Progress" with progress comment (if partial)
 - [ ] Completion comment added to sub-task
 - [ ] Completion report output with STATUS marker

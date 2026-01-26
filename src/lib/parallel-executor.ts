@@ -34,7 +34,7 @@ interface AgentHandle {
   command: string;
 }
 
-// Status markers from the execute-linear-issue skill
+// Status markers from the execute-issue skill
 const STATUS_PATTERNS = {
   SUBTASK_COMPLETE: /STATUS:\s*SUBTASK_COMPLETE/,
   VERIFICATION_FAILED: /STATUS:\s*VERIFICATION_FAILED/,

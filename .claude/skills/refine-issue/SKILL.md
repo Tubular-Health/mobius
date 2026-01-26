@@ -1,57 +1,130 @@
 ---
-name: refine-linear-issue
-description: Break down a Linear issue into actionable sub-tasks through deep codebase research. Each sub-task is sized for single-file focus and context window efficiency. Creates sub-tasks with blocking relationships for parallel execution. Use when an issue needs implementation breakdown, when starting work on a complex Linear issue, or when the user mentions "refine", "break down", or "plan" for a Linear issue.
+name: refine-issue
+description: Break down issues into sub-tasks with dependencies. Supports both Linear and Jira backends via progressive disclosure. Each sub-task is sized for single-file focus and context window efficiency. Creates sub-tasks with blocking relationships for parallel execution. Use when an issue needs implementation breakdown, when starting work on a complex issue, or when the user mentions "refine", "break down", or "plan" for an issue.
+invocation: /refine
 ---
 
 <objective>
-Transform a Linear issue into a set of focused, executable sub-tasks through deep codebase exploration. Each sub-task targets a single file or tightly-coupled file pair, sized to fit within one Claude context window. Sub-tasks are created with blocking relationships to enable parallel work where dependencies allow.
+Transform an issue into a set of focused, executable sub-tasks through deep codebase exploration. Each sub-task targets a single file or tightly-coupled file pair, sized to fit within one Claude context window. Sub-tasks are created with blocking relationships to enable parallel work where dependencies allow.
 </objective>
 
 <context>
-This skill bridges high-level Linear issues and actionable implementation work. It:
+This skill bridges high-level issues and actionable implementation work. It:
 
 1. **Deeply researches** the codebase to understand existing patterns, dependencies, and affected areas
 2. **Decomposes** work into single-file-focused tasks that Claude can complete in one session
 3. **Identifies dependencies** between tasks to establish blocking relationships
-4. **Creates sub-tasks** in Linear as children of the parent issue with proper blocking order
+4. **Creates sub-tasks** as children of the parent issue with proper blocking order
 
 Sub-tasks are designed for autonomous execution - each should be completable without needing to reference other sub-tasks or gather additional context.
 </context>
 
+<backend_detection>
+Read the backend from mobius config (`~/.config/mobius/config.yaml`). The `backend` field specifies which issue tracker to use.
+
+**Supported backends**:
+- `linear` (default) - Linear issue tracker
+- `jira` - Atlassian Jira
+
+If no backend is specified in config, default to `linear`.
+
+The backend determines which MCP tools to use for issue operations. All workflow logic remains the same regardless of backend.
+</backend_detection>
+
+<backend_context>
+<linear>
+**MCP Tools for Linear backend**:
+
+- `mcp__plugin_linear_linear__get_issue` - Fetch issue details with relations
+- `mcp__plugin_linear_linear__create_issue` - Create sub-tasks with `parentId` parameter
+- `mcp__plugin_linear_linear__update_issue` - Set blocking relationships via `blockedBy` array
+- `mcp__plugin_linear_linear__create_comment` - Post Mermaid dependency diagram
+
+**Issue ID format**: `MOB-123`, `VRZ-456` (team prefix + number)
+
+**Creating sub-tasks**:
+```
+mcp__plugin_linear_linear__create_issue
+  team: "{same team as parent}"
+  title: "[{parent-id}] {sub-task title}"
+  description: "{full sub-task description with acceptance criteria}"
+  parentId: "{parent issue id}"
+  labels: ["{inherited from parent}"]
+  priority: {inherited from parent}
+  state: "Backlog"
+  blockedBy: ["{ids of blocking sub-tasks}"]
+```
+</linear>
+
+<jira>
+**MCP Tools for Jira backend**:
+
+- `mcp__plugin_jira_jira__get_issue` - Fetch issue details with relations
+- `mcp__plugin_jira_jira__create_issue` - Create sub-tasks with parent link
+- `mcp__plugin_jira_jira__update_issue` - Set blocking relationships via issue links
+- `mcp__plugin_jira_jira__create_comment` - Post Mermaid dependency diagram
+
+**Issue ID format**: `PROJ-123` (project key + number)
+
+**Creating sub-tasks**:
+```
+mcp__plugin_jira_jira__create_issue
+  project: "{same project as parent}"
+  summary: "[{parent-id}] {sub-task title}"
+  description: "{full sub-task description with acceptance criteria}"
+  parent: "{parent issue key}"
+  issuetype: "Sub-task"
+  labels: ["{inherited from parent}"]
+  priority: {inherited from parent}
+```
+
+Note: Jira uses issue links for blocking relationships. After creating sub-tasks, use `update_issue` to add "Blocks"/"Is blocked by" links.
+</jira>
+</backend_context>
+
 <quick_start>
 <invocation>
-The skill expects a Linear issue identifier as argument:
+The skill expects an issue identifier as argument:
 
 ```
-/refine-linear-issue VRZ-123
+/refine MOB-123    # Linear issue
+/refine PROJ-456   # Jira issue
 ```
 
 Or invoke programmatically:
 ```
-Skill: refine-linear-issue
-Args: VRZ-123
+Skill: refine-issue
+Args: MOB-123
 ```
 </invocation>
 
 <workflow>
-1. **Fetch issue** - Get full issue details from Linear including description and acceptance criteria
-2. **Deep exploration** - Use Explore agent to thoroughly analyze related code, patterns, and dependencies
-3. **Identify work units** - Break down into single-file-focused tasks
-4. **Determine blocking order** - Analyze functional dependencies between tasks
-5. **Present breakdown** - Show complete plan with all sub-tasks and their relationships
-6. **Gather feedback** - Use AskUserQuestion for refinement
-7. **Batch create** - Create all approved sub-tasks in Linear with blocking relationships
+1. **Detect backend** - Read backend from mobius config (default: linear)
+2. **Fetch issue** - Get full issue details including description and acceptance criteria
+3. **Deep exploration** - Use Explore agent to thoroughly analyze related code, patterns, and dependencies
+4. **Identify work units** - Break down into single-file-focused tasks
+5. **Determine blocking order** - Analyze functional dependencies between tasks
+6. **Present breakdown** - Show complete plan with all sub-tasks and their relationships
+7. **Gather feedback** - Use AskUserQuestion for refinement
+8. **Batch create** - Create all approved sub-tasks with blocking relationships
 </workflow>
 </quick_start>
 
 <research_phase>
 <fetch_issue>
-First, retrieve the issue details:
+First, retrieve the issue details using the appropriate backend tool:
 
+**For Linear**:
 ```
 mcp__plugin_linear_linear__get_issue
   id: "{issue-id}"
   includeRelations: true
+```
+
+**For Jira**:
+```
+mcp__plugin_jira_jira__get_issue
+  issueIdOrKey: "{issue-id}"
 ```
 
 Extract:
@@ -224,7 +297,7 @@ After presenting, use AskUserQuestion:
 Question: "How would you like to proceed with this breakdown?"
 
 Options:
-1. **Create all sub-tasks** - Breakdown looks correct, create in Linear
+1. **Create all sub-tasks** - Breakdown looks correct, create in issue tracker
 2. **Adjust scope** - Some tasks need to be split or combined
 3. **Change ordering** - Blocking relationships need adjustment
 4. **Add context** - I have additional information to include
@@ -244,23 +317,12 @@ Loop back to presentation after each refinement until user approves.
 
 <creation_phase>
 <batch_creation>
-After approval, create all sub-tasks in Linear:
+After approval, create all sub-tasks using the appropriate backend tools.
 
-For each sub-task in dependency order (leaves first):
+**Important**: Create in reverse dependency order so blocking references exist.
 
-```
-mcp__plugin_linear_linear__create_issue
-  team: "{same team as parent}"
-  title: "[{parent-id}] {sub-task title}"
-  description: "{full sub-task description with acceptance criteria}"
-  parentId: "{parent issue id}"
-  labels: ["{inherited from parent}"]
-  priority: {inherited from parent}
-  state: "Backlog"
-  blockedBy: ["{ids of blocking sub-tasks}"]
-```
-
-**Important**: Create in reverse dependency order so blockedBy references exist.
+For Linear, use `blockedBy` parameter during creation.
+For Jira, create sub-tasks first, then add issue links for blocking relationships.
 </batch_creation>
 
 <creation_order>
@@ -271,27 +333,63 @@ mcp__plugin_linear_linear__create_issue
 </creation_order>
 
 <post_creation>
-After all sub-tasks created, confirm:
+After all sub-tasks created, add a comment to the parent issue with the Mermaid dependency diagram:
+
+**For Linear**:
+```
+mcp__plugin_linear_linear__create_comment
+  issueId: "{parent-issue-id}"
+  body: |
+    ## Sub-task Dependency Graph
+
+    ```mermaid
+    graph TD
+      A[MOB-124: Define types] --> B[MOB-125: Implement service]
+      B --> C[MOB-126: Add hook]
+      C --> D[MOB-127: Update component]
+    ```
+
+    **Ready to start**: MOB-124
+```
+
+**For Jira**:
+```
+mcp__plugin_jira_jira__create_comment
+  issueIdOrKey: "{parent-issue-key}"
+  body: |
+    ## Sub-task Dependency Graph
+
+    {code:mermaid}
+    graph TD
+      A[PROJ-124: Define types] --> B[PROJ-125: Implement service]
+      B --> C[PROJ-126: Add hook]
+      C --> D[PROJ-127: Update component]
+    {code}
+
+    *Ready to start*: PROJ-124
+```
+
+Then confirm with summary:
 
 ```markdown
 Created {count} sub-tasks for {parent issue ID}:
 
 | ID | Title | Blocked By | Status |
 |----|-------|------------|--------|
-| VRZ-124 | Define types | - | Ready |
-| VRZ-125 | Implement service | VRZ-124 | Blocked |
-| VRZ-126 | Add hook | VRZ-124 | Blocked |
-| VRZ-127 | Update component | VRZ-125, VRZ-126 | Blocked |
+| XXX-124 | Define types | - | Ready |
+| XXX-125 | Implement service | XXX-124 | Blocked |
+| XXX-126 | Add hook | XXX-124 | Blocked |
+| XXX-127 | Update component | XXX-125, XXX-126 | Blocked |
 
-**Ready to start**: VRZ-124
-**Parallel opportunities**: After VRZ-124, can work VRZ-125 and VRZ-126 simultaneously
+**Ready to start**: XXX-124
+**Parallel opportunities**: After XXX-124, can work XXX-125 and XXX-126 simultaneously
 ```
 </post_creation>
 </creation_phase>
 
 <examples>
 <example_breakdown>
-**Parent issue**: VRZ-100 - Add dark mode support
+**Parent issue**: MOB-100 - Add dark mode support
 
 **Exploration findings**:
 - Need theme types in `src/types/theme.ts`
@@ -373,7 +471,8 @@ A successful refinement produces:
 - [ ] Blocking relationships are logically sound
 - [ ] No circular dependencies exist
 - [ ] Parallel opportunities are maximized
-- [ ] Sub-tasks created in Linear as children of parent issue
+- [ ] Sub-tasks created as children of parent issue
 - [ ] Ready tasks (no blockers) are clearly identified
 - [ ] User approved breakdown before creation
+- [ ] Mermaid dependency diagram posted to parent issue
 </success_criteria>

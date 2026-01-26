@@ -14,7 +14,9 @@ import { readExecutionState, watchExecutionState } from '../../lib/execution-sta
 import { TaskTree } from './TaskTree.js';
 import { AgentPanelGrid } from './AgentPanelGrid.js';
 import { Legend } from './Legend.js';
+import { Header } from './Header.js';
 import { STRUCTURE_COLORS, AURORA } from '../theme.js';
+import { formatDuration, getElapsedMs } from '../utils/formatDuration.js';
 
 export interface DashboardProps {
   parentId: string;
@@ -141,6 +143,7 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
   if (!executionState) {
     return (
       <Box flexDirection="column" padding={1}>
+        <Header parentId={parentId} startedAt={undefined} />
         <TaskTree graph={graph} executionState={undefined} />
         <Box marginTop={1}>
           <Text color={STRUCTURE_COLORS.muted}>
@@ -164,6 +167,7 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
 
     return (
       <Box flexDirection="column" padding={1}>
+        <Header parentId={parentId} startedAt={executionState.startedAt} />
         <TaskTree graph={graph} executionState={executionState} />
 
         {/* Completion Summary */}
@@ -172,7 +176,7 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
             Execution {statusText}
           </Text>
           <Text color={STRUCTURE_COLORS.text}>
-            Total: {stats.total} | Done: {completedCount} | Failed: {failedCount}
+            Total: {stats.total} | Done: {completedCount} | Failed: {failedCount} | Runtime: {formatDuration(getElapsedMs(executionState.startedAt))}
           </Text>
         </Box>
 
@@ -195,6 +199,9 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
   // Normal running state - show full dashboard
   return (
     <Box flexDirection="column" padding={1}>
+      {/* Header */}
+      <Header parentId={parentId} startedAt={executionState.startedAt} />
+
       {/* Task Tree */}
       <TaskTree graph={graph} executionState={executionState} />
 

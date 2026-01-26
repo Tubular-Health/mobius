@@ -42,8 +42,8 @@ STATE_DIR="${MOBIUS_STATE_DIR:-$HOME/.mobius/state}"
 
 # Backend skill mappings
 declare -A BACKEND_SKILLS=(
-    [linear]="/execute-linear-issue"
-    [jira]="/execute-jira-issue"  # Future: implement Jira skill
+    [linear]="/execute-issue"
+    [jira]="/execute-issue"
 )
 
 declare -A BACKEND_ID_PATTERNS=(
@@ -517,9 +517,28 @@ should_stop_execution() {
     return 1
 }
 
+# Check if tmux is available and running
+check_tmux() {
+    if ! command -v tmux &> /dev/null; then
+        return 1
+    fi
+    # Check if tmux server is running (we can create windows even if not attached)
+    tmux list-sessions &> /dev/null || tmux new-session -d -s mobius-bg &> /dev/null
+    return 0
+}
+
 # The main loop
 run_loop() {
-    # Clean up state file on exit
+    # Check tmux availability for TUI pane capture
+    local use_tmux=false
+    if check_tmux; then
+        use_tmux=true
+        log "tmux available - TUI will show live agent output"
+    else
+        log "tmux not available - TUI will not show live output"
+    fi
+
+    # Clean up state file and tmux panes on exit
     trap 'echo ""; clear_active_tasks; log "Stopped"; exit 0' INT TERM
 
     local skill="${BACKEND_SKILLS[$BACKEND]}"
@@ -573,25 +592,48 @@ run_loop() {
         local output_file
         output_file=$(mktemp)
 
-        # The skill will find the next ready sub-task and execute it
-        # If no sub-tasks remain, Claude will indicate completion
-        # Run in background to get PID, then wait
-        echo "$skill $TASK_ID" | claude -p \
-            --dangerously-skip-permissions \
-            --verbose \
-            --output-format=stream-json \
-            --model "$MODEL" \
-            $chrome_flag 2>&1 | tee "$output_file" | cclean &
-        claude_pid=$!
+        local pane_id=""
+        local pane_pid=""
 
-        # Try to detect the current sub-task from the output
-        # The skill outputs "STATUS: SUBTASK_COMPLETE" and "## {Sub-task ID}:" in the completion report
-        # For now, we track the Claude process as the active task
-        # In parallel mode, more sophisticated tracking would be needed
-        add_active_task "$TASK_ID" "$claude_pid" "" ""
+        if [ "$use_tmux" = "true" ]; then
+            # Unique signal name for tmux wait-for
+            local wait_signal="mobius-$$-$iteration"
 
-        # Wait for Claude to finish
-        wait $claude_pid || true
+            # Run Claude inside a tmux pane so TUI can capture live output
+            pane_id=$(tmux new-window -d -P -F '#{pane_id}' \
+                "echo '$skill $TASK_ID' | claude -p \
+                    --dangerously-skip-permissions \
+                    --verbose \
+                    --output-format=stream-json \
+                    --model $MODEL \
+                    $chrome_flag 2>&1 | tee '$output_file' | cclean; \
+                tmux wait-for -S '$wait_signal'")
+
+            # Get the PID of the shell running in the tmux pane
+            pane_pid=$(tmux display-message -t "$pane_id" -p '#{pane_pid}')
+
+            # Track this task with its tmux pane ID for TUI live output capture
+            add_active_task "$TASK_ID" "$pane_pid" "$pane_id" ""
+
+            # Wait for Claude to finish (tmux wait-for blocks until signaled)
+            tmux wait-for "$wait_signal" 2>/dev/null || true
+        else
+            # Fallback: run Claude directly without tmux (no live TUI output)
+            echo "$skill $TASK_ID" | claude -p \
+                --dangerously-skip-permissions \
+                --verbose \
+                --output-format=stream-json \
+                --model "$MODEL" \
+                $chrome_flag 2>&1 | tee "$output_file" | cclean &
+            pane_pid=$!
+
+            # Track without pane ID (TUI will show "(available)" placeholder)
+            add_active_task "$TASK_ID" "$pane_pid" "" ""
+
+            # Wait for Claude to finish
+            wait $pane_pid || true
+        fi
+
         local exit_code=$?
 
         # Parse output for completion status

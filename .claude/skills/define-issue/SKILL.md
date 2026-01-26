@@ -1,27 +1,68 @@
 ---
-name: define-linear-issue
-description: Create well-defined Linear issues (bugs, features, tasks) using Socratic questioning to eliminate ambiguity. Use when creating new Linear issues, when the user mentions Linear, or needs to define work items with proper acceptance criteria and relationships.
+name: define-issue
+description: Create well-defined issues (bugs, features, tasks) using Socratic questioning to eliminate ambiguity. Use when creating new Linear or Jira issues, when the user mentions Linear, Jira, or needs to define work items with proper acceptance criteria and relationships.
+invocation: /define
 ---
 
 <objective>
-Guide the creation of precise, unambiguous Linear issues through the Socratic method. Ask targeted questions to uncover edge cases, acceptance criteria, relationships, and constraints before creating the issue. A well-defined issue prevents thrashing and enables clear work execution.
+Guide the creation of precise, unambiguous issues through the Socratic method. Ask targeted questions to uncover edge cases, acceptance criteria, relationships, and constraints before creating the issue. A well-defined issue prevents thrashing and enables clear work execution.
 </objective>
 
-<context>
-Linear is a project management tool with issues, projects, and cycles. Issues have:
-- **States**: Backlog, Todo, In Progress, Done, Canceled, Duplicate
-- **Labels**: Bug, Feature, Improvement (and custom labels)
-- **Priority**: 0 (No priority), 1 (Urgent), 2 (High), 3 (Normal), 4 (Low)
-- **Relationships**: blocks, blockedBy, relatedTo, duplicateOf
-- **Hierarchy**: Issues can have parent issues (sub-issues)
+<backend_detection>
+Read backend from mobius config (`mobius.config.yaml` or `~/.config/mobius/config.yaml`).
+Default to 'linear' if not specified.
 
-Use the Linear MCP tools for all operations:
+```yaml
+# mobius.config.yaml
+backend: linear  # or 'jira'
+```
+
+The backend determines which MCP tools to use for issue operations.
+</backend_detection>
+
+<backend_context>
+<linear>
+**Linear MCP Tools**:
 - `mcp__plugin_linear_linear__create_issue` - Create issues
 - `mcp__plugin_linear_linear__list_issues` - Search existing issues
 - `mcp__plugin_linear_linear__get_issue` - Get issue details
 - `mcp__plugin_linear_linear__list_teams` - List available teams
 - `mcp__plugin_linear_linear__list_issue_labels` - List available labels
-</context>
+
+**Linear Concepts**:
+- **States**: Backlog, Todo, In Progress, Done, Canceled, Duplicate
+- **Labels**: Bug, Feature, Improvement (and custom labels)
+- **Priority**: 0 (No priority), 1 (Urgent), 2 (High), 3 (Normal), 4 (Low)
+- **Relationships**: blocks, blockedBy, relatedTo, duplicateOf
+- **Hierarchy**: Issues can have parent issues (sub-issues)
+</linear>
+
+<jira>
+**Jira MCP Tools**:
+- `mcp__plugin_jira_jira__create_issue` - Create issues
+- `mcp__plugin_jira_jira__list_issues` - Search existing issues
+- `mcp__plugin_jira_jira__get_issue` - Get issue details
+- `mcp__plugin_jira_jira__list_projects` - List available projects
+
+**Jira Configuration**:
+Requires `project_key` from jira config section:
+
+```yaml
+# mobius.config.yaml
+backend: jira
+jira:
+  base_url: https://yourcompany.atlassian.net
+  project_key: PROJ
+```
+
+**Jira Concepts**:
+- **Statuses**: To Do, In Progress, Done (varies by workflow)
+- **Issue Types**: Bug, Story, Task, Epic, Sub-task
+- **Priority**: Highest, High, Medium, Low, Lowest
+- **Links**: blocks, is blocked by, relates to, duplicates
+- **Hierarchy**: Epics contain Stories/Tasks; Tasks can have Sub-tasks
+</jira>
+</backend_context>
 
 <quick_start>
 <initial_gate>
@@ -29,7 +70,7 @@ Use the Linear MCP tools for all operations:
 
 If user provides no context (just invoked the skill), use AskUserQuestion:
 
-Question: "What kind of issue do you need to create in Linear?"
+Question: "What kind of issue do you need to create?"
 
 Options:
 1. **Bug report** - Something is broken or not working as expected
@@ -40,14 +81,14 @@ Options:
 
 <workflow>
 1. **Determine issue type** - Bug, feature, task, or improvement
-2. **Identify team** - Use `list_teams` to find the target team
+2. **Identify team/project** - Use `list_teams` (Linear) or `list_projects` (Jira)
 3. **Gather core information** - Title, description, affected areas
 4. **Investigate with Socratic questions** - Ask until no ambiguities remain
 5. **Define acceptance criteria** - Verifiable outcomes
 6. **Identify relationships** - What blocks this? What does this block?
-7. **Set priority and metadata** - Priority 1-4, labels, project
+7. **Set priority and metadata** - Priority, labels/issue type, project
 8. **Present for approval** - Show complete issue before creating
-9. **Create with Linear MCP** - Execute the create_issue tool
+9. **Create with MCP tool** - Execute the appropriate create_issue tool
 </workflow>
 </quick_start>
 
@@ -163,9 +204,9 @@ Each criterion should be:
 </acceptance_criteria_rules>
 </issue_structure>
 
-<linear_context_gathering>
-<available_context>
-Before creating an issue, gather context from Linear:
+<context_gathering>
+<linear_context>
+Before creating an issue with Linear backend:
 
 ```
 # List existing issues that might be related
@@ -180,32 +221,52 @@ mcp__plugin_linear_linear__list_teams
 # List available labels
 mcp__plugin_linear_linear__list_issue_labels
 ```
-</available_context>
+</linear_context>
+
+<jira_context>
+Before creating an issue with Jira backend:
+
+```
+# Search for related issues
+mcp__plugin_jira_jira__list_issues with JQL query
+
+# Get issue details
+mcp__plugin_jira_jira__get_issue
+
+# List available projects
+mcp__plugin_jira_jira__list_projects
+```
+</jira_context>
 
 <relationship_discovery>
-Ask about relationships using Linear context:
+Ask about relationships using context from the backend:
 
 - "I found these related open issues: [list]. Does this new issue depend on any of them?"
 - "Should any existing issues be blocked by this work?"
 - "Is this related to an existing issue?"
 
-Use relationship parameters at creation time:
+**Linear relationships** (at creation time):
 - `blocks`: Issues this one blocks
 - `blockedBy`: Issues blocking this one
 - `relatedTo`: Related issues
 - `duplicateOf`: If this duplicates another issue
+
+**Jira links** (at creation or via separate call):
+- blocks / is blocked by
+- relates to
+- duplicates / is duplicated by
 </relationship_discovery>
-</linear_context_gathering>
+</context_gathering>
 
 <priority_guidelines>
 <priority_matrix>
-| Priority | Meaning | When to use |
-|----------|---------|-------------|
-| 1 | Urgent | Production down, data loss, security |
-| 2 | High | Major feature broken, many users affected |
-| 3 | Normal | Important but not urgent, default |
-| 4 | Low | Nice to have, improvements |
-| 0 | No priority | Not yet triaged |
+| Priority | Linear | Jira | When to use |
+|----------|--------|------|-------------|
+| Urgent | 1 | Highest | Production down, data loss, security |
+| High | 2 | High | Major feature broken, many users affected |
+| Normal | 3 | Medium | Important but not urgent, default |
+| Low | 4 | Low | Nice to have, improvements |
+| None | 0 | Lowest | Not yet triaged |
 </priority_matrix>
 
 <priority_questions>
@@ -214,10 +275,10 @@ Use AskUserQuestion for priority:
 Question: "What priority should this have?"
 
 Options:
-1. **Urgent (1)** - Production impact, must fix immediately
-2. **High (2)** - Major functionality affected, fix soon
-3. **Normal (3)** - Important but not urgent (recommended default)
-4. **Low (4)** - Enhancement, can wait
+1. **Urgent** - Production impact, must fix immediately
+2. **High** - Major functionality affected, fix soon
+3. **Normal** - Important but not urgent (recommended default)
+4. **Low** - Enhancement, can wait
 </priority_questions>
 </priority_guidelines>
 
@@ -225,18 +286,18 @@ Options:
 <before_creating>
 Present the complete issue in chat:
 
-"Here is the issue I'll create in Linear:
+"Here is the issue I'll create:
 
 **Title**: [title]
-**Team**: [team name]
-**Labels**: [Bug/Feature/Improvement]
+**Team/Project**: [team or project name]
+**Type/Labels**: [Bug/Feature/Improvement or issue type]
 **Priority**: [Urgent/High/Normal/Low]
-**State**: [Backlog/Todo]
+**State/Status**: [initial state]
 **Description**:
 [full description with acceptance criteria]
 
 **Relationships**: [if any]
-**Project**: [if applicable]
+**Parent**: [if applicable]
 
 Ready to create this issue?"
 
@@ -248,8 +309,9 @@ Use AskUserQuestion:
 </before_creating>
 
 <create_command>
-After approval, use the Linear MCP tool:
+After approval, use the appropriate MCP tool based on backend:
 
+**Linear**:
 ```
 mcp__plugin_linear_linear__create_issue
   team: "Team Name"
@@ -262,6 +324,16 @@ mcp__plugin_linear_linear__create_issue
   blockedBy: ["ISSUE-456"]  # optional
   relatedTo: ["ISSUE-789"]  # optional
 ```
+
+**Jira**:
+```
+mcp__plugin_jira_jira__create_issue
+  project: "PROJECT_KEY"
+  summary: "Issue title"
+  description: "Full markdown description"
+  issuetype: "Bug" or "Story" or "Task"
+  priority: "High" or "Medium" or "Low"
+```
 </create_command>
 
 <after_creation>
@@ -270,7 +342,7 @@ Confirm: "Created issue [ID]: [title]
 Would you like to:
 - Create related issues
 - Set up additional relationships
-- Add this to a project"
+- Add this to a project/epic"
 </after_creation>
 </approval_workflow>
 
@@ -284,10 +356,10 @@ Response flow:
 3. "Does this affect all users or specific scenarios?"
 4. "What error message do you see?"
 
-Resulting issue:
+**Linear** resulting issue:
 ```
 mcp__plugin_linear_linear__create_issue
-  team: "Verz"
+  team: "Engineering"
   title: "Schedule deactivation throws 500 error"
   description: "## Summary
 Users receive HTTP 500 error when deactivating schedules.
@@ -312,6 +384,16 @@ Schedule deactivates successfully with confirmation message.
   priority: 1
   state: "Todo"
 ```
+
+**Jira** resulting issue:
+```
+mcp__plugin_jira_jira__create_issue
+  project: "PROJ"
+  summary: "Schedule deactivation throws 500 error"
+  description: "...same description..."
+  issuetype: "Bug"
+  priority: "Highest"
+```
 </bug_example>
 
 <feature_example>
@@ -323,12 +405,10 @@ Response flow:
 3. "Which screens/components need dark mode support?"
 4. "How will we know this feature is successful?"
 
-Resulting issue:
+Resulting issue (backend-agnostic description):
 ```
-mcp__plugin_linear_linear__create_issue
-  team: "Verz"
-  title: "Add dark mode theme support"
-  description: "## Summary
+Title: "Add dark mode theme support"
+Description: "## Summary
 Add dark mode support with system preference detection and manual toggle.
 
 ## Expected Behavior
@@ -342,9 +422,6 @@ Add dark mode support with system preference detection and manual toggle.
 - [ ] All text maintains 4.5:1 contrast ratio in both modes
 - [ ] Theme preference persists across app restarts
 - [ ] No flash of wrong theme on app launch"
-  labels: ["Feature"]
-  priority: 3
-  state: "Backlog"
 ```
 </feature_example>
 </examples>
@@ -374,7 +451,7 @@ Add dark mode support with system preference detection and manual toggle.
 <success_criteria>
 An issue is ready when:
 
-- [ ] Labels match the nature of the work (Bug/Feature/Improvement)
+- [ ] Type/labels match the nature of the work (Bug/Feature/Task)
 - [ ] Title is specific and actionable
 - [ ] Description includes all relevant context
 - [ ] Acceptance criteria are behavioral outcomes

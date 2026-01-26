@@ -146,6 +146,36 @@ export function configExists(configPath: string): boolean {
 }
 
 /**
+ * Validate Jira-specific configuration
+ */
+function validateJiraConfig(config: LoopConfig): string[] {
+  const errors: string[] = [];
+
+  if (config.backend === 'jira') {
+    if (!config.jira?.base_url) {
+      errors.push('jira.base_url is required when backend is jira');
+    } else if (!config.jira.base_url.startsWith('https://')) {
+      errors.push('jira.base_url must be an HTTPS URL');
+    }
+
+    if (!config.jira?.project_key) {
+      errors.push('jira.project_key is required when backend is jira');
+    } else if (!/^[A-Z]+$/.test(config.jira.project_key)) {
+      errors.push('jira.project_key must be uppercase letters only');
+    }
+
+    if (
+      config.jira?.auth_method &&
+      !['api_token', 'oauth'].includes(config.jira.auth_method)
+    ) {
+      errors.push('jira.auth_method must be "api_token" or "oauth"');
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Validate config structure
  */
 export function validateConfig(config: LoopConfig): { valid: boolean; errors: string[] } {
@@ -208,6 +238,9 @@ export function validateConfig(config: LoopConfig): { valid: boolean; errors: st
       }
     }
   }
+
+  // Validate Jira configuration when backend is 'jira'
+  errors.push(...validateJiraConfig(config));
 
   return { valid: errors.length === 0, errors };
 }

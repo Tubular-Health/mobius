@@ -11,7 +11,7 @@
 
 **Autonomous AI development that works with your existing workflow.**
 
-**Define issues in Linear. Let Claude implement them. Review and ship.**
+**Define issues in Linear or Jira. Let Claude implement them. Review and ship.**
 
 [![npm version](https://img.shields.io/npm/v/mobius-loop?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/mobius-loop)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
@@ -40,6 +40,8 @@ npm install -g mobius-loop && mobius setup
 - [Why Mobius?](#why-mobius)
 - [The 4 Skills](#the-4-skills)
 - [Configuration](#configuration)
+- [Jira Setup](#jira-setup)
+- [Switching Backends](#switching-backends)
 - [Backend Architecture](#backend-architecture)
 - [Project Setup](#project-setup-agentsmd)
 - [Sandbox Mode](#sandbox-mode)
@@ -63,11 +65,11 @@ AI-assisted coding has a coordination problem:
 
 ## The Solution
 
-Mobius uses **your existing Linear issues** as the source of truth. No new systems to learn. No state files to merge. Your team already knows how to use Linear.
+Mobius uses **your existing issue tracker** as the source of truth. No new systems to learn. No state files to merge. Your team already knows how to use Linear or Jira.
 
 | What You Do | What Mobius Does |
 |-------------|------------------|
-| Create a Linear issue | Break it into focused sub-tasks |
+| Create an issue (Linear or Jira) | Break it into focused sub-tasks |
 | Run `mobius ABC-123` | Execute each sub-task autonomously |
 | Review the PR | Validate against acceptance criteria |
 
@@ -230,10 +232,10 @@ If tmux is unavailable, use `--sequential` for bash-based execution.
 
 ## The 4 Skills
 
-Mobius provides four skills for the complete issue lifecycle. Currently implemented for Linear; the architecture supports additional backends.
+Mobius provides four unified skills for the complete issue lifecycle, supporting both Linear and Jira backends. The skills automatically detect your configured backend and use the appropriate API.
 
 <details>
-<summary><code>/linear:define</code> — Create well-defined issues</summary>
+<summary><code>/define</code> — Create well-defined issues</summary>
 
 Through Socratic questioning, Claude helps you create issues with:
 - Clear title and description
@@ -241,13 +243,15 @@ Through Socratic questioning, Claude helps you create issues with:
 - Appropriate labels and priority
 
 ```bash
-claude "/linear:define"
+claude "/define"
 ```
+
+Works with both Linear and Jira based on your `backend` config setting.
 
 </details>
 
 <details>
-<summary><code>/linear:refine</code> — Break into sub-tasks</summary>
+<summary><code>/refine</code> — Break into sub-tasks</summary>
 
 Analyzes your codebase and creates sub-tasks that are:
 - Small enough for single-file focus
@@ -255,13 +259,14 @@ Analyzes your codebase and creates sub-tasks that are:
 - Detailed with specific files and changes
 
 ```bash
-claude "/linear:refine ABC-123"
+claude "/refine ABC-123"    # Linear
+claude "/refine PROJ-123"   # Jira
 ```
 
 </details>
 
 <details>
-<summary><code>/linear:execute</code> — Implement one sub-task</summary>
+<summary><code>/execute</code> — Implement one sub-task</summary>
 
 Executes the next ready sub-task:
 1. Reads parent issue context
@@ -271,7 +276,7 @@ Executes the next ready sub-task:
 5. Marks sub-task complete
 
 ```bash
-claude "/linear:execute ABC-123"
+claude "/execute ABC-123"
 ```
 
 Or use the CLI for continuous execution:
@@ -282,19 +287,30 @@ mobius ABC-123
 </details>
 
 <details>
-<summary><code>/linear:verify</code> — Validate completion</summary>
+<summary><code>/verify</code> — Validate completion</summary>
 
 Reviews implementation against acceptance criteria:
 - Compares changes to requirements
 - Runs final validation
-- Adds review notes as Linear comment
+- Adds review notes as issue comment
 - Marks issue complete if passing
 
 ```bash
-claude "/linear:verify ABC-123"
+claude "/verify ABC-123"
 ```
 
 </details>
+
+### Backend-Specific Aliases
+
+For explicit backend selection, you can also use:
+
+| Unified Command | Linear Alias | Jira Alias |
+|-----------------|--------------|------------|
+| `/define` | `/linear:define` | `/jira:define` |
+| `/refine` | `/linear:refine` | `/jira:refine` |
+| `/execute` | `/linear:execute` | `/jira:execute` |
+| `/verify` | `/linear:verify` | `/jira:verify` |
 
 ---
 
@@ -308,7 +324,19 @@ claude "/linear:verify ABC-123"
 Edit `~/.config/mobius/config.yaml`:
 
 ```yaml
+# Issue tracker backend: linear | jira
 backend: linear
+
+# Linear configuration (default)
+linear:
+  # Uses Linear MCP tools (auto-configured via Claude Code)
+  # No additional configuration required
+
+# Jira configuration (uncomment when using Jira)
+# jira:
+#   base_url: https://your-org.atlassian.net
+#   project_key: PROJ
+#   auth_method: api_token
 
 execution:
   delay_seconds: 3
@@ -353,21 +381,156 @@ mobius config --edit   # Open config in editor
 
 ---
 
+## Jira Setup
+
+<details>
+<summary>Configure Mobius for Jira</summary>
+
+### 1. Update Configuration
+
+Edit `~/.config/mobius/config.yaml`:
+
+```yaml
+backend: jira
+
+jira:
+  base_url: https://your-org.atlassian.net
+  project_key: PROJ
+  auth_method: api_token
+```
+
+### 2. Generate API Token
+
+1. Go to [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens)
+2. Click **Create API token**
+3. Give it a name (e.g., "Mobius")
+4. Copy the generated token
+
+### 3. Set Environment Variable
+
+```bash
+export JIRA_API_TOKEN="your-api-token-here"
+
+# Add to your shell profile for persistence
+echo 'export JIRA_API_TOKEN="your-api-token-here"' >> ~/.bashrc
+```
+
+### 4. Configure Claude MCP Plugin
+
+The Jira MCP plugin must be configured in your Claude Code settings. Add to your MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "jira": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-jira"],
+      "env": {
+        "JIRA_BASE_URL": "https://your-org.atlassian.net",
+        "JIRA_EMAIL": "your-email@company.com",
+        "JIRA_API_TOKEN": "${JIRA_API_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+### 5. Verify Setup
+
+```bash
+mobius doctor
+```
+
+This will confirm Jira connectivity and MCP plugin availability.
+
+### Example Jira Workflow
+
+```bash
+# Define a new Jira issue
+claude "/define"
+
+# Break down into sub-tasks
+claude "/refine PROJ-123"
+
+# Execute sub-tasks (parallel by default)
+mobius loop PROJ-123
+
+# Verify implementation
+claude "/verify PROJ-123"
+```
+
+</details>
+
+---
+
+## Switching Backends
+
+<details>
+<summary>How to switch between Linear and Jira</summary>
+
+### Global Switch
+
+Change the `backend` setting in your config:
+
+```yaml
+# ~/.config/mobius/config.yaml
+backend: jira  # or 'linear'
+```
+
+### Per-Session Switch
+
+Use environment variable to override:
+
+```bash
+# Use Jira for this session
+MOBIUS_BACKEND=jira mobius PROJ-123
+
+# Use Linear for this session
+MOBIUS_BACKEND=linear mobius ABC-123
+```
+
+### Per-Project Configuration
+
+Create a `mobius.config.yaml` in your project root to override the global config:
+
+```yaml
+# /path/to/project/mobius.config.yaml
+backend: jira
+
+jira:
+  base_url: https://your-org.atlassian.net
+  project_key: MYPROJ
+```
+
+Project-level config takes precedence over global config.
+
+### Backend Detection Order
+
+Mobius determines the backend in this order:
+1. `MOBIUS_BACKEND` environment variable
+2. `mobius.config.yaml` in project root
+3. `~/.config/mobius/config.yaml`
+4. Default: `linear`
+
+</details>
+
+---
+
 ## Backend Architecture
 
 <p align="center">
   <img src="assets/diagrams/architecture.svg" alt="Backend Architecture" width="600" />
 </p>
 
-Mobius uses a skill-based architecture that abstracts the issue tracker. While **Linear is the primary supported backend**, the architecture is designed for extensibility.
+Mobius uses a skill-based architecture that abstracts the issue tracker. **Both Linear and Jira are fully supported** through unified skills that detect your configured backend.
 
-Each backend has corresponding skills at `.claude/skills/<backend>/`. The pattern supports adding new backends (Jira, GitHub Issues, etc.) by implementing the skill interface:
+The unified skills at `.claude/skills/` use progressive disclosure to provide backend-specific MCP tool documentation while keeping workflow logic backend-agnostic:
 
-| Backend | Status | Skills Location |
-|---------|--------|-----------------|
-| **Linear** | Supported | `.claude/skills/*-linear-issue/` |
-| Jira | Planned | `.claude/skills/*-jira-issue/` |
-| GitHub Issues | Planned | `.claude/skills/*-github-issue/` |
+| Backend | Status | MCP Plugin |
+|---------|--------|------------|
+| **Linear** | Supported | `@anthropic/mcp-server-linear` |
+| **Jira** | Supported | `@anthropic/mcp-server-jira` |
+| GitHub Issues | Planned | — |
 
 ---
 
@@ -437,7 +600,7 @@ execution:
 |-------------|-------|
 | **Node.js 18+** | For npm installation |
 | **Claude Code CLI** | Install from [claude.ai/code](https://claude.ai/code) |
-| **Linear account** | Primary supported backend; architecture supports additional backends |
+| **Linear or Jira account** | Both backends fully supported |
 | **tmux** (optional) | Required for parallel execution; use `--sequential` without it |
 | **Docker** (optional) | For sandbox mode |
 
@@ -491,7 +654,7 @@ Increase `max_iterations` or set to `0` for unlimited.
 
 ### Sub-tasks not executing in order
 
-Ensure sub-tasks have proper `blockedBy` relationships. Run `/linear:refine` again if dependencies are missing.
+Ensure sub-tasks have proper `blockedBy` relationships. Run `/refine` again if dependencies are missing.
 
 ### Linear MCP not configured
 
@@ -499,6 +662,26 @@ Ensure Linear MCP tools are configured in your Claude settings. Check with:
 ```bash
 mobius doctor
 ```
+
+### Jira MCP not configured
+
+Ensure the Jira MCP plugin is properly configured:
+
+1. Verify your API token:
+```bash
+echo $JIRA_API_TOKEN
+```
+
+2. Check MCP configuration in Claude Code settings
+3. Verify base URL is correct (should end with `.atlassian.net`)
+4. Run `mobius doctor` to validate connectivity
+
+### Jira authentication failed
+
+Common causes:
+- **Invalid API token**: Generate a new token from [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens)
+- **Wrong email**: The `JIRA_EMAIL` must match your Atlassian account email
+- **Permissions**: Ensure your account has access to the specified project
 
 ### Docker sandbox fails to start
 
@@ -523,7 +706,7 @@ chmod +x ~/.local/bin/mobius
 
 The task will remain incomplete. Fix the issue manually or run:
 ```bash
-claude "/linear:execute ABC-123"
+claude "/execute ABC-123"
 ```
 
 Claude will retry the failed task.

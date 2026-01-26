@@ -10,7 +10,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { ActiveTask, ExecutionState } from '../types.js';
+import type { ActiveTask, CompletedTask, ExecutionState } from '../types.js';
 
 /** Default state directory */
 const DEFAULT_STATE_DIR = join(homedir(), '.mobius', 'state');
@@ -74,6 +74,53 @@ function isValidActiveTask(obj: unknown): obj is ActiveTask {
 }
 
 /**
+ * Validate that an object is a valid CompletedTask
+ */
+function isValidCompletedTask(obj: unknown): obj is CompletedTask {
+  if (typeof obj !== 'object' || obj === null) {
+    return false;
+  }
+
+  const task = obj as Record<string, unknown>;
+
+  if (typeof task.id !== 'string') return false;
+  if (typeof task.completedAt !== 'string') return false;
+  if (typeof task.duration !== 'number') return false;
+
+  return true;
+}
+
+/**
+ * Validate that a completed/failed task entry is valid (string or CompletedTask)
+ */
+function isValidCompletedTaskEntry(item: unknown): item is string | CompletedTask {
+  return typeof item === 'string' || isValidCompletedTask(item);
+}
+
+/**
+ * Normalize a completed task entry to CompletedTask format
+ * For backward compatibility with legacy string format
+ */
+export function normalizeCompletedTask(entry: string | CompletedTask): CompletedTask {
+  if (typeof entry === 'string') {
+    // Legacy format - no duration info available
+    return {
+      id: entry,
+      completedAt: new Date().toISOString(),
+      duration: 0,
+    };
+  }
+  return entry;
+}
+
+/**
+ * Get the task ID from a completed task entry (string or CompletedTask)
+ */
+export function getCompletedTaskId(entry: string | CompletedTask): string {
+  return typeof entry === 'string' ? entry : entry.id;
+}
+
+/**
  * Validate that an object has the required ExecutionState fields
  */
 function isValidExecutionState(obj: unknown): obj is ExecutionState {
@@ -99,12 +146,12 @@ function isValidExecutionState(obj: unknown): obj is ExecutionState {
     if (!isValidActiveTask(task)) return false;
   }
 
-  // Validate completedTasks and failedTasks are string arrays
-  for (const id of state.completedTasks) {
-    if (typeof id !== 'string') return false;
+  // Validate completedTasks and failedTasks (accept both string and CompletedTask)
+  for (const entry of state.completedTasks) {
+    if (!isValidCompletedTaskEntry(entry)) return false;
   }
-  for (const id of state.failedTasks) {
-    if (typeof id !== 'string') return false;
+  for (const entry of state.failedTasks) {
+    if (!isValidCompletedTaskEntry(entry)) return false;
   }
 
   return true;
@@ -233,10 +280,24 @@ export function completeTask(
   taskId: string,
   stateDir?: string
 ): ExecutionState {
+  const now = new Date();
+  const activeTask = state.activeTasks.find(t => t.id === taskId);
+
+  // Calculate duration from task start time
+  const duration = activeTask
+    ? now.getTime() - new Date(activeTask.startedAt).getTime()
+    : 0;
+
+  const completedTask: CompletedTask = {
+    id: taskId,
+    completedAt: now.toISOString(),
+    duration,
+  };
+
   const newState: ExecutionState = {
     ...state,
     activeTasks: state.activeTasks.filter(t => t.id !== taskId),
-    completedTasks: [...state.completedTasks, taskId],
+    completedTasks: [...state.completedTasks, completedTask],
   };
 
   writeExecutionState(newState, stateDir);
@@ -251,10 +312,24 @@ export function failTask(
   taskId: string,
   stateDir?: string
 ): ExecutionState {
+  const now = new Date();
+  const activeTask = state.activeTasks.find(t => t.id === taskId);
+
+  // Calculate duration from task start time
+  const duration = activeTask
+    ? now.getTime() - new Date(activeTask.startedAt).getTime()
+    : 0;
+
+  const failedTask: CompletedTask = {
+    id: taskId,
+    completedAt: now.toISOString(),
+    duration,
+  };
+
   const newState: ExecutionState = {
     ...state,
     activeTasks: state.activeTasks.filter(t => t.id !== taskId),
-    failedTasks: [...state.failedTasks, taskId],
+    failedTasks: [...state.failedTasks, failedTask],
   };
 
   writeExecutionState(newState, stateDir);

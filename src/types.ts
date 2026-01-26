@@ -23,16 +23,28 @@ export interface ActiveTask {
 }
 
 /**
+ * Represents a completed or failed task with timing info
+ */
+export interface CompletedTask {
+  id: string;                    // Task identifier (e.g., "MOB-126")
+  completedAt: string;           // ISO timestamp when task finished
+  duration: number;              // Duration in milliseconds
+}
+
+/**
  * Execution state file schema for TUI state tracking
  * Written by mobius.sh, read by TUI dashboard
+ *
+ * Note: completedTasks and failedTasks support both legacy format (string[])
+ * and new format (CompletedTask[]) for backward compatibility.
  */
 export interface ExecutionState {
   parentId: string;              // Parent issue identifier (e.g., "MOB-11")
   parentTitle: string;           // Parent issue title for display
 
   activeTasks: ActiveTask[];     // Currently running tasks
-  completedTasks: string[];      // Completed task identifiers
-  failedTasks: string[];         // Failed task identifiers
+  completedTasks: (string | CompletedTask)[];  // Completed task identifiers or objects
+  failedTasks: (string | CompletedTask)[];     // Failed task identifiers or objects
 
   startedAt: string;             // ISO timestamp - loop start
   updatedAt: string;             // ISO timestamp - last update
@@ -111,8 +123,8 @@ export const DEFAULT_CONFIG: LoopConfig = {
 };
 
 export const BACKEND_SKILLS: Record<Backend, string> = {
-  linear: '/execute-linear-issue',
-  jira: '/execute-jira-issue',
+  linear: '/execute-issue',
+  jira: '/execute-issue',
 };
 
 export const BACKEND_ID_PATTERNS: Record<Backend, RegExp> = {
