@@ -6,6 +6,7 @@
  */
 
 import { Text } from 'ink';
+import { memo } from 'react';
 import type { SubTask, TaskGraph } from '../../lib/task-graph.js';
 import { getBlockers } from '../../lib/task-graph.js';
 import { STRUCTURE_COLORS } from '../theme.js';
@@ -39,13 +40,19 @@ function formatBlockerSuffix(task: SubTask, graph: TaskGraph): string {
 
 /**
  * TaskNode component renders a single task in the dependency tree.
+ * Memoized to prevent unnecessary re-renders when props haven't changed.
  *
  * Output format examples:
  * - ├── [✓] MOB-124: Setup base types
  * - ├── [⟳] MOB-126: Implement parser
  * - │   └── [·] MOB-127: Add tests (blocked by: MOB-126)
  */
-export function TaskNode({ task, graph, prefix, connector }: TaskNodeProps): JSX.Element {
+export const TaskNode = memo(function TaskNode({
+  task,
+  graph,
+  prefix,
+  connector,
+}: TaskNodeProps): JSX.Element {
   const blockerSuffix = formatBlockerSuffix(task, graph);
 
   return (
@@ -58,6 +65,6 @@ export function TaskNode({ task, graph, prefix, connector }: TaskNodeProps): JSX
       )}
     </Text>
   );
-}
+});
 
 export default TaskNode;

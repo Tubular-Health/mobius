@@ -36,6 +36,9 @@ export interface ExecutionState {
 
   startedAt: string;             // ISO timestamp - loop start
   updatedAt: string;             // ISO timestamp - last update
+
+  loopPid?: number;              // PID of the loop process (for cleanup)
+  totalTasks?: number;           // Total number of tasks (for completion detection)
 }
 
 export interface ExecutionConfig {

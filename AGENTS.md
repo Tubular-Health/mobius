@@ -2,14 +2,31 @@
 
 Operational guide for autonomous Mobius development.
 
-## Build & Validation
+## Just Commands
 
-Run these commands after implementing changes:
+This project uses [just](https://github.com/casey/just) as a command runner. Run `just` to see all available recipes.
 
-- **Build:** `npm run build`
-- **Typecheck:** `npm run typecheck`
-- **Tests:** `bun test` or `bun test src/lib/task-graph.test.ts`
-- **Run locally:** `bun src/bin/mobius.ts <command>`
+**Build & Validation:**
+- `just build` - Compile TypeScript to dist/
+- `just typecheck` - Type check without emitting
+- `just test` - Run all unit tests
+- `just test-file <pattern>` - Run tests matching pattern
+- `just validate` - Full validation (typecheck + test + build)
+
+**Development:**
+- `just dev` - Watch mode for TypeScript compilation
+- `just run <command>` - Run mobius locally (development mode)
+- `just tui` - Run the TUI monitoring interface
+
+**Mobius Loop:**
+- `just loop <TASK-ID>` - Execute sub-tasks of a Linear issue
+- `just loop-local <TASK-ID>` - Run locally (bypass sandbox)
+- `just config` - Show current mobius configuration
+
+**Utilities:**
+- `just deps` - Install dependencies
+- `just clean` - Remove build artifacts
+- `just lint-commit "<msg>"` - Validate a commit message
 
 ## Commit Conventions
 

@@ -5,7 +5,7 @@
  */
 
 import { Text, Box } from 'ink';
-import { StatusIndicator } from './StatusIndicator.js';
+import { STATUS_COLORS, STATUS_ICONS } from '../theme.js';
 
 export interface LegendProps {
   visible?: boolean; // default: true
@@ -15,7 +15,8 @@ export interface LegendProps {
  * Renders the status icon legend matching tree-renderer.ts format:
  * Legend: [✓] Done  [→] Ready  [·] Blocked  [⟳] In Progress
  *
- * Note: In-progress uses static icon here, not spinner (legend is static).
+ * Uses static icons (not StatusIndicator) to avoid spinner animation
+ * causing constant re-renders.
  */
 export function Legend({ visible = true }: LegendProps): JSX.Element | null {
   if (!visible) {
@@ -25,13 +26,13 @@ export function Legend({ visible = true }: LegendProps): JSX.Element | null {
   return (
     <Box>
       <Text>Legend: </Text>
-      <StatusIndicator status="done" />
+      <Text color={STATUS_COLORS.done}>{STATUS_ICONS.done}</Text>
       <Text> Done  </Text>
-      <StatusIndicator status="ready" />
+      <Text color={STATUS_COLORS.ready}>{STATUS_ICONS.ready}</Text>
       <Text> Ready  </Text>
-      <StatusIndicator status="blocked" />
+      <Text color={STATUS_COLORS.blocked}>{STATUS_ICONS.blocked}</Text>
       <Text> Blocked  </Text>
-      <StatusIndicator status="in_progress" />
+      <Text color={STATUS_COLORS.in_progress}>{STATUS_ICONS.in_progress}</Text>
       <Text> In Progress</Text>
     </Box>
   );

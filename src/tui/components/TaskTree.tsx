@@ -6,6 +6,7 @@
  */
 
 import { Box, Text } from 'ink';
+import { memo, useMemo } from 'react';
 import type { SubTask, TaskGraph, TaskStatus } from '../../lib/task-graph.js';
 import type { ExecutionState } from '../../types.js';
 import { TaskNode } from './TaskNode.js';
@@ -115,8 +116,9 @@ interface TaskTreeNodeProps {
 
 /**
  * Recursively render a task node and its children
+ * Memoized to prevent unnecessary re-renders when props haven't changed
  */
-function TaskTreeNode({
+const TaskTreeNode = memo(function TaskTreeNode({
   task,
   graph,
   childrenMap,
@@ -157,7 +159,7 @@ function TaskTreeNode({
       })}
     </Box>
   );
-}
+});
 
 /**
  * TaskTree component renders the full dependency tree.
@@ -174,9 +176,13 @@ function TaskTreeNode({
  * ```
  */
 export function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element {
-  const childrenMap = buildChildrenMap(graph);
-  const rootTasks = getRootTasks(graph);
-  const statusOverrides = getStatusOverrides(graph, executionState);
+  // Memoize expensive computations to avoid recalculating on every render
+  const childrenMap = useMemo(() => buildChildrenMap(graph), [graph]);
+  const rootTasks = useMemo(() => getRootTasks(graph), [graph]);
+  const statusOverrides = useMemo(
+    () => getStatusOverrides(graph, executionState),
+    [graph, executionState]
+  );
 
   return (
     <Box flexDirection="column">

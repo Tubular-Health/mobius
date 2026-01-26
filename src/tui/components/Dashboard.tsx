@@ -66,7 +66,7 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
   // Config defaults
   const showLegend = config?.show_legend ?? true;
   const stateDir = config?.state_dir;
-  const panelRefreshMs = config?.panel_refresh_ms ?? 300;
+  const panelRefreshMs = config?.panel_refresh_ms ?? 500;
   const panelLines = config?.panel_lines ?? 8;
 
   // Subscribe to execution state file changes
@@ -89,9 +89,42 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
     return cleanup;
   }, [parentId, stateDir, graph]);
 
-  // Handle keypress for exit when complete
+  // Auto-exit when execution completes
+  useEffect(() => {
+    if (!isComplete) return;
+
+    // Brief delay to show completion summary before exiting
+    const exitTimer = setTimeout(() => {
+      // Kill the loop process if still running
+      if (executionState?.loopPid) {
+        try {
+          process.kill(executionState.loopPid, 'SIGTERM');
+        } catch {
+          // Process may have already exited
+        }
+      }
+
+      // Determine exit code based on failures
+      const hasFailures = (executionState?.failedTasks.length ?? 0) > 0;
+      exit();
+      process.exitCode = hasFailures ? 1 : 0;
+    }, 2000); // Show summary for 2 seconds
+
+    return () => clearTimeout(exitTimer);
+  }, [isComplete, executionState, exit]);
+
+  // Handle keypress for immediate exit when complete
   useInput((input, key) => {
     if (isComplete && (key.return || input === 'q' || input === ' ')) {
+      // Kill the loop process if still running
+      if (executionState?.loopPid) {
+        try {
+          process.kill(executionState.loopPid, 'SIGTERM');
+        } catch {
+          // Process may have already exited
+        }
+      }
+
       // Determine exit code based on failures
       const hasFailures = (executionState?.failedTasks.length ?? 0) > 0;
       exit();
@@ -146,7 +179,7 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
         {/* Exit instruction */}
         <Box marginTop={1}>
           <Text color={STRUCTURE_COLORS.muted}>
-            Press any key to exit
+            Exiting in 2s... (press any key to exit now)
           </Text>
         </Box>
 

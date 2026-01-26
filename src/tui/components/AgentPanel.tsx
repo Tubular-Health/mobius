@@ -6,7 +6,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, memo } from 'react';
 import { execa } from 'execa';
 import type { ActiveTask } from '../../types.js';
 import { FROST, STRUCTURE_COLORS, SNOW_STORM } from '../theme.js';
@@ -14,7 +14,7 @@ import { FROST, STRUCTURE_COLORS, SNOW_STORM } from '../theme.js';
 export interface AgentPanelProps {
   activeTask?: ActiveTask; // undefined = show "(available)"
   lines?: number; // default: 8
-  refreshMs?: number; // default: 300
+  refreshMs?: number; // default: 500
 }
 
 /**
@@ -44,22 +44,33 @@ export async function captureTmuxPane(paneId: string, lines: number): Promise<st
 /**
  * AgentPanel component - displays live output from a tmux pane
  */
-export function AgentPanel({
+function AgentPanelImpl({
   activeTask,
   lines = 8,
-  refreshMs = 300,
+  refreshMs = 500,
 }: AgentPanelProps): JSX.Element {
   const [output, setOutput] = useState<string[]>([]);
+  const prevContentRef = useRef<string>('');
 
   useEffect(() => {
     if (!activeTask) {
-      setOutput([]);
+      if (prevContentRef.current !== '') {
+        prevContentRef.current = '';
+        setOutput([]);
+      }
       return;
     }
 
-    // Initial fetch
+    // Fetch and only update if content changed
     const fetchOutput = async () => {
       const content = await captureTmuxPane(activeTask.pane, lines);
+
+      // Skip update if content hasn't changed
+      if (content === prevContentRef.current) {
+        return;
+      }
+      prevContentRef.current = content;
+
       const outputLines = content
         .split('\n')
         .filter(line => line.trim() !== '')
@@ -107,5 +118,8 @@ export function AgentPanel({
     </Box>
   );
 }
+
+// Memoize to prevent re-renders when props haven't changed
+export const AgentPanel = memo(AgentPanelImpl);
 
 export default AgentPanel;

@@ -7,7 +7,7 @@
  * Uses fs.watch() for instant file change detection with debouncing.
  */
 
-import { existsSync, mkdirSync, readFileSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, watch, type FSWatcher } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ActiveTask, ExecutionState } from '../types.js';
@@ -15,8 +15,8 @@ import type { ActiveTask, ExecutionState } from '../types.js';
 /** Default state directory */
 const DEFAULT_STATE_DIR = join(homedir(), '.mobius', 'state');
 
-/** Debounce timeout in milliseconds */
-const DEBOUNCE_MS = 50;
+/** Debounce timeout in milliseconds - higher value reduces flickering */
+const DEBOUNCE_MS = 150;
 
 /**
  * Get the state directory path
@@ -146,6 +146,136 @@ export function readExecutionState(
     }
     return null;
   }
+}
+
+/**
+ * Write execution state to the state file
+ *
+ * @param state - The execution state to write
+ * @param stateDir - Optional custom state directory
+ */
+export function writeExecutionState(
+  state: ExecutionState,
+  stateDir?: string
+): void {
+  ensureStateDir(stateDir);
+  const filePath = getStateFilePath(state.parentId, stateDir);
+
+  // Update the updatedAt timestamp
+  const stateWithTimestamp: ExecutionState = {
+    ...state,
+    updatedAt: new Date().toISOString(),
+  };
+
+  writeFileSync(filePath, JSON.stringify(stateWithTimestamp, null, 2), 'utf-8');
+}
+
+/**
+ * Initialize a new execution state for a parent issue
+ *
+ * @param parentId - Parent issue identifier (e.g., "MOB-11")
+ * @param parentTitle - Parent issue title for display
+ * @param options - Optional configuration
+ * @param options.stateDir - Custom state directory
+ * @param options.loopPid - PID of the loop process
+ * @param options.totalTasks - Total number of tasks
+ * @returns The initialized execution state
+ */
+export function initializeExecutionState(
+  parentId: string,
+  parentTitle: string,
+  options?: {
+    stateDir?: string;
+    loopPid?: number;
+    totalTasks?: number;
+  }
+): ExecutionState {
+  const now = new Date().toISOString();
+
+  const state: ExecutionState = {
+    parentId,
+    parentTitle,
+    activeTasks: [],
+    completedTasks: [],
+    failedTasks: [],
+    startedAt: now,
+    updatedAt: now,
+    loopPid: options?.loopPid,
+    totalTasks: options?.totalTasks,
+  };
+
+  writeExecutionState(state, options?.stateDir);
+  return state;
+}
+
+/**
+ * Update execution state with a task starting
+ */
+export function addActiveTask(
+  state: ExecutionState,
+  task: ActiveTask,
+  stateDir?: string
+): ExecutionState {
+  const newState: ExecutionState = {
+    ...state,
+    activeTasks: [...state.activeTasks, task],
+  };
+
+  writeExecutionState(newState, stateDir);
+  return newState;
+}
+
+/**
+ * Update execution state when a task completes
+ */
+export function completeTask(
+  state: ExecutionState,
+  taskId: string,
+  stateDir?: string
+): ExecutionState {
+  const newState: ExecutionState = {
+    ...state,
+    activeTasks: state.activeTasks.filter(t => t.id !== taskId),
+    completedTasks: [...state.completedTasks, taskId],
+  };
+
+  writeExecutionState(newState, stateDir);
+  return newState;
+}
+
+/**
+ * Update execution state when a task fails
+ */
+export function failTask(
+  state: ExecutionState,
+  taskId: string,
+  stateDir?: string
+): ExecutionState {
+  const newState: ExecutionState = {
+    ...state,
+    activeTasks: state.activeTasks.filter(t => t.id !== taskId),
+    failedTasks: [...state.failedTasks, taskId],
+  };
+
+  writeExecutionState(newState, stateDir);
+  return newState;
+}
+
+/**
+ * Remove active task without marking as completed or failed (for retries)
+ */
+export function removeActiveTask(
+  state: ExecutionState,
+  taskId: string,
+  stateDir?: string
+): ExecutionState {
+  const newState: ExecutionState = {
+    ...state,
+    activeTasks: state.activeTasks.filter(t => t.id !== taskId),
+  };
+
+  writeExecutionState(newState, stateDir);
+  return newState;
 }
 
 /**

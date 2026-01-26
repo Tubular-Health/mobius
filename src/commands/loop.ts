@@ -44,7 +44,15 @@ import {
   getRetryTasks,
   hasPermamentFailures,
 } from '../lib/execution-tracker.js';
+import {
+  initializeExecutionState,
+  addActiveTask,
+  completeTask,
+  failTask,
+  removeActiveTask,
+} from '../lib/execution-state.js';
 import type { SubTask } from '../lib/task-graph.js';
+import type { ExecutionState } from '../types.js';
 
 export interface LoopOptions {
   maxIterations?: number;
@@ -160,6 +168,29 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
   // Track tasks pending retry
   let retryQueue: SubTask[] = [];
 
+  // Initialize TUI execution state for file-based monitoring
+  let executionState: ExecutionState = initializeExecutionState(
+    taskId,
+    parentIssue.title,
+    {
+      stateDir: executionConfig.tui?.state_dir,
+      loopPid: process.pid,
+      totalTasks: graph.tasks.size,
+    }
+  );
+
+  // Pre-populate completedTasks with tasks already done in Linear
+  // This handles the case where we're called on an already-completed task
+  for (const task of graph.tasks.values()) {
+    if (task.status === 'done') {
+      executionState = completeTask(
+        executionState,
+        task.identifier,
+        executionConfig.tui?.state_dir
+      );
+    }
+  }
+
   try {
     // Main execution loop
     while (iteration < maxIterations) {
@@ -214,6 +245,21 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         assignTask(tracker, task);
       }
 
+      // Update execution state with active tasks (for TUI monitoring)
+      for (const task of tasksToExecute) {
+        executionState = addActiveTask(
+          executionState,
+          {
+            id: task.identifier,
+            pid: 0, // Will be updated when process spawns
+            pane: `%${tasksToExecute.indexOf(task)}`,
+            startedAt: new Date().toISOString(),
+            worktree: worktreeInfo.path,
+          },
+          executionConfig.tui?.state_dir
+        );
+      }
+
       // Update status pane
       const loopStatus: LoopStatus = {
         totalTasks: stats.total,
@@ -251,14 +297,31 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         )
       );
 
-      // Update graph for verified successes only
+      // Update graph and execution state for verified results
       for (const result of verifiedResults) {
         if (result.success && result.linearVerified) {
           graph = updateTaskStatus(graph, result.taskId, 'done');
+          executionState = completeTask(
+            executionState,
+            result.identifier,
+            executionConfig.tui?.state_dir
+          );
           console.log(chalk.green(`  ✓ ${result.identifier} (Linear: ${result.linearStatus})`));
         } else if (result.shouldRetry) {
+          // Remove from active tasks for retry (will be re-added next iteration)
+          executionState = removeActiveTask(
+            executionState,
+            result.identifier,
+            executionConfig.tui?.state_dir
+          );
           console.log(chalk.yellow(`  ↻ ${result.identifier}: Retrying (${result.error ?? 'verification pending'})`));
         } else {
+          // Permanent failure
+          executionState = failTask(
+            executionState,
+            result.identifier,
+            executionConfig.tui?.state_dir
+          );
           console.log(chalk.red(`  ✗ ${result.identifier}: ${result.error ?? result.status}`));
         }
       }
