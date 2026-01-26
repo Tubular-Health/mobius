@@ -7,10 +7,16 @@
  * Uses fs.watch() for instant file change detection with debouncing.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, watch, type FSWatcher } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync, watch, type FSWatcher } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ActiveTask, CompletedTask, ExecutionState } from '../types.js';
+
+/** Lock file timeout in milliseconds - how long to wait for lock acquisition */
+const LOCK_TIMEOUT_MS = 5000;
+
+/** Lock retry interval in milliseconds */
+const LOCK_RETRY_INTERVAL_MS = 10;
 
 /** Default state directory */
 const DEFAULT_STATE_DIR = join(homedir(), '.mobius', 'state');
@@ -238,6 +244,206 @@ export function writeExecutionState(
 }
 
 /**
+ * Get the lock file path for a state file
+ *
+ * @param filePath - Path to the state file
+ * @returns Path to the lock file
+ */
+function getLockFilePath(filePath: string): string {
+  return `${filePath}.lock`;
+}
+
+/**
+ * Check if a lock file is stale (older than timeout)
+ *
+ * @param lockPath - Path to the lock file
+ * @returns true if lock is stale and can be forcibly acquired
+ */
+function isLockStale(lockPath: string): boolean {
+  try {
+    const content = readFileSync(lockPath, 'utf-8');
+    const lockTime = parseInt(content, 10);
+    if (isNaN(lockTime)) return true;
+    return Date.now() - lockTime > LOCK_TIMEOUT_MS;
+  } catch {
+    // Lock file doesn't exist or can't be read - consider it stale
+    return true;
+  }
+}
+
+/**
+ * Attempt to acquire an exclusive lock on the state file
+ *
+ * Uses a simple lock file mechanism with timestamp for stale lock detection.
+ *
+ * @param filePath - Path to the state file to lock
+ * @returns true if lock was acquired, false otherwise
+ */
+function tryAcquireLock(filePath: string): boolean {
+  const lockPath = getLockFilePath(filePath);
+
+  try {
+    // Check if lock file exists
+    if (existsSync(lockPath)) {
+      // Check if it's stale (process crashed without releasing)
+      if (isLockStale(lockPath)) {
+        // Force remove stale lock
+        try {
+          unlinkSync(lockPath);
+        } catch {
+          // Another process may have removed it, continue
+        }
+      } else {
+        // Lock is held by another process
+        return false;
+      }
+    }
+
+    // Try to create lock file with exclusive flag
+    // Write current timestamp for stale detection
+    writeFileSync(lockPath, Date.now().toString(), { flag: 'wx' });
+    return true;
+  } catch {
+    // Lock file was created by another process between our check and write
+    return false;
+  }
+}
+
+/**
+ * Release the lock on a state file
+ *
+ * @param filePath - Path to the state file to unlock
+ */
+function releaseLock(filePath: string): void {
+  const lockPath = getLockFilePath(filePath);
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    // Lock may have been force-removed due to staleness, ignore
+  }
+}
+
+/**
+ * Sleep for a specified number of milliseconds
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Acquire a lock with retry and timeout
+ *
+ * @param filePath - Path to the state file to lock
+ * @returns Promise that resolves when lock is acquired
+ * @throws Error if lock cannot be acquired within timeout
+ */
+async function acquireLock(filePath: string): Promise<void> {
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < LOCK_TIMEOUT_MS) {
+    if (tryAcquireLock(filePath)) {
+      return;
+    }
+    await sleep(LOCK_RETRY_INTERVAL_MS);
+  }
+
+  throw new Error(`Failed to acquire lock on ${filePath} within ${LOCK_TIMEOUT_MS}ms`);
+}
+
+/**
+ * Execute a state mutation atomically with read-modify-write pattern
+ *
+ * This function:
+ * 1. Acquires an exclusive lock on the state file
+ * 2. Reads the current state from disk
+ * 3. Applies the mutation function to get the new state
+ * 4. Writes the new state atomically (tmp file + rename)
+ * 5. Releases the lock
+ *
+ * This ensures that concurrent state updates don't lose changes.
+ *
+ * @param parentId - Parent issue identifier (e.g., "MOB-11")
+ * @param mutate - Function that takes current state and returns new state
+ * @param stateDir - Optional custom state directory
+ * @returns The new state after mutation
+ * @throws Error if lock cannot be acquired or mutation fails
+ */
+export async function withExecutionState(
+  parentId: string,
+  mutate: (state: ExecutionState | null) => ExecutionState,
+  stateDir?: string
+): Promise<ExecutionState> {
+  ensureStateDir(stateDir);
+  const filePath = getStateFilePath(parentId, stateDir);
+
+  await acquireLock(filePath);
+
+  try {
+    // Read current state (may be null if file doesn't exist)
+    const currentState = readExecutionState(parentId, stateDir);
+
+    // Apply mutation
+    const newState = mutate(currentState);
+
+    // Write atomically
+    writeExecutionState(newState, stateDir);
+
+    return newState;
+  } finally {
+    releaseLock(filePath);
+  }
+}
+
+/**
+ * Synchronous version of withExecutionState for backwards compatibility
+ *
+ * Uses busy-wait for lock acquisition. Prefer the async version when possible.
+ *
+ * @param parentId - Parent issue identifier (e.g., "MOB-11")
+ * @param mutate - Function that takes current state and returns new state
+ * @param stateDir - Optional custom state directory
+ * @returns The new state after mutation
+ * @throws Error if lock cannot be acquired or mutation fails
+ */
+export function withExecutionStateSync(
+  parentId: string,
+  mutate: (state: ExecutionState | null) => ExecutionState,
+  stateDir?: string
+): ExecutionState {
+  ensureStateDir(stateDir);
+  const filePath = getStateFilePath(parentId, stateDir);
+  const startTime = Date.now();
+
+  // Busy-wait for lock acquisition
+  while (Date.now() - startTime < LOCK_TIMEOUT_MS) {
+    if (tryAcquireLock(filePath)) {
+      try {
+        // Read current state (may be null if file doesn't exist)
+        const currentState = readExecutionState(parentId, stateDir);
+
+        // Apply mutation
+        const newState = mutate(currentState);
+
+        // Write atomically
+        writeExecutionState(newState, stateDir);
+
+        return newState;
+      } finally {
+        releaseLock(filePath);
+      }
+    }
+
+    // Busy wait - use a small delay to reduce CPU usage
+    const endTime = Date.now() + LOCK_RETRY_INTERVAL_MS;
+    while (Date.now() < endTime) {
+      // Spin
+    }
+  }
+
+  throw new Error(`Failed to acquire lock on ${filePath} within ${LOCK_TIMEOUT_MS}ms`);
+}
+
+/**
  * Initialize a new execution state for a parent issue
  *
  * @param parentId - Parent issue identifier (e.g., "MOB-11")
@@ -277,100 +483,132 @@ export function initializeExecutionState(
 
 /**
  * Update execution state with a task starting
+ *
+ * Uses atomic read-modify-write to prevent race conditions in concurrent scenarios.
+ * The passed state is used for parentId extraction only; fresh state is read from disk.
  */
 export function addActiveTask(
   state: ExecutionState,
   task: ActiveTask,
   stateDir?: string
 ): ExecutionState {
-  const newState: ExecutionState = {
-    ...state,
-    activeTasks: [...state.activeTasks, task],
-  };
-
-  writeExecutionState(newState, stateDir);
-  return newState;
+  return withExecutionStateSync(
+    state.parentId,
+    (currentState) => {
+      // Use fresh state from disk, falling back to passed state if file doesn't exist
+      const baseState = currentState ?? state;
+      return {
+        ...baseState,
+        activeTasks: [...baseState.activeTasks, task],
+      };
+    },
+    stateDir
+  );
 }
 
 /**
  * Update execution state when a task completes
+ *
+ * Uses atomic read-modify-write to prevent race conditions in concurrent scenarios.
+ * The passed state is used for parentId extraction only; fresh state is read from disk.
  */
 export function completeTask(
   state: ExecutionState,
   taskId: string,
   stateDir?: string
 ): ExecutionState {
-  const now = new Date();
-  const activeTask = state.activeTasks.find(t => t.id === taskId);
+  return withExecutionStateSync(
+    state.parentId,
+    (currentState) => {
+      // Use fresh state from disk, falling back to passed state if file doesn't exist
+      const baseState = currentState ?? state;
+      const now = new Date();
+      const activeTask = baseState.activeTasks.find(t => t.id === taskId);
 
-  // Calculate duration from task start time
-  const duration = activeTask
-    ? now.getTime() - new Date(activeTask.startedAt).getTime()
-    : 0;
+      // Calculate duration from task start time
+      const duration = activeTask
+        ? now.getTime() - new Date(activeTask.startedAt).getTime()
+        : 0;
 
-  const completedTask: CompletedTask = {
-    id: taskId,
-    completedAt: now.toISOString(),
-    duration,
-  };
+      const completedTask: CompletedTask = {
+        id: taskId,
+        completedAt: now.toISOString(),
+        duration,
+      };
 
-  const newState: ExecutionState = {
-    ...state,
-    activeTasks: state.activeTasks.filter(t => t.id !== taskId),
-    completedTasks: [...state.completedTasks, completedTask],
-  };
-
-  writeExecutionState(newState, stateDir);
-  return newState;
+      return {
+        ...baseState,
+        activeTasks: baseState.activeTasks.filter(t => t.id !== taskId),
+        completedTasks: [...baseState.completedTasks, completedTask],
+      };
+    },
+    stateDir
+  );
 }
 
 /**
  * Update execution state when a task fails
+ *
+ * Uses atomic read-modify-write to prevent race conditions in concurrent scenarios.
+ * The passed state is used for parentId extraction only; fresh state is read from disk.
  */
 export function failTask(
   state: ExecutionState,
   taskId: string,
   stateDir?: string
 ): ExecutionState {
-  const now = new Date();
-  const activeTask = state.activeTasks.find(t => t.id === taskId);
+  return withExecutionStateSync(
+    state.parentId,
+    (currentState) => {
+      // Use fresh state from disk, falling back to passed state if file doesn't exist
+      const baseState = currentState ?? state;
+      const now = new Date();
+      const activeTask = baseState.activeTasks.find(t => t.id === taskId);
 
-  // Calculate duration from task start time
-  const duration = activeTask
-    ? now.getTime() - new Date(activeTask.startedAt).getTime()
-    : 0;
+      // Calculate duration from task start time
+      const duration = activeTask
+        ? now.getTime() - new Date(activeTask.startedAt).getTime()
+        : 0;
 
-  const failedTask: CompletedTask = {
-    id: taskId,
-    completedAt: now.toISOString(),
-    duration,
-  };
+      const failedTask: CompletedTask = {
+        id: taskId,
+        completedAt: now.toISOString(),
+        duration,
+      };
 
-  const newState: ExecutionState = {
-    ...state,
-    activeTasks: state.activeTasks.filter(t => t.id !== taskId),
-    failedTasks: [...state.failedTasks, failedTask],
-  };
-
-  writeExecutionState(newState, stateDir);
-  return newState;
+      return {
+        ...baseState,
+        activeTasks: baseState.activeTasks.filter(t => t.id !== taskId),
+        failedTasks: [...baseState.failedTasks, failedTask],
+      };
+    },
+    stateDir
+  );
 }
 
 /**
  * Remove active task without marking as completed or failed (for retries)
+ *
+ * Uses atomic read-modify-write to prevent race conditions in concurrent scenarios.
+ * The passed state is used for parentId extraction only; fresh state is read from disk.
  */
 export function removeActiveTask(
   state: ExecutionState,
   taskId: string,
   stateDir?: string
 ): ExecutionState {
-  const newState: ExecutionState = {
-    ...state,
-    activeTasks: state.activeTasks.filter(t => t.id !== taskId),
-  };
-
-  writeExecutionState(newState, stateDir);
-  return newState;
+  return withExecutionStateSync(
+    state.parentId,
+    (currentState) => {
+      // Use fresh state from disk, falling back to passed state if file doesn't exist
+      const baseState = currentState ?? state;
+      return {
+        ...baseState,
+        activeTasks: baseState.activeTasks.filter(t => t.id !== taskId),
+      };
+    },
+    stateDir
+  );
 }
 
 /**
@@ -378,6 +616,9 @@ export function removeActiveTask(
  *
  * Used to set the real tmux pane ID after executeParallel() returns,
  * replacing the initial empty string placeholder.
+ *
+ * Uses atomic read-modify-write to prevent race conditions in concurrent scenarios.
+ * The passed state is used for parentId extraction only; fresh state is read from disk.
  *
  * @param state - Current execution state
  * @param taskId - Task identifier (e.g., "MOB-124")
@@ -391,15 +632,20 @@ export function updateActiveTaskPane(
   paneId: string,
   stateDir?: string
 ): ExecutionState {
-  const newState: ExecutionState = {
-    ...state,
-    activeTasks: state.activeTasks.map(task =>
-      task.id === taskId ? { ...task, pane: paneId } : task
-    ),
-  };
-
-  writeExecutionState(newState, stateDir);
-  return newState;
+  return withExecutionStateSync(
+    state.parentId,
+    (currentState) => {
+      // Use fresh state from disk, falling back to passed state if file doesn't exist
+      const baseState = currentState ?? state;
+      return {
+        ...baseState,
+        activeTasks: baseState.activeTasks.map(task =>
+          task.id === taskId ? { ...task, pane: paneId } : task
+        ),
+      };
+    },
+    stateDir
+  );
 }
 
 /**
