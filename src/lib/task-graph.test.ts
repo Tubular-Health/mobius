@@ -209,7 +209,7 @@ describe('getReadyTasks', () => {
     expect(ready[0].identifier).toBe('MOB-2');
   });
 
-  it('returns empty array when all tasks are blocked', () => {
+  it('returns in_progress tasks as ready (for resume capability)', () => {
     const issues: LinearIssue[] = [
       createMockIssue('id-1', 'MOB-1', 'Task 1', 'In Progress'),
       createMockIssue('id-2', 'MOB-2', 'Task 2', 'Backlog', [{ id: 'id-1', identifier: 'MOB-1' }]),
@@ -219,8 +219,11 @@ describe('getReadyTasks', () => {
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const ready = getReadyTasks(graph);
 
-    // Only MOB-1 is not blocked, but it's in_progress, not ready
-    expect(ready.length).toBe(0);
+    // MOB-1 is in_progress and should be returned as ready (allows resuming)
+    // MOB-2 and MOB-3 are blocked
+    expect(ready.length).toBe(1);
+    expect(ready[0].identifier).toBe('MOB-1');
+    expect(ready[0].status).toBe('in_progress');
   });
 
   it('returns empty array when all tasks are done', () => {

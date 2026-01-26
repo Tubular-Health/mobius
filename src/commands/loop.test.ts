@@ -461,9 +461,9 @@ describe('loop integration: edge cases', () => {
     expect(getReadyTasks(graph).length).toBe(0);
   });
 
-  it('handles all tasks blocked scenario', () => {
-    // Circular dependency (shouldn't happen in practice, but test robustness)
-    const circularTasks: LinearIssue[] = [
+  it('handles in_progress task with blocked dependents', () => {
+    // Chain where first task is in progress, rest are blocked
+    const chainTasks: LinearIssue[] = [
       createMockLinearIssue('id-1', 'MOB-401', 'Task 1', 'In Progress'),
       createMockLinearIssue('id-2', 'MOB-402', 'Task 2', 'Backlog', [
         { id: 'id-1', identifier: 'MOB-401' },
@@ -473,10 +473,12 @@ describe('loop integration: edge cases', () => {
       ]),
     ];
 
-    const graph = buildTaskGraph('parent-id', 'MOB-400', circularTasks);
+    const graph = buildTaskGraph('parent-id', 'MOB-400', chainTasks);
 
-    // MOB-401 is in progress, MOB-402 and MOB-403 are blocked
-    expect(getReadyTasks(graph).length).toBe(0);
+    // MOB-401 is in_progress and returned as ready (for resume capability)
+    // MOB-402 and MOB-403 are blocked
+    expect(getReadyTasks(graph).length).toBe(1);
+    expect(getReadyTasks(graph)[0].identifier).toBe('MOB-401');
     expect(getBlockedTasks(graph).length).toBe(2);
   });
 

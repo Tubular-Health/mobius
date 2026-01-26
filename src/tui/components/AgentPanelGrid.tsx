@@ -14,8 +14,10 @@ export interface AgentPanelGridProps {
   activeTasks: ActiveTask[];
   maxPanels?: number; // default: 4
   panelLines?: number; // default: 8
-  /** Pre-fetched output lines per task (keyed by task id) */
-  panelOutputs?: Map<string, string[]>;
+  /** Elapsed time per task (keyed by task id) */
+  taskElapsedMs?: Map<string, number>;
+  /** Process health per task (keyed by task id) */
+  taskProcessHealth?: Map<string, boolean>;
 }
 
 /**
@@ -24,16 +26,20 @@ export interface AgentPanelGridProps {
  *
  * Layout:
  * ┌─ MOB-126 ─────────────────┬─ MOB-128 ─────────────────┐
- * │ ⟳ Reading src/parser...   │ ⟳ Editing cli/commands... │
+ * │      ⠋ Running            │      ⠋ Running            │
+ * │      2m 34s               │      1m 12s               │
+ * │      Process: active      │      Process: active      │
  * ├───────────────────────────┼───────────────────────────┤
  * │ (available)               │ (available)               │
+ * │      Ready for work       │      Ready for work       │
  * └───────────────────────────┴───────────────────────────┘
  */
 export const AgentPanelGrid = memo(function AgentPanelGrid({
   activeTasks,
   maxPanels = 4,
   panelLines = 8,
-  panelOutputs,
+  taskElapsedMs,
+  taskProcessHealth,
 }: AgentPanelGridProps): JSX.Element {
   // Create slots array with tasks or undefined for empty slots
   const slots: (ActiveTask | undefined)[] = [];
@@ -58,7 +64,8 @@ export const AgentPanelGrid = memo(function AgentPanelGrid({
               <AgentPanel
                 activeTask={task}
                 lines={panelLines}
-                outputLines={task ? panelOutputs?.get(task.id) : undefined}
+                elapsedMs={task ? taskElapsedMs?.get(task.id) : undefined}
+                isProcessAlive={task ? taskProcessHealth?.get(task.id) : undefined}
               />
             </Box>
           ))}
