@@ -97,7 +97,11 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
       parentId: taskId,
       graph: graph,
       config: tuiConfig,
-    })
+    }),
+    {
+      // Intercept console output to prevent it from breaking Ink's layout
+      patchConsole: true,
+    }
   );
 
   // 5. Handle cleanup on exit (SIGINT)

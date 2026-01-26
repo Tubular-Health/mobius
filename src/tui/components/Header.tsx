@@ -2,12 +2,13 @@
  * Header component for TUI dashboard
  *
  * Displays the MOBIUS ASCII art logo with Nord theme colors and runtime.
+ * Time display is driven by parent's tick to consolidate timers.
  */
 
 import { Box, Text } from 'ink';
-import { memo, useState, useEffect } from 'react';
+import { memo } from 'react';
 import { FROST } from '../theme.js';
-import { formatDuration, getElapsedMs } from '../utils/formatDuration.js';
+import { formatDuration } from '../utils/formatDuration.js';
 
 const LOGO_LINES = [
   '███╗   ███╗ ██████╗ ██████╗ ██╗██╗   ██╗███████╗',
@@ -20,33 +21,17 @@ const LOGO_LINES = [
 
 export interface HeaderProps {
   parentId?: string;
-  startedAt?: string;
+  /** Elapsed time in milliseconds - calculated by parent to consolidate timers */
+  elapsedMs?: number;
 }
 
 /**
  * Header component - displays MOBIUS logo and runtime
  * Memoized to prevent unnecessary re-renders when props haven't changed.
+ * No internal timer - elapsed time is passed from parent's consolidated tick.
  */
-export const Header = memo(function Header({ parentId, startedAt }: HeaderProps): JSX.Element {
-  const [elapsed, setElapsed] = useState<number>(
-    startedAt ? getElapsedMs(startedAt) : 0
-  );
-
-  // Update elapsed time every second
-  useEffect(() => {
-    if (!startedAt) return;
-
-    // Initial calculation
-    setElapsed(getElapsedMs(startedAt));
-
-    const interval = setInterval(() => {
-      setElapsed(getElapsedMs(startedAt));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [startedAt]);
-
-  const runtimeDisplay = startedAt ? ` | Runtime: ${formatDuration(elapsed)}` : '';
+export const Header = memo(function Header({ parentId, elapsedMs }: HeaderProps): JSX.Element {
+  const runtimeDisplay = elapsedMs !== undefined ? ` | Runtime: ${formatDuration(elapsedMs)}` : '';
 
   return (
     <Box flexDirection="column" alignItems="center" marginBottom={1}>

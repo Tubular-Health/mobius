@@ -354,6 +354,58 @@ export function removeActiveTask(
 }
 
 /**
+ * Compare active task arrays for equality (by id and startedAt)
+ */
+function activeTasksEqual(a: ActiveTask[], b: ActiveTask[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].startedAt !== b[i].startedAt) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Compare completed/failed task arrays for equality (by id)
+ */
+function completedTasksEqual(
+  a: (string | CompletedTask)[],
+  b: (string | CompletedTask)[]
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const aId = getCompletedTaskId(a[i]);
+    const bId = getCompletedTaskId(b[i]);
+    if (aId !== bId) return false;
+  }
+  return true;
+}
+
+/**
+ * Check if execution state content has actually changed
+ * Ignores updatedAt timestamp to prevent unnecessary re-renders
+ */
+function hasContentChanged(
+  oldState: ExecutionState | null,
+  newState: ExecutionState | null
+): boolean {
+  // Handle null cases
+  if (oldState === null && newState === null) return false;
+  if (oldState === null || newState === null) return true;
+
+  // Compare actual content, not timestamps
+  if (!activeTasksEqual(oldState.activeTasks, newState.activeTasks)) return true;
+  if (!completedTasksEqual(oldState.completedTasks, newState.completedTasks)) return true;
+  if (!completedTasksEqual(oldState.failedTasks, newState.failedTasks)) return true;
+
+  // Check loopPid change (for exit handling)
+  if (oldState.loopPid !== newState.loopPid) return true;
+
+  return false;
+}
+
+/**
  * Watch the execution state file for changes
  *
  * Uses fs.watch() for instant file change detection with 50ms debouncing.
@@ -400,9 +452,9 @@ export function watchExecutionState(
         debounceTimer = null;
         const newState = readExecutionState(parentId, stateDir);
 
-        // Only call callback if state actually changed
-        // (compare by updatedAt timestamp to avoid unnecessary re-renders)
-        if (newState?.updatedAt !== lastState?.updatedAt || newState === null !== (lastState === null)) {
+        // Only call callback if actual content changed (not just updatedAt timestamp)
+        // This prevents unnecessary re-renders when only the timestamp changes
+        if (hasContentChanged(lastState, newState)) {
           lastState = newState;
           callback(newState);
         }

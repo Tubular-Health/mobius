@@ -3,16 +3,17 @@
  *
  * Renders a single task node in the tree with proper status icon,
  * identifier, title, runtime, and blocked-by suffix. Uses Nord colors based on status.
+ * Time display is driven by parent's tick to consolidate timers.
  */
 
 import { Text } from 'ink';
-import { memo, useState, useEffect } from 'react';
+import { memo } from 'react';
 import type { SubTask, TaskGraph } from '../../lib/task-graph.js';
 import { getBlockers } from '../../lib/task-graph.js';
-import type { ActiveTask, CompletedTask } from '../../types.js';
+import type { CompletedTask } from '../../types.js';
 import { STRUCTURE_COLORS } from '../theme.js';
 import { StatusIndicator } from './StatusIndicator.js';
-import { formatDuration, getElapsedMs } from '../utils/formatDuration.js';
+import { formatDuration } from '../utils/formatDuration.js';
 
 export interface TaskNodeProps {
   task: SubTask;
@@ -20,7 +21,8 @@ export interface TaskNodeProps {
   prefix: string;     // Box-drawing characters for indentation
   connector: string;  // "├── " or "└── "
   completedTaskInfo?: CompletedTask;  // Timing info for completed/failed tasks
-  activeTaskInfo?: ActiveTask;        // Timing info for in-progress tasks
+  /** Elapsed time in ms for active tasks - calculated by parent to consolidate timers */
+  activeElapsedMs?: number;
 }
 
 /**
@@ -47,15 +49,14 @@ function formatBlockerSuffix(task: SubTask, graph: TaskGraph): string {
  */
 function formatRuntimeSuffix(
   completedTaskInfo?: CompletedTask,
-  activeTaskInfo?: ActiveTask,
-  elapsed?: number
+  activeElapsedMs?: number
 ): string {
   if (completedTaskInfo && completedTaskInfo.duration > 0) {
     return ` (${formatDuration(completedTaskInfo.duration)})`;
   }
 
-  if (activeTaskInfo && elapsed !== undefined) {
-    return ` (${formatDuration(elapsed)}...)`;
+  if (activeElapsedMs !== undefined) {
+    return ` (${formatDuration(activeElapsedMs)}...)`;
   }
 
   return '';
@@ -64,6 +65,7 @@ function formatRuntimeSuffix(
 /**
  * TaskNode component renders a single task in the dependency tree.
  * Memoized to prevent unnecessary re-renders when props haven't changed.
+ * No internal timer - elapsed time is passed from parent's consolidated tick.
  *
  * Output format examples:
  * - ├── [✓] MOB-124: Setup base types (2m 34s)
@@ -76,29 +78,10 @@ export const TaskNode = memo(function TaskNode({
   prefix,
   connector,
   completedTaskInfo,
-  activeTaskInfo,
+  activeElapsedMs,
 }: TaskNodeProps): JSX.Element {
   const blockerSuffix = formatBlockerSuffix(task, graph);
-
-  // For active tasks, track elapsed time with live updates
-  const [elapsed, setElapsed] = useState<number>(
-    activeTaskInfo ? getElapsedMs(activeTaskInfo.startedAt) : 0
-  );
-
-  useEffect(() => {
-    if (!activeTaskInfo) return;
-
-    // Initial calculation
-    setElapsed(getElapsedMs(activeTaskInfo.startedAt));
-
-    const interval = setInterval(() => {
-      setElapsed(getElapsedMs(activeTaskInfo.startedAt));
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [activeTaskInfo]);
-
-  const runtimeSuffix = formatRuntimeSuffix(completedTaskInfo, activeTaskInfo, elapsed);
+  const runtimeSuffix = formatRuntimeSuffix(completedTaskInfo, activeElapsedMs);
 
   return (
     <Text>
