@@ -5,7 +5,9 @@ import { program } from 'commander';
 import { doctor } from '../commands/doctor.js';
 import { setup } from '../commands/setup.js';
 import { run } from '../commands/run.js';
+import { loop } from '../commands/loop.js';
 import { showConfig } from '../commands/config.js';
+import { submit } from '../commands/submit.js';
 import type { Backend, Model } from '../types.js';
 
 const require = createRequire(import.meta.url);
@@ -41,7 +43,7 @@ program
 
 program
   .command('run <task-id> [max-iterations]')
-  .description('Execute sub-tasks of an issue')
+  .description('Execute sub-tasks sequentially (use "loop" for parallel execution)')
   .option('-l, --local', 'Run locally (bypass container sandbox)')
   .option('-b, --backend <backend>', 'Backend: linear or jira')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
@@ -56,15 +58,50 @@ program
     });
   });
 
-// Default command: treat first arg as task ID if no command specified
 program
-  .argument('[task-id]', 'Task ID to execute (shorthand for "run")')
-  .argument('[max-iterations]', 'Maximum iterations')
+  .command('loop <task-id>')
+  .description('Execute sub-tasks with parallel execution and worktree isolation')
   .option('-l, --local', 'Run locally (bypass container sandbox)')
   .option('-b, --backend <backend>', 'Backend: linear or jira')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
-  .option('-d, --delay <seconds>', 'Delay between iterations', parseInt)
-  .action(async (taskId: string | undefined, maxIterations: string | undefined, options) => {
+  .option('-p, --parallel <count>', 'Max parallel agents (overrides config)', parseInt)
+  .option('-n, --max-iterations <count>', 'Maximum iterations', parseInt)
+  .action(async (taskId: string, options) => {
+    await loop(taskId, {
+      local: options.local,
+      backend: options.backend as Backend | undefined,
+      model: options.model as Model | undefined,
+      parallel: options.parallel,
+      maxIterations: options.maxIterations,
+    });
+  });
+
+program
+  .command('submit <task-id>')
+  .description('Create a pull request for a completed task')
+  .option('-b, --backend <backend>', 'Backend: linear or jira')
+  .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
+  .option('-d, --draft', 'Create as draft PR')
+  .action(async (taskId: string, options) => {
+    await submit(taskId, {
+      backend: options.backend as Backend | undefined,
+      model: options.model as Model | undefined,
+      draft: options.draft,
+    });
+  });
+
+// Default command: treat first arg as task ID if no command specified
+// Uses parallel loop by default, --sequential falls back to run command
+program
+  .argument('[task-id]', 'Task ID to execute (uses parallel loop by default)')
+  .option('-l, --local', 'Run locally (bypass container sandbox)')
+  .option('-b, --backend <backend>', 'Backend: linear or jira')
+  .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
+  .option('-s, --sequential', 'Use sequential execution instead of parallel')
+  .option('-p, --parallel <count>', 'Max parallel agents (overrides config)', parseInt)
+  .option('-n, --max-iterations <count>', 'Maximum iterations', parseInt)
+  .option('-d, --delay <seconds>', 'Delay between iterations (sequential mode)', parseInt)
+  .action(async (taskId: string | undefined, options) => {
     // If no task ID, show help
     if (!taskId) {
       program.help();
@@ -72,18 +109,28 @@ program
     }
 
     // If task ID looks like a command, let commander handle it
-    if (['setup', 'doctor', 'config', 'run', 'help'].includes(taskId)) {
+    if (['setup', 'doctor', 'config', 'run', 'loop', 'submit', 'help'].includes(taskId)) {
       return;
     }
 
-    // Otherwise, treat as task ID
-    const max = maxIterations ? parseInt(maxIterations, 10) : undefined;
-    await run(taskId, max, {
-      local: options.local,
-      backend: options.backend as Backend | undefined,
-      model: options.model as Model | undefined,
-      delay: options.delay,
-    });
+    // Use sequential mode if --sequential flag is set
+    if (options.sequential) {
+      await run(taskId, options.maxIterations, {
+        local: options.local,
+        backend: options.backend as Backend | undefined,
+        model: options.model as Model | undefined,
+        delay: options.delay,
+      });
+    } else {
+      // Default to parallel loop
+      await loop(taskId, {
+        local: options.local,
+        backend: options.backend as Backend | undefined,
+        model: options.model as Model | undefined,
+        parallel: options.parallel,
+        maxIterations: options.maxIterations,
+      });
+    }
   });
 
 program.parse();

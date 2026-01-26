@@ -36,6 +36,7 @@ npm install -g mobius-loop && mobius setup
 - [How It Works](#how-it-works)
 - [Quick Start](#quick-start)
 - [The Execution Loop](#the-execution-loop)
+- [Parallel Execution](#parallel-execution)
 - [Why Mobius?](#why-mobius)
 - [The 4 Skills](#the-4-skills)
 - [Configuration](#configuration)
@@ -150,6 +151,70 @@ do {
 
 ---
 
+## Parallel Execution
+
+Mobius supports parallel sub-task execution with git worktree isolation. When sub-tasks have no blocking dependencies, multiple Claude agents work simultaneously.
+
+### How It Works
+
+```
+mobius loop MOB-123
+    ↓
+1. Creates git worktree at ../mobius-worktrees/MOB-123/
+2. Creates feature branch off main
+3. Builds task dependency graph from Linear
+4. Spawns N parallel agents for unblocked tasks
+5. Agents share worktree, git operations serialized
+6. Loop continues until all tasks complete
+7. Worktree cleaned up on success
+```
+
+### Task Dependency Visualization
+
+Before execution, Mobius displays the task tree in your terminal:
+
+```
+Task Tree for MOB-123:
+├── [✓] MOB-124: Setup base types
+├── [✓] MOB-125: Create utility functions
+├── [→] MOB-126: Implement parser (blocked by: MOB-124, MOB-125)
+│   └── [·] MOB-127: Add tests (blocked by: MOB-126)
+├── [→] MOB-128: Build CLI interface (blocked by: MOB-125)
+└── [·] MOB-129: Integration tests (blocked by: MOB-126, MOB-128)
+
+Legend: [✓] Done  [→] Ready  [·] Blocked  [!] In Progress
+Ready for parallel execution: MOB-126, MOB-128 (2 agents)
+```
+
+A Mermaid diagram is also posted to the parent Linear issue for team visibility.
+
+### Commands
+
+```bash
+mobius loop MOB-123             # Parallel execution (default)
+mobius loop MOB-123 --parallel=5  # Override max parallel agents
+mobius MOB-123 --sequential     # Sequential execution (bash loop)
+```
+
+### Configuration
+
+| Option | Default | Environment Variable | Description |
+|--------|---------|---------------------|-------------|
+| `max_parallel_agents` | `3` | `MOBIUS_MAX_PARALLEL_AGENTS` | Maximum concurrent Claude agents (1-10) |
+| `worktree_path` | `../<repo>-worktrees/` | `MOBIUS_WORKTREE_PATH` | Base directory for worktrees |
+| `cleanup_on_success` | `true` | `MOBIUS_CLEANUP_ON_SUCCESS` | Auto-remove worktree on success |
+| `base_branch` | `main` | `MOBIUS_BASE_BRANCH` | Branch for feature branches |
+
+### Requirements
+
+- **tmux** - Required for parallel execution display
+  - macOS: `brew install tmux`
+  - Linux: `apt install tmux`
+
+If tmux is unavailable, use `--sequential` for bash-based execution.
+
+---
+
 ## Why Mobius?
 
 | Feature | Mobius | GSD | Beads |
@@ -251,6 +316,12 @@ execution:
   model: opus
   sandbox: true
   container_name: mobius-sandbox
+
+  # Parallel execution settings
+  max_parallel_agents: 3
+  worktree_path: "../<repo>-worktrees/"
+  cleanup_on_success: true
+  base_branch: "main"
 ```
 
 ### Environment Variables
@@ -263,6 +334,12 @@ export MOBIUS_DELAY_SECONDS=5
 export MOBIUS_MAX_ITERATIONS=100
 export MOBIUS_MODEL=sonnet
 export MOBIUS_SANDBOX_ENABLED=false
+
+# Parallel execution settings
+export MOBIUS_MAX_PARALLEL_AGENTS=5
+export MOBIUS_WORKTREE_PATH="../custom-worktrees/"
+export MOBIUS_CLEANUP_ON_SUCCESS=false
+export MOBIUS_BASE_BRANCH=develop
 ```
 
 ### Commands
@@ -361,6 +438,7 @@ execution:
 | **Node.js 18+** | For npm installation |
 | **Claude Code CLI** | Install from [claude.ai/code](https://claude.ai/code) |
 | **Linear account** | Primary supported backend; architecture supports additional backends |
+| **tmux** (optional) | Required for parallel execution; use `--sequential` without it |
 | **Docker** (optional) | For sandbox mode |
 
 ---
@@ -368,12 +446,18 @@ execution:
 ## CLI Reference
 
 ```bash
-mobius <issue-id> [iterations]   # Execute sub-tasks
-mobius ABC-123                   # Run until complete
+# Parallel execution (default)
+mobius loop ABC-123              # Run parallel loop until complete
+mobius loop ABC-123 --parallel=5 # Override max parallel agents
+mobius ABC-123                   # Alias for parallel loop
+
+# Sequential execution
+mobius ABC-123 --sequential      # Use bash sequential loop
 mobius ABC-123 10                # Limit to 10 iterations
 mobius ABC-123 --local           # Bypass sandbox
 mobius ABC-123 --model=sonnet    # Use specific model
 
+# Management commands
 mobius setup                     # Interactive setup wizard
 mobius config                    # Show configuration
 mobius config --edit             # Edit configuration
@@ -443,6 +527,40 @@ claude "/linear:execute ABC-123"
 ```
 
 Claude will retry the failed task.
+
+### tmux not found
+
+The parallel `loop` command requires tmux. Install it:
+```bash
+# macOS
+brew install tmux
+
+# Ubuntu/Debian
+apt install tmux
+```
+
+Or use sequential mode:
+```bash
+mobius ABC-123 --sequential
+```
+
+### Worktree already exists
+
+If a previous run was interrupted, the worktree may still exist:
+```bash
+# List worktrees
+git worktree list
+
+# Remove the stuck worktree
+git worktree remove ../mobius-worktrees/ABC-123
+```
+
+### Parallel agents failing
+
+If agents are failing in parallel mode:
+1. Check the tmux session for error output: `tmux attach -t mobius-ABC-123`
+2. Worktree is preserved on failure for debugging
+3. Review individual agent logs in the tmux panes
 
 </details>
 

@@ -23,6 +23,7 @@ Guidelines for autonomous execution:
 - If tests fail, fix them before moving to the next sub-task
 - When blocked, add a comment to the issue explaining the blocker
 - Prefer small, focused changes over large refactors
+- **After completing a sub-task:** Mark it as "Done" once the commit is pushed and expected work is complete
 
 ## Codebase Patterns
 
