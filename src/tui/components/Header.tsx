@@ -5,7 +5,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { FROST } from '../theme.js';
 import { formatDuration, getElapsedMs } from '../utils/formatDuration.js';
 
@@ -25,8 +25,9 @@ export interface HeaderProps {
 
 /**
  * Header component - displays MOBIUS logo and runtime
+ * Memoized to prevent unnecessary re-renders when props haven't changed.
  */
-export function Header({ parentId, startedAt }: HeaderProps): JSX.Element {
+export const Header = memo(function Header({ parentId, startedAt }: HeaderProps): JSX.Element {
   const [elapsed, setElapsed] = useState<number>(
     startedAt ? getElapsedMs(startedAt) : 0
   );
@@ -61,6 +62,6 @@ export function Header({ parentId, startedAt }: HeaderProps): JSX.Element {
       )}
     </Box>
   );
-}
+});
 
 export default Header;
