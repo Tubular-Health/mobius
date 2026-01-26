@@ -97,12 +97,12 @@ program
   });
 
 program
-  .command('submit <task-id>')
-  .description('Create a pull request for a completed task')
+  .command('submit [task-id]')
+  .description('Create a pull request (auto-detects issue from branch name if not specified)')
   .option('-b, --backend <backend>', 'Backend: linear or jira')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
   .option('-d, --draft', 'Create as draft PR')
-  .action(async (taskId: string, options) => {
+  .action(async (taskId: string | undefined, options) => {
     await submit(taskId, {
       backend: options.backend as Backend | undefined,
       model: options.model as Model | undefined,
