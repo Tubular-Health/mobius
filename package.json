@@ -1,6 +1,6 @@
 {
   "name": "mobius-loop",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "AI-Powered Development Workflow Tool - Execute Linear/Jira issues with Claude",
   "type": "module",
   "main": "dist/bin/mobius.js",
