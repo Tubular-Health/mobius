@@ -25,6 +25,8 @@ export interface ExecutionResult {
   status: 'SUBTASK_COMPLETE' | 'VERIFICATION_FAILED' | 'ERROR';
   duration: number;
   error?: string;
+  /** The tmux pane ID (e.g., "%0", "%1") where this agent executed */
+  pane?: string;
 }
 
 interface AgentHandle {
