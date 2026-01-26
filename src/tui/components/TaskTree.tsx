@@ -219,6 +219,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
 
 /**
  * TaskTree component renders the full dependency tree.
+ * Memoized to prevent re-renders when props haven't changed.
  *
  * Output format:
  * ```
@@ -231,7 +232,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
  * └── [·] MOB-129: Integration tests (blocked by: 126, 128)
  * ```
  */
-export function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element {
+export const TaskTree = memo(function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element {
   // Memoize expensive computations to avoid recalculating on every render
   const childrenMap = useMemo(() => buildChildrenMap(graph), [graph]);
   const rootTasks = useMemo(() => getRootTasks(graph), [graph]);
@@ -270,6 +271,6 @@ export function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element 
       })}
     </Box>
   );
-}
+});
 
 export default TaskTree;
