@@ -36,3 +36,17 @@ execution:
 
   # Docker container name for sandbox mode
   container_name: mobius-sandbox
+
+  # Parallel execution settings (for `mobius loop` command)
+
+  # Maximum concurrent Claude agents for parallel sub-task execution (1-10)
+  max_parallel_agents: 3
+
+  # Base directory for git worktrees (<repo> replaced with repository name at runtime)
+  worktree_path: "../<repo>-worktrees/"
+
+  # Automatically remove worktree after successful loop completion
+  cleanup_on_success: true
+
+  # Branch to create feature branches from when starting a loop
+  base_branch: "main"
