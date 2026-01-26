@@ -6,6 +6,7 @@
  */
 
 import { Box } from 'ink';
+import { memo } from 'react';
 import { AgentPanel } from './AgentPanel.js';
 import type { ActiveTask } from '../../types.js';
 
@@ -18,6 +19,7 @@ export interface AgentPanelGridProps {
 
 /**
  * AgentPanelGrid component - displays up to 4 agent panels in a 2x2 grid
+ * Memoized to prevent re-renders when props haven't changed.
  *
  * Layout:
  * ┌─ MOB-126 ─────────────────┬─ MOB-128 ─────────────────┐
@@ -26,7 +28,7 @@ export interface AgentPanelGridProps {
  * │ (available)               │ (available)               │
  * └───────────────────────────┴───────────────────────────┘
  */
-export function AgentPanelGrid({
+export const AgentPanelGrid = memo(function AgentPanelGrid({
   activeTasks,
   maxPanels = 4,
   panelLines = 8,
@@ -63,6 +65,6 @@ export function AgentPanelGrid({
       ))}
     </Box>
   );
-}
+});
 
 export default AgentPanelGrid;
