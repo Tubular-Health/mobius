@@ -7,6 +7,7 @@ import { checkCclean } from '../lib/checks/cclean.js';
 import { checkConfig } from '../lib/checks/config.js';
 import { checkPath, checkSkills } from '../lib/checks/path.js';
 import { checkLinearMcp } from '../lib/checks/linear-mcp.js';
+import { checkTmux } from '../lib/checks/tmux.js';
 import type { CheckResult } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
 
@@ -85,6 +86,10 @@ export async function doctor(): Promise<void> {
   const ccleanResult = await checkCclean();
   results.push(ccleanResult);
   console.log(formatResult(ccleanResult));
+
+  const tmuxResult = await checkTmux();
+  results.push(tmuxResult);
+  console.log(formatResult(tmuxResult));
 
   // Summary
   console.log('');
