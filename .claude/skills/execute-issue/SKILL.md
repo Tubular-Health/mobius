@@ -120,6 +120,162 @@ Each sub-task is designed to:
 - Have explicit blocking relationships
 </context>
 
+<checkpoint_system>
+**Checkpoint system enables recovery from interruptions** by saving structured state after each major phase.
+
+Checkpoints are only used for **non-trivial tasks** (estimated >5 minutes or involving multiple verification cycles). Skip checkpoints for simple single-file changes.
+
+<checkpoint_definitions>
+### Checkpoint 1: Context Priming Complete
+**Phase**: After loading parent issue, finding ready subtask, and loading dependency context
+**Marker**: `CHECKPOINT:PRIMED`
+**Saves**:
+- Parent issue ID and title
+- Selected subtask ID and title
+- Target file path
+- Completed dependency summaries (not full content)
+- Key patterns identified for implementation
+**Recovery**: Skip context loading, proceed directly to implementation
+
+### Checkpoint 2: Implementation Complete
+**Phase**: After implementing changes but before verification
+**Marker**: `CHECKPOINT:IMPLEMENTED`
+**Saves**:
+- List of modified files
+- Summary of changes made (not full diffs)
+- Staged files ready for verification
+- Implementation approach taken
+**Recovery**: Skip implementation, proceed to verification
+
+### Checkpoint 3: Verification Complete
+**Phase**: After all verification passes, ready to commit
+**Marker**: `CHECKPOINT:VERIFIED`
+**Saves**:
+- Verification results (typecheck, tests, lint)
+- Files ready to commit
+- Draft commit message
+**Recovery**: Skip verification, proceed directly to commit
+</checkpoint_definitions>
+
+<checkpoint_thresholds>
+**When to create checkpoints**:
+- Task description > 5 sentences
+- Multiple acceptance criteria (>3)
+- Target file > 200 lines
+- Previous attempt was interrupted (detected via existing checkpoint)
+
+**When to skip checkpoints**:
+- Simple single-criterion tasks
+- Small file changes (<50 lines)
+- Tasks marked as "quick fix" or "trivial"
+</checkpoint_thresholds>
+
+<save_checkpoint>
+**Add checkpoint comment to issue** after completing each phase.
+
+Use the backend-appropriate comment tool:
+- **Linear**: `mcp__plugin_linear_linear__create_comment`
+- **Jira**: `mcp__plugin_jira_jira__add_comment`
+
+**Checkpoint comment format** (structured for parsing):
+
+```markdown
+## Checkpoint: {CHECKPOINT_MARKER}
+
+**Timestamp**: {ISO-8601 timestamp}
+**Agent**: {agent-id or session-id if available}
+
+### State Summary
+{phase-specific state data as key-value pairs}
+
+### Files Involved
+- `{file1}` - {status: read/modified/staged}
+- `{file2}` - {status: read/modified/staged}
+
+### Next Phase
+{description of what the next phase should do}
+
+---
+CHECKPOINT:{MARKER}:{subtask-id}:{timestamp}
+```
+
+**Example checkpoint comments**:
+
+```markdown
+## Checkpoint: PRIMED
+
+**Timestamp**: 2024-01-15T14:30:00Z
+**Agent**: execute-loop-1
+
+### State Summary
+- parent_id: PROJ-100
+- subtask_id: PROJ-125
+- target_file: src/contexts/ThemeContext.tsx
+- change_type: Create
+- dependencies_loaded: PROJ-124
+
+### Files Involved
+- `src/types/theme.ts` - read (from dependency)
+
+### Next Phase
+Implement ThemeContext provider with light/dark/system modes
+
+---
+CHECKPOINT:PRIMED:PROJ-125:2024-01-15T14:30:00Z
+```
+
+**Important**:
+- Append new checkpoints; never delete previous ones (audit trail)
+- Include machine-parseable marker line at the end
+- Keep state summaries concise - metadata only, not full content
+</save_checkpoint>
+
+<resume_from_checkpoint>
+**Detect and resume from interrupted work** at the start of execution.
+
+**Detection steps**:
+1. After loading the subtask, list recent comments
+2. Search for comments containing `CHECKPOINT:` marker
+3. Parse the most recent checkpoint marker line
+
+**Checkpoint marker format**:
+```
+CHECKPOINT:{MARKER}:{subtask-id}:{timestamp}
+```
+
+**Resume logic by marker**:
+
+| Marker | Resume Action |
+|--------|---------------|
+| `PRIMED` | Skip context loading, read state summary, proceed to implementation |
+| `IMPLEMENTED` | Skip implementation, verify files from state, proceed to verification |
+| `VERIFIED` | Skip verification, use saved commit message, proceed to commit |
+
+**Resume validation**:
+Before resuming, validate the checkpoint is still valid:
+1. Check that mentioned files still exist
+2. Verify git status matches expected state (staged files, no unexpected changes)
+3. If validation fails, discard checkpoint and start fresh
+
+**Resume comment** (add when resuming):
+```markdown
+## Resuming from Checkpoint
+
+**Previous checkpoint**: {MARKER} at {timestamp}
+**Validation**: PASSED
+**Skipping phases**: {list of skipped phases}
+
+Continuing from {phase name}...
+```
+
+**When NOT to resume**:
+- Checkpoint is >24 hours old
+- Files mentioned in checkpoint were modified outside this workflow
+- Subtask description has changed since checkpoint
+- User explicitly requests fresh start
+</resume_from_checkpoint>
+</checkpoint_system>
+
 <quick_start>
 <invocation>
 Pass an issue ID (either parent or subtask):
@@ -140,11 +296,12 @@ When running in parallel mode, each agent receives a specific subtask ID to prev
 5. **Mark In Progress** - Move sub-task to "In Progress" immediately before starting work
 6. **Prime context** - Load completed dependent tasks for implementation context
 7. **Implement changes** - Execute the single-file-focused work
-8. **Verify** - Run tests, typecheck, and lint
+8. **Verify standard** - Run tests, typecheck, and lint
 9. **Fix if needed** - Attempt automatic fixes on verification failures
-10. **Commit and push** - Create commit with conventional message, push
-11. **Update status** - Move sub-task to "Done" if all criteria met
-12. **Report completion** - Show what was done and what's next
+10. **Verify sub-task** - Execute `### Verify` command from sub-task if present (with safety checks)
+11. **Commit and push** - Create commit with conventional message, push
+12. **Update status** - Move sub-task to "Done" if all criteria met
+13. **Report completion** - Show what was done and what's next
 </workflow>
 </quick_start>
 
@@ -324,6 +481,154 @@ If you discover issues outside scope:
 </scope_discipline>
 </implementation_phase>
 
+<tdd_option>
+**Test-Driven Development workflow is optional** and should be used when explicitly requested or when sub-tasks have highly testable acceptance criteria.
+
+<when_to_use>
+**Use TDD when ANY of these apply**:
+
+1. **Explicit directive**: Sub-task description contains "Use TDD" or "TDD workflow"
+2. **Complex business logic**: Algorithm implementations, data transformations, validation rules
+3. **Refactoring existing code**: When changing implementation while preserving behavior
+4. **Bug fixes with reproducible steps**: Write test that reproduces bug first
+5. **Well-defined input/output**: Functions with clear contracts and edge cases
+
+**Skip TDD when**:
+- Simple configuration changes
+- UI/layout modifications without logic
+- Adding imports or wiring up existing components
+- Documentation-only changes
+- Sub-task explicitly says "Do NOT use TDD"
+
+**Detection heuristic**: If sub-task has >3 specific, testable acceptance criteria (not just "implement X"), consider TDD.
+</when_to_use>
+
+<tdd_workflow>
+When TDD is appropriate, follow the **red-green-refactor** cycle instead of the standard implementation flow:
+
+### Red Phase: Write Failing Tests First
+
+1. **Analyze acceptance criteria** - Convert each criterion to a test case
+2. **Create/update test file** - Write tests that define expected behavior
+3. **Run tests to confirm failure** - Tests MUST fail (proves tests are meaningful)
+4. **Commit failing tests** (optional) - Some teams prefer this for traceability
+
+```bash
+# Example: Run tests to verify they fail
+just test-file {test-file-pattern}
+# Expected: Tests should FAIL at this point
+```
+
+**Red phase checklist**:
+- [ ] Each acceptance criterion has a corresponding test
+- [ ] Tests cover edge cases mentioned in sub-task
+- [ ] Tests are isolated and independent
+- [ ] Tests fail for the right reason (missing implementation, not syntax errors)
+
+### Green Phase: Implement Minimal Code to Pass
+
+1. **Focus on passing tests** - Write just enough code to make tests green
+2. **Don't optimize prematurely** - Correctness first, elegance later
+3. **Run tests after each change** - Verify progress incrementally
+4. **All tests must pass** before proceeding
+
+```bash
+# Verify tests pass
+just test-file {test-file-pattern}
+# Expected: All tests should PASS
+```
+
+**Green phase checklist**:
+- [ ] All previously failing tests now pass
+- [ ] No new test failures introduced
+- [ ] Implementation addresses acceptance criteria
+- [ ] Code compiles without type errors
+
+### Refactor Phase: Improve Code Quality
+
+1. **Clean up implementation** - Remove duplication, improve naming
+2. **Maintain passing tests** - Run tests after each refactor step
+3. **Apply code patterns** - Match existing codebase conventions
+4. **Don't add new behavior** - Only restructure existing code
+
+```bash
+# Verify tests still pass after refactoring
+just test-file {test-file-pattern}
+# Expected: All tests should still PASS
+```
+
+**Refactor phase checklist**:
+- [ ] Code follows project patterns and conventions
+- [ ] No code duplication
+- [ ] Clear naming and structure
+- [ ] All tests still pass
+- [ ] Typecheck passes
+</tdd_workflow>
+
+<tdd_vs_standard_flow>
+**When to use each approach**:
+
+| Scenario | Approach | Why |
+|----------|----------|-----|
+| "Use TDD" in description | TDD | Explicit request |
+| Algorithm implementation | TDD | Complex logic benefits from test-first |
+| Bug fix with repro steps | TDD | Test captures the bug |
+| UI component wiring | Standard | Tests come after implementation |
+| Config/env changes | Standard | Not meaningfully testable |
+| >3 testable criteria | Consider TDD | High specificity suggests test-first value |
+
+**Switching mid-task**: If you start with standard flow and realize TDD would help, you can switch. Write tests for remaining criteria, verify they fail, then continue with green-refactor.
+</tdd_vs_standard_flow>
+
+<tdd_commit_strategy>
+**Commit points in TDD workflow**:
+
+Option A: Single commit at end (recommended for small sub-tasks)
+- Complete full red-green-refactor cycle
+- Single commit with all changes
+
+Option B: Multiple commits (for larger sub-tasks)
+- Commit 1: Failing tests (optional, documents intent)
+- Commit 2: Passing implementation + refactored code
+
+**Commit message for TDD**:
+```
+feat(scope): implement feature using TDD
+
+Red: Added tests for {criteria}
+Green: Implemented {functionality}
+Refactor: {what was cleaned up}
+
+Implements: {sub-task-id}
+Part-of: {parent-issue-id}
+```
+</tdd_commit_strategy>
+
+<tdd_anti_patterns>
+**Avoid these TDD mistakes**:
+
+- **Testing implementation details**: Test behavior, not internal structure
+  - BAD: `expect(obj._privateMethod).toBeCalled()`
+  - GOOD: `expect(result).toEqual(expectedOutput)`
+
+- **Writing tests that can't fail**: Tests must be meaningful
+  - BAD: `expect(true).toBe(true)`
+  - GOOD: `expect(calculate(input)).toBe(expectedResult)`
+
+- **Skipping the refactor phase**: Refactoring is essential for maintainability
+  - BAD: Green tests → commit immediately
+  - GOOD: Green tests → refactor → verify still green → commit
+
+- **Over-testing**: Don't test framework behavior or trivial code
+  - BAD: Testing that React renders a div
+  - GOOD: Testing that component displays correct data
+
+- **Forcing TDD on unsuitable tasks**: Not everything benefits from test-first
+  - BAD: TDD for a CSS color change
+  - GOOD: Standard flow for styling, TDD for logic
+</tdd_anti_patterns>
+</tdd_option>
+
 <verification_phase>
 <full_validation>
 Run all three verification steps:
@@ -410,9 +715,165 @@ All checks must pass before proceeding:
 - Tests: PASS (X tests, Y assertions)
 - Lint: PASS
 
-Ready to commit.
+Ready for sub-task verify command (if present).
 ```
 </verification_success>
+
+<subtask_verify_command>
+**After standard verification passes**, check for and execute a `### Verify` command from the sub-task description.
+
+<parse_verify_block>
+Extract the verify command from the sub-task description:
+
+1. Look for `### Verify` section in the sub-task description
+2. Extract the bash code block immediately following the header
+3. The command is the content between ` ```bash ` and ` ``` ` markers
+
+**Example sub-task description**:
+```markdown
+### Verify
+
+```bash
+grep -q "export function" src/utils/helpers.ts && \
+npm test -- --grep "helpers" && \
+echo "PASS: Helper function verified"
+```
+```
+
+**Extraction result**: The bash command to execute.
+</parse_verify_block>
+
+<verify_command_safety>
+**CRITICAL**: Before executing any verify command, check for dangerous patterns.
+
+**Block these patterns** (do NOT execute, report as unsafe):
+- `rm -rf` or `rm -r` with wildcards or root paths
+- `sudo` commands
+- Commands writing to system paths (`/etc`, `/usr`, `/var`)
+- `chmod 777` or overly permissive permission changes
+- `curl | bash` or `wget | sh` piping to shell
+- `dd if=` disk operations
+- `mkfs` or filesystem formatting
+- `:(){:|:&};:` or other fork bombs
+- `> /dev/` device writes
+- Commands containing `$()` or backticks with destructive operations
+
+**Safety check implementation**:
+```bash
+# Patterns to block (regex)
+DANGEROUS_PATTERNS=(
+  "rm\s+(-[rf]+\s+)*(/|~|\*|\.\.|\\$)"
+  "sudo\s+"
+  "chmod\s+777"
+  "curl.*\|\s*(ba)?sh"
+  "wget.*\|\s*(ba)?sh"
+  "dd\s+if="
+  "mkfs"
+  ">\s*/dev/"
+  ":\(\)\s*\{.*\}.*;"
+)
+```
+
+If a dangerous pattern is detected:
+```markdown
+## Verify Command Blocked
+
+**Reason**: Command contains potentially dangerous pattern: `{pattern}`
+**Command**: `{command}`
+
+The verify command was not executed for safety reasons.
+Proceeding to commit phase without sub-task verification.
+
+**Note**: Review the verify command in the sub-task description.
+```
+</verify_command_safety>
+
+<execute_verify_command>
+If the verify command passes safety checks, execute it:
+
+```bash
+# Execute the extracted verify command
+{extracted_verify_command}
+```
+
+**Timeout**: Verify commands have a 60-second timeout to prevent hanging.
+
+**On success** (exit code 0):
+```markdown
+## Sub-task Verify Command
+- Command: `{command_summary}`
+- Result: PASS
+- Output: {last few lines of output}
+
+Verify command passed. Ready to commit.
+```
+
+**On failure** (non-zero exit code):
+The verify command failure triggers an implementation review loop:
+
+1. Read the error output to understand what failed
+2. Review the implementation against the sub-task requirements
+3. Attempt to fix the issue (similar to handling test failures)
+4. Re-run the verify command
+5. Repeat up to 3 times
+
+If verify command still fails after 3 attempts:
+```markdown
+STATUS: VERIFICATION_FAILED
+
+## Sub-task Failed: {sub-task-id}
+
+### Error Summary
+Sub-task verify command failed after 3 attempts
+
+### Verify Command
+```bash
+{command}
+```
+
+### Last Error Output
+```
+{error output}
+```
+
+### Attempted Fixes
+1. {fix attempt 1}
+2. {fix attempt 2}
+3. {fix attempt 3}
+
+### Files Modified (uncommitted)
+- {file1}
+- {file2}
+
+The loop will stop. Review the verify command and implementation.
+```
+
+**CRITICAL**: After outputting this failure report, STOP.
+</execute_verify_command>
+
+<verify_command_fallback>
+**If no `### Verify` section exists** in the sub-task description:
+
+- This is normal and expected for older sub-tasks
+- Proceed directly to commit phase after standard verification passes
+- Include note in completion report:
+
+```markdown
+## Verification Results
+- Typecheck: PASS
+- Tests: PASS
+- Lint: PASS
+- Sub-task verify: N/A (no verify block in sub-task)
+
+Ready to commit.
+```
+
+**Fallback behavior ensures**:
+- Backward compatibility with existing sub-tasks
+- Standard tests/typecheck/lint still required
+- No failure if verify block is missing
+</verify_command_fallback>
+</subtask_verify_command>
 </verification_phase>
 
 <commit_phase>
@@ -585,6 +1046,7 @@ STATUS: SUBTASK_COMPLETE
 - Typecheck: PASS
 - Tests: PASS
 - Lint: PASS
+- Sub-task verify: {PASS/N/A}
 
 ---
 
@@ -630,6 +1092,7 @@ STATUS: SUBTASK_PARTIAL
 - Typecheck: {PASS/FAIL/NOT_RUN}
 - Tests: {PASS/FAIL/NOT_RUN}
 - Lint: {PASS/FAIL/NOT_RUN}
+- Sub-task verify: {PASS/FAIL/NOT_RUN/N/A}
 
 ### Why Stopping
 {reason - e.g., "context limit reached", "blocking issue discovered", "time constraint"}
@@ -778,6 +1241,7 @@ A successful execution achieves:
 - [ ] Typecheck passes
 - [ ] Tests pass
 - [ ] Lint passes
+- [ ] Sub-task verify command passes (if present in description)
 - [ ] Commit created with conventional message
 - [ ] Changes pushed to remote
 - [ ] Sub-task moved to "Done" (if fully complete)

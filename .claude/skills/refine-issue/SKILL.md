@@ -1,6 +1,6 @@
 ---
 name: refine-issue
-description: Break down issues into sub-tasks with dependencies. Supports both Linear and Jira backends via progressive disclosure. Each sub-task is sized for single-file focus and context window efficiency. Creates sub-tasks with blocking relationships for parallel execution. Use when an issue needs implementation breakdown, when starting work on a complex issue, or when the user mentions "refine", "break down", or "plan" for an issue.
+description: Break down issues into sub-tasks with dependencies. Supports Linear and Jira backends. Use when the user mentions "refine", "break down", or "plan" for an issue.
 invocation: /refine
 ---
 
@@ -30,6 +30,20 @@ If no backend is specified in config, default to `linear`.
 
 The backend determines which MCP tools to use for issue operations. All workflow logic remains the same regardless of backend.
 </backend_detection>
+
+<input_validation>
+**Issue ID Validation**:
+- Linear: `MOB-123`, `VRZ-456` (team prefix + number)
+- Jira: `PROJ-123` (project key + number)
+- Pattern: `/^[A-Z]{2,10}-\d+$/`
+
+If issue ID doesn't match expected format, warn user before proceeding:
+
+```
+The issue ID "{id}" doesn't match the expected format ({backend} pattern).
+Did you mean to use a different backend, or is this a valid issue ID?
+```
+</input_validation>
 
 <backend_context>
 <linear>
@@ -112,22 +126,12 @@ Args: MOB-123
 
 <research_phase>
 <fetch_issue>
-First, retrieve the issue details using the appropriate backend tool:
+Retrieve issue details using the backend-appropriate get_issue tool (see `<backend_context>` for tool names):
 
-**For Linear**:
-```
-mcp__plugin_linear_linear__get_issue
-  id: "{issue-id}"
-  includeRelations: true
-```
+- Linear: `mcp__plugin_linear_linear__get_issue` with `includeRelations: true`
+- Jira: `mcp__plugin_jira_jira__get_issue`
 
-**For Jira**:
-```
-mcp__plugin_jira_jira__get_issue
-  issueIdOrKey: "{issue-id}"
-```
-
-Extract:
+**Extract from response**:
 - Title and description
 - Acceptance criteria
 - Existing relationships
@@ -171,6 +175,19 @@ From the exploration, extract:
 - **Test requirements**: Which test files need updates
 - **Pattern notes**: Existing conventions to follow
 </analysis_output>
+
+<parallel_research>
+**Optional optimization**: For complex issues (5+ files across multiple directories), spawn parallel Explore agents to gather context faster.
+
+**Triggers** - use parallel research when:
+- Issue affects 5+ files across multiple directories
+- Multiple subsystems are involved
+- Deep domain knowledge is required
+
+**Skip** when: Simple features (< 4 files), well-understood areas, or time-sensitive changes.
+
+For detailed agent prompts, aggregation strategy, and synthesis templates, see `.claude/skills/refine-issue/parallel-research.md`.
+</parallel_research>
 </research_phase>
 
 <decomposition_phase>
@@ -184,26 +201,50 @@ Each sub-task should focus on ONE file (or tightly-coupled pair like component +
 </single_file_principle>
 
 <task_structure>
-For each sub-task, define:
+<task_structure_quick>
+Each sub-task must include:
+- **Target file(s)**: Single file or source + test pair
+- **Action**: 2-4 sentences of specific implementation guidance
+- **Verify**: Executable command that proves completion
+- **Done**: 2-4 measurable outcomes as checklist
+- **Blocked by / Enables**: Dependency relationships
+</task_structure_quick>
+
+<task_structure_full>
+Full template for detailed sub-tasks:
 
 ```markdown
-## Sub-task: [Sequential number] - [Brief title]
+## Sub-task: [Number] - [Brief title]
 
 **Target file(s)**: `path/to/file.ts` (and `path/to/file.test.ts` if applicable)
-
 **Change type**: Create | Modify | Delete
 
-**Description**:
-[2-3 sentences describing exactly what to implement in this file]
+### Action
+[2-4 sentences of specific implementation guidance]
+- Use {library/pattern} following `src/existing/example.ts`
+- Handle {error case} by {specific handling}
+- Return {exact output shape}
 
-**Acceptance criteria**:
-- [ ] Specific, verifiable outcome 1
-- [ ] Specific, verifiable outcome 2
+### Avoid
+- Do NOT {anti-pattern 1} because {reason}
+- Do NOT {anti-pattern 2} because {reason}
 
-**Blocked by**: [List of sub-task numbers that must complete first, or "None"]
-
-**Enables**: [List of sub-task numbers this unblocks]
+### Verify
+```bash
+{executable command that proves completion}
 ```
+
+### Done
+- [ ] {Measurable outcome 1}
+- [ ] {Measurable outcome 2}
+- [ ] {Measurable outcome 3}
+
+**Blocked by**: [Sub-task numbers, or "None"]
+**Enables**: [Sub-task numbers this unblocks]
+```
+
+Use the "Avoid" section when research phase identified pitfalls specific to this task.
+</task_structure_full>
 </task_structure>
 
 <ordering_principles>
@@ -240,6 +281,33 @@ A well-sized sub-task:
 - Changes are trivially small (< 10 lines each)
 - One file is just re-exporting from another
 </sizing_guidelines>
+
+<context_sizing>
+**Maximum 3 tasks per batch** to prevent context degradation.
+
+<wave_triggers>
+Create multiple waves when:
+- More than 3 files affected in a single batch
+- Changes span multiple subsystems (e.g., API + UI + database)
+- Sub-task description exceeds 10 sentences
+</wave_triggers>
+
+<wave_structure>
+For features requiring 4+ sub-tasks, organize into waves:
+
+1. **Wave 1: Foundation** - Types, interfaces, schemas (max 3 tasks)
+2. **Wave 2: Core Logic** - Services, API endpoints (max 3 tasks)
+3. **Wave 3: UI/Presentation** - Components, forms (max 3 tasks)
+4. **Wave 4: Integration** - Routing, E2E tests (remaining tasks)
+
+**Batching rules**:
+- Group related changes in same wave (e.g., service + its tests)
+- Foundation tasks always in first wave
+- Integration/E2E tasks always in final wave
+
+See `<examples>` section for complete wave-based breakdown example.
+</wave_structure>
+</context_sizing>
 </decomposition_phase>
 
 <presentation_phase>
@@ -387,9 +455,32 @@ Created {count} sub-tasks for {parent issue ID}:
 </post_creation>
 </creation_phase>
 
+<error_handling>
+<fetch_failure>
+If issue fetch fails:
+1. Verify issue ID format matches backend pattern (see `<input_validation>`)
+2. Check MCP tool availability for the detected backend
+3. Report error with suggested action:
+   - "Issue not found" - Verify issue ID exists in your tracker
+   - "Permission denied" - Check API token permissions
+   - "MCP tool unavailable" - Verify Linear/Jira plugin is configured
+</fetch_failure>
+
+<creation_failure>
+If sub-task creation fails:
+1. Do NOT retry failed tasks automatically
+2. Report which tasks succeeded and which failed with IDs
+3. Provide manual recovery:
+   - Successfully created: List IDs for reference
+   - Failed tasks: Re-run with just the failed sub-tasks
+   - Blocking relationships: May need manual update if partial success
+</creation_failure>
+</error_handling>
+
 <examples>
-<example_breakdown>
+<example_breakdown backend="linear">
 **Parent issue**: MOB-100 - Add dark mode support
+**Backend**: Linear (Jira equivalent: PROJ-100)
 
 **Exploration findings**:
 - Need theme types in `src/types/theme.ts`
@@ -400,34 +491,91 @@ Created {count} sub-tasks for {parent issue ID}:
 
 **Breakdown**:
 
+```markdown
+## Sub-task: 1 - Define theme types
+
+**Target file(s)**: `src/types/theme.ts`
+**Change type**: Create
+
+### Action
+Create TypeScript type definitions for the theme system. Define `Theme` type with light/dark/system modes, `ThemeContextValue` interface with current theme and toggle function.
+- Follow existing type patterns in `src/types/` directory
+- Export all types for use by ThemeProvider and useTheme hook
+
+### Avoid
+- Do NOT include implementation logic in types file because types should be pure declarations
+- Do NOT use `any` type because it defeats type safety
+
+### Verify
+```bash
+grep -q "export type Theme" src/types/theme.ts && \
+grep -q "export interface ThemeContextValue" src/types/theme.ts && \
+echo "PASS"
 ```
-1. Define theme types
-   File: src/types/theme.ts (create)
-   Blocked by: None
 
-2. Create ThemeProvider context
-   File: src/contexts/ThemeContext.tsx (create)
-   Blocked by: 1
+### Done
+- [ ] `Theme` type exported with 'light' | 'dark' | 'system' values
+- [ ] `ThemeContextValue` interface exported with theme and setTheme properties
+- [ ] File compiles without TypeScript errors
 
-3. Implement useTheme hook
-   File: src/hooks/useTheme.ts (create)
-   Blocked by: 2
+**Blocked by**: None
+**Enables**: 2, 3
 
-4. Add ThemeToggle component
-   File: src/components/settings/ThemeToggle.tsx (create)
-   Blocked by: 3
+---
 
-5. Update Header with theme support
-   File: src/components/layout/Header.tsx (modify)
-   Blocked by: 3
+## Sub-task: 2 - Create ThemeProvider context
 
-6. Update Sidebar with theme support
-   File: src/components/layout/Sidebar.tsx (modify)
-   Blocked by: 3
+**Target file(s)**: `src/contexts/ThemeContext.tsx`
+**Change type**: Create
 
-7. Update Card component with theme support
-   File: src/components/ui/Card.tsx (modify)
-   Blocked by: 3
+### Action
+Create React context provider for theme state management. Import types from sub-task 1, implement localStorage persistence, and detect system preference.
+- Follow existing context patterns in `src/contexts/` directory
+- Use `useEffect` for system preference detection via `matchMedia`
+
+### Avoid
+- Do NOT call hooks conditionally because it violates React rules
+- Do NOT forget SSR safety check for localStorage because window may not exist
+
+### Verify
+```bash
+grep -q "createContext" src/contexts/ThemeContext.tsx && \
+grep -q "ThemeProvider" src/contexts/ThemeContext.tsx && \
+echo "PASS"
+```
+
+### Done
+- [ ] ThemeContext created with proper default value
+- [ ] ThemeProvider component exports and wraps children
+- [ ] Theme persisted to localStorage on change
+- [ ] System preference detected on mount
+
+**Blocked by**: 1
+**Enables**: 3
+
+---
+
+## Sub-task: 3 - Implement useTheme hook
+
+**Target file(s)**: `src/hooks/useTheme.ts`
+**Change type**: Create
+**Blocked by**: 2
+**Enables**: 4, 5, 6, 7
+
+---
+
+## Sub-task: 4 - Add ThemeToggle component
+
+**Target file(s)**: `src/components/settings/ThemeToggle.tsx`
+**Change type**: Create
+**Blocked by**: 3
+
+---
+
+## Sub-task: 5-7 - Update existing components
+
+Files: Header.tsx, Sidebar.tsx, Card.tsx (modify)
+**Blocked by**: 3
 ```
 
 **Parallel groups**:
