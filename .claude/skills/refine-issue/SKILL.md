@@ -1,6 +1,6 @@
 ---
 name: refine-issue
-description: Break down issues into sub-tasks with dependencies. Supports both Linear and Jira backends via progressive disclosure. Each sub-task is sized for single-file focus and context window efficiency. Creates sub-tasks with blocking relationships for parallel execution. Use when an issue needs implementation breakdown, when starting work on a complex issue, or when the user mentions "refine", "break down", or "plan" for an issue.
+description: Break down issues into sub-tasks with dependencies. Supports Linear and Jira backends. Use when the user mentions "refine", "break down", or "plan" for an issue.
 invocation: /refine
 ---
 
@@ -30,6 +30,20 @@ If no backend is specified in config, default to `linear`.
 
 The backend determines which MCP tools to use for issue operations. All workflow logic remains the same regardless of backend.
 </backend_detection>
+
+<input_validation>
+**Issue ID Validation**:
+- Linear: `MOB-123`, `VRZ-456` (team prefix + number)
+- Jira: `PROJ-123` (project key + number)
+- Pattern: `/^[A-Z]{2,10}-\d+$/`
+
+If issue ID doesn't match expected format, warn user before proceeding:
+
+```
+The issue ID "{id}" doesn't match the expected format ({backend} pattern).
+Did you mean to use a different backend, or is this a valid issue ID?
+```
+</input_validation>
 
 <backend_context>
 <linear>
@@ -112,22 +126,12 @@ Args: MOB-123
 
 <research_phase>
 <fetch_issue>
-First, retrieve the issue details using the appropriate backend tool:
+Retrieve issue details using the backend-appropriate get_issue tool (see `<backend_context>` for tool names):
 
-**For Linear**:
-```
-mcp__plugin_linear_linear__get_issue
-  id: "{issue-id}"
-  includeRelations: true
-```
+- Linear: `mcp__plugin_linear_linear__get_issue` with `includeRelations: true`
+- Jira: `mcp__plugin_jira_jira__get_issue`
 
-**For Jira**:
-```
-mcp__plugin_jira_jira__get_issue
-  issueIdOrKey: "{issue-id}"
-```
-
-Extract:
+**Extract from response**:
 - Title and description
 - Acceptance criteria
 - Existing relationships
@@ -173,85 +177,16 @@ From the exploration, extract:
 </analysis_output>
 
 <parallel_research>
-**Optional optimization**: For complex issues, spawn parallel Explore agents to gather context faster.
+**Optional optimization**: For complex issues (5+ files across multiple directories), spawn parallel Explore agents to gather context faster.
 
-Use this approach when:
+**Triggers** - use parallel research when:
 - Issue affects 5+ files across multiple directories
 - Multiple subsystems are involved
 - Deep domain knowledge is required
 
-**Parallel agent prompts** (spawn up to 3 simultaneously):
+**Skip** when: Simple features (< 4 files), well-understood areas, or time-sensitive changes.
 
-```markdown
-## Agent 1: Architecture Analysis
-Task tool:
-  subagent_type: Explore
-  prompt: |
-    For implementing "{issue title}":
-    1. How is similar functionality currently implemented?
-    2. What architectural patterns are used in this area?
-    3. What are the key abstractions and interfaces?
-    4. Are there existing utilities that should be reused?
-
-## Agent 2: Dependency Mapping
-Task tool:
-  subagent_type: Explore
-  prompt: |
-    For implementing "{issue title}":
-    1. What files will need to import new code?
-    2. What existing exports will need modification?
-    3. Are there circular dependency risks?
-    4. What test utilities exist for mocking these dependencies?
-
-## Agent 3: Test & Error Analysis
-Task tool:
-  subagent_type: Explore
-  prompt: |
-    For implementing "{issue title}":
-    1. What test patterns exist for similar features?
-    2. What error handling patterns are used?
-    3. What could go wrong during implementation?
-    4. Are there known pitfalls in this area of the codebase?
-```
-
-**Aggregation strategy**:
-
-After parallel agents complete, synthesize their findings:
-
-1. **Merge file lists** - Combine all affected files from each agent, deduplicate
-2. **Resolve conflicts** - If agents suggest different patterns, prefer the most recent/common pattern
-3. **Build dependency graph** - Use Agent 2's output as the foundation
-4. **Annotate with risks** - Add Agent 3's pitfalls as "Avoid" items in sub-tasks
-5. **Create unified context brief** - Single document for the decomposition phase
-
-```markdown
-## Synthesized Research Brief
-
-### Files Affected (merged from all agents)
-- `src/services/feature.ts` - Create (Agent 1, 2)
-- `src/types/feature.ts` - Create (Agent 1)
-- `src/hooks/useFeature.ts` - Create (Agent 2)
-- `src/components/Feature.tsx` - Modify (Agent 1, 3)
-
-### Patterns to Follow (from Agent 1)
-- Service pattern: Follow `src/services/auth.ts` structure
-- Hook pattern: Match `src/hooks/useAuth.ts` conventions
-
-### Dependency Notes (from Agent 2)
-- New service must be exported from `src/services/index.ts`
-- Hook will import from service, component from hook
-
-### Pitfalls to Avoid (from Agent 3)
-- Don't forget SSR safety checks (window undefined)
-- Similar feature had race condition - use AbortController
-- Test file must mock the external API dependency
-```
-
-**When NOT to use parallel research**:
-- Simple features (< 4 files)
-- Well-understood areas of the codebase
-- Time-sensitive changes where sequential is faster
-- When agents would query overlapping areas (redundant work)
+For detailed agent prompts, aggregation strategy, and synthesis templates, see `.claude/skills/refine-issue/parallel-research.md`.
 </parallel_research>
 </research_phase>
 
@@ -266,13 +201,22 @@ Each sub-task should focus on ONE file (or tightly-coupled pair like component +
 </single_file_principle>
 
 <task_structure>
-For each sub-task, define:
+<task_structure_quick>
+Each sub-task must include:
+- **Target file(s)**: Single file or source + test pair
+- **Action**: 2-4 sentences of specific implementation guidance
+- **Verify**: Executable command that proves completion
+- **Done**: 2-4 measurable outcomes as checklist
+- **Blocked by / Enables**: Dependency relationships
+</task_structure_quick>
+
+<task_structure_full>
+Full template for detailed sub-tasks:
 
 ```markdown
-## Sub-task: [Sequential number] - [Brief title]
+## Sub-task: [Number] - [Brief title]
 
 **Target file(s)**: `path/to/file.ts` (and `path/to/file.test.ts` if applicable)
-
 **Change type**: Create | Modify | Delete
 
 ### Action
@@ -295,10 +239,12 @@ For each sub-task, define:
 - [ ] {Measurable outcome 2}
 - [ ] {Measurable outcome 3}
 
-**Blocked by**: [List of sub-task numbers that must complete first, or "None"]
-
-**Enables**: [List of sub-task numbers this unblocks]
+**Blocked by**: [Sub-task numbers, or "None"]
+**Enables**: [Sub-task numbers this unblocks]
 ```
+
+Use the "Avoid" section when research phase identified pitfalls specific to this task.
+</task_structure_full>
 </task_structure>
 
 <ordering_principles>
@@ -339,47 +285,28 @@ A well-sized sub-task:
 <context_sizing>
 **Maximum 3 tasks per batch** to prevent context degradation.
 
-When a feature requires more than 3 sub-tasks, use wave-based execution:
-
-**Split triggers** - create multiple waves when:
+<wave_triggers>
+Create multiple waves when:
 - More than 3 files affected in a single batch
 - Changes span multiple subsystems (e.g., API + UI + database)
 - Sub-task description exceeds 10 sentences
+</wave_triggers>
 
-**Wave-based execution example** (10+ task feature):
+<wave_structure>
+For features requiring 4+ sub-tasks, organize into waves:
 
-```markdown
-## Wave 1: Foundation (max 3 tasks)
-1. Define types/interfaces
-2. Create core service
-3. Add database schema
+1. **Wave 1: Foundation** - Types, interfaces, schemas (max 3 tasks)
+2. **Wave 2: Core Logic** - Services, API endpoints (max 3 tasks)
+3. **Wave 3: UI/Presentation** - Components, forms (max 3 tasks)
+4. **Wave 4: Integration** - Routing, E2E tests (remaining tasks)
 
-## Wave 2: API Layer (max 3 tasks)
-4. Implement API endpoints
-5. Add validation middleware
-6. Create API tests
-
-## Wave 3: UI Components (max 3 tasks)
-7. Build main component
-8. Add form handling
-9. Create component tests
-
-## Wave 4: Integration (remaining tasks)
-10. Wire up routing
-11. Add E2E tests
-```
-
-**Benefits of wave-based execution**:
-- Fresh context for each wave (no context degradation)
-- Natural checkpoints for review
-- Easier to parallelize within waves
-- Clearer progress tracking
-
-**Task batching rules**:
+**Batching rules**:
 - Group related changes in same wave (e.g., service + its tests)
-- Keep cross-cutting concerns in separate waves
 - Foundation tasks always in first wave
 - Integration/E2E tasks always in final wave
+
+See `<examples>` section for complete wave-based breakdown example.
+</wave_structure>
 </context_sizing>
 </decomposition_phase>
 
@@ -528,9 +455,32 @@ Created {count} sub-tasks for {parent issue ID}:
 </post_creation>
 </creation_phase>
 
+<error_handling>
+<fetch_failure>
+If issue fetch fails:
+1. Verify issue ID format matches backend pattern (see `<input_validation>`)
+2. Check MCP tool availability for the detected backend
+3. Report error with suggested action:
+   - "Issue not found" - Verify issue ID exists in your tracker
+   - "Permission denied" - Check API token permissions
+   - "MCP tool unavailable" - Verify Linear/Jira plugin is configured
+</fetch_failure>
+
+<creation_failure>
+If sub-task creation fails:
+1. Do NOT retry failed tasks automatically
+2. Report which tasks succeeded and which failed with IDs
+3. Provide manual recovery:
+   - Successfully created: List IDs for reference
+   - Failed tasks: Re-run with just the failed sub-tasks
+   - Blocking relationships: May need manual update if partial success
+</creation_failure>
+</error_handling>
+
 <examples>
-<example_breakdown>
+<example_breakdown backend="linear">
 **Parent issue**: MOB-100 - Add dark mode support
+**Backend**: Linear (Jira equivalent: PROJ-100)
 
 **Exploration findings**:
 - Need theme types in `src/types/theme.ts`
