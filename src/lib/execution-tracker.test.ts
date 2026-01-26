@@ -298,14 +298,14 @@ describe('resetTracker', () => {
 });
 
 describe('integration: retry flow simulation', () => {
-  it('simulates a complete retry flow', () => {
-    const tracker = createTracker(2);
+  it('simulates a complete retry flow with maxRetries=2 allowing 3 total executions', () => {
+    const tracker = createTracker(2); // maxRetries=2 means attempts 1, 2 can retry; attempt 3 cannot
     const tasks: SubTask[] = [
       createMockSubTask('id-1', 'MOB-101'),
       createMockSubTask('id-2', 'MOB-102'),
     ];
 
-    // First execution: MOB-101 succeeds, MOB-102 fails
+    // First execution (attempt 1): MOB-101 succeeds, MOB-102 fails
     for (const task of tasks) {
       assignTask(tracker, task);
     }
@@ -320,22 +320,61 @@ describe('integration: retry flow simulation', () => {
     expect(retryTasks[0].identifier).toBe('MOB-102');
     expect(hasPermamentFailures(firstResults)).toBe(false);
 
-    // Second execution: MOB-102 fails again
+    // Second execution (attempt 2): MOB-102 fails again, but can still retry (2 <= 2)
     assignTask(tracker, retryTasks[0]); // Attempt 2
 
     const secondResults: VerifiedResult[] = [
-      createVerifiedResult('id-2', 'MOB-102', false, false, false, 'Max retries exceeded'),
+      createVerifiedResult('id-2', 'MOB-102', false, false, true, 'Verification timeout'),
     ];
 
     retryTasks = getRetryTasks(secondResults, tasks);
+    expect(retryTasks.length).toBe(1); // Can still retry at attempt 2
+    expect(hasPermamentFailures(secondResults)).toBe(false);
+
+    // Third execution (attempt 3): MOB-102 fails again, now exceeds retries (3 > 2)
+    assignTask(tracker, retryTasks[0]); // Attempt 3
+
+    const thirdResults: VerifiedResult[] = [
+      createVerifiedResult('id-2', 'MOB-102', false, false, false, 'Max retries exceeded'),
+    ];
+
+    retryTasks = getRetryTasks(thirdResults, tasks);
     expect(retryTasks.length).toBe(0);
-    expect(hasPermamentFailures(secondResults)).toBe(true);
+    expect(hasPermamentFailures(thirdResults)).toBe(true);
 
     // Check tracker stats
     const stats = getTrackerStats(tracker);
     expect(stats.totalAssigned).toBe(2);
     expect(stats.retriedTasks).toBe(1);
-    expect(stats.maxAttemptsReached).toBe(1);
+    expect(stats.maxAttemptsReached).toBe(1); // task2 is at 3 attempts, >= maxRetries(2)
+  });
+
+  it('allows retry when attempts equals maxRetries', () => {
+    // This test verifies the fix: attempts <= maxRetries (not <)
+    // With maxRetries=2, attempt 2 should still allow retry
+    const tracker = createTracker(2);
+    const task = createMockSubTask('id-1', 'MOB-101');
+
+    // First attempt (attempt 1)
+    assignTask(tracker, task);
+    expect(tracker.assignments.get('id-1')?.attempts).toBe(1);
+    // At attempt 1, 1 <= 2 is true, so retry should be allowed
+
+    // Second attempt (attempt 2) - this is the edge case
+    assignTask(tracker, task);
+    expect(tracker.assignments.get('id-1')?.attempts).toBe(2);
+    // At attempt 2, 2 <= 2 is true, so retry should STILL be allowed
+    // This was the bug: the old code used < which would have made 2 < 2 = false
+
+    // Third attempt (attempt 3) - this exceeds maxRetries
+    assignTask(tracker, task);
+    expect(tracker.assignments.get('id-1')?.attempts).toBe(3);
+    // At attempt 3, 3 <= 2 is false, so retry should NOT be allowed
+
+    const stats = getTrackerStats(tracker);
+    expect(stats.totalAssigned).toBe(1);
+    expect(stats.retriedTasks).toBe(1);
+    expect(stats.maxAttemptsReached).toBe(1); // 3 >= 2
   });
 
   it('simulates successful retry', () => {
