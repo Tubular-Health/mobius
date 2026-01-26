@@ -120,6 +120,162 @@ Each sub-task is designed to:
 - Have explicit blocking relationships
 </context>
 
+<checkpoint_system>
+**Checkpoint system enables recovery from interruptions** by saving structured state after each major phase.
+
+Checkpoints are only used for **non-trivial tasks** (estimated >5 minutes or involving multiple verification cycles). Skip checkpoints for simple single-file changes.
+
+<checkpoint_definitions>
+### Checkpoint 1: Context Priming Complete
+**Phase**: After loading parent issue, finding ready subtask, and loading dependency context
+**Marker**: `CHECKPOINT:PRIMED`
+**Saves**:
+- Parent issue ID and title
+- Selected subtask ID and title
+- Target file path
+- Completed dependency summaries (not full content)
+- Key patterns identified for implementation
+**Recovery**: Skip context loading, proceed directly to implementation
+
+### Checkpoint 2: Implementation Complete
+**Phase**: After implementing changes but before verification
+**Marker**: `CHECKPOINT:IMPLEMENTED`
+**Saves**:
+- List of modified files
+- Summary of changes made (not full diffs)
+- Staged files ready for verification
+- Implementation approach taken
+**Recovery**: Skip implementation, proceed to verification
+
+### Checkpoint 3: Verification Complete
+**Phase**: After all verification passes, ready to commit
+**Marker**: `CHECKPOINT:VERIFIED`
+**Saves**:
+- Verification results (typecheck, tests, lint)
+- Files ready to commit
+- Draft commit message
+**Recovery**: Skip verification, proceed directly to commit
+</checkpoint_definitions>
+
+<checkpoint_thresholds>
+**When to create checkpoints**:
+- Task description > 5 sentences
+- Multiple acceptance criteria (>3)
+- Target file > 200 lines
+- Previous attempt was interrupted (detected via existing checkpoint)
+
+**When to skip checkpoints**:
+- Simple single-criterion tasks
+- Small file changes (<50 lines)
+- Tasks marked as "quick fix" or "trivial"
+</checkpoint_thresholds>
+
+<save_checkpoint>
+**Add checkpoint comment to issue** after completing each phase.
+
+Use the backend-appropriate comment tool:
+- **Linear**: `mcp__plugin_linear_linear__create_comment`
+- **Jira**: `mcp__plugin_jira_jira__add_comment`
+
+**Checkpoint comment format** (structured for parsing):
+
+```markdown
+## Checkpoint: {CHECKPOINT_MARKER}
+
+**Timestamp**: {ISO-8601 timestamp}
+**Agent**: {agent-id or session-id if available}
+
+### State Summary
+{phase-specific state data as key-value pairs}
+
+### Files Involved
+- `{file1}` - {status: read/modified/staged}
+- `{file2}` - {status: read/modified/staged}
+
+### Next Phase
+{description of what the next phase should do}
+
+---
+CHECKPOINT:{MARKER}:{subtask-id}:{timestamp}
+```
+
+**Example checkpoint comments**:
+
+```markdown
+## Checkpoint: PRIMED
+
+**Timestamp**: 2024-01-15T14:30:00Z
+**Agent**: execute-loop-1
+
+### State Summary
+- parent_id: PROJ-100
+- subtask_id: PROJ-125
+- target_file: src/contexts/ThemeContext.tsx
+- change_type: Create
+- dependencies_loaded: PROJ-124
+
+### Files Involved
+- `src/types/theme.ts` - read (from dependency)
+
+### Next Phase
+Implement ThemeContext provider with light/dark/system modes
+
+---
+CHECKPOINT:PRIMED:PROJ-125:2024-01-15T14:30:00Z
+```
+
+**Important**:
+- Append new checkpoints; never delete previous ones (audit trail)
+- Include machine-parseable marker line at the end
+- Keep state summaries concise - metadata only, not full content
+</save_checkpoint>
+
+<resume_from_checkpoint>
+**Detect and resume from interrupted work** at the start of execution.
+
+**Detection steps**:
+1. After loading the subtask, list recent comments
+2. Search for comments containing `CHECKPOINT:` marker
+3. Parse the most recent checkpoint marker line
+
+**Checkpoint marker format**:
+```
+CHECKPOINT:{MARKER}:{subtask-id}:{timestamp}
+```
+
+**Resume logic by marker**:
+
+| Marker | Resume Action |
+|--------|---------------|
+| `PRIMED` | Skip context loading, read state summary, proceed to implementation |
+| `IMPLEMENTED` | Skip implementation, verify files from state, proceed to verification |
+| `VERIFIED` | Skip verification, use saved commit message, proceed to commit |
+
+**Resume validation**:
+Before resuming, validate the checkpoint is still valid:
+1. Check that mentioned files still exist
+2. Verify git status matches expected state (staged files, no unexpected changes)
+3. If validation fails, discard checkpoint and start fresh
+
+**Resume comment** (add when resuming):
+```markdown
+## Resuming from Checkpoint
+
+**Previous checkpoint**: {MARKER} at {timestamp}
+**Validation**: PASSED
+**Skipping phases**: {list of skipped phases}
+
+Continuing from {phase name}...
+```
+
+**When NOT to resume**:
+- Checkpoint is >24 hours old
+- Files mentioned in checkpoint were modified outside this workflow
+- Subtask description has changed since checkpoint
+- User explicitly requests fresh start
+</resume_from_checkpoint>
+</checkpoint_system>
+
 <quick_start>
 <invocation>
 Pass an issue ID (either parent or subtask):
