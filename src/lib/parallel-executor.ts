@@ -15,6 +15,7 @@ import {
   capturePaneContent,
   layoutPanes,
   setPaneTitle,
+  killPane,
 } from './tmux-display.js';
 import { BACKEND_SKILLS } from '../types.js';
 
@@ -112,8 +113,8 @@ export async function executeParallel(
       });
     }
 
-    // Clean up pane after completion (optional, keeps session clean)
-    // await killPane(handle.pane);
+    // Note: Panes are intentionally kept open after completion for debugging.
+    // Failed/timed-out tasks have their panes killed in waitForAgent.
   }
 
   return executionResults;
@@ -235,7 +236,11 @@ async function waitForAgent(
     await sleep(POLL_INTERVAL_MS);
   }
 
-  // Timeout reached
+  // Timeout reached - kill the pane to stop the runaway process
+  // This ensures state matches reality: if we mark it failed, it should actually stop
+  await setPaneTitle(handle.pane, `✗ ${handle.task.identifier}: TIMEOUT`);
+  await killPane(handle.pane);
+
   return {
     taskId: handle.task.id,
     identifier: handle.task.identifier,

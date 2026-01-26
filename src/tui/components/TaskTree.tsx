@@ -96,6 +96,20 @@ function getStatusOverrides(
     }
   }
 
+  // Mark failed tasks as failed
+  for (const entry of executionState.failedTasks) {
+    const taskIdentifier = getCompletedTaskId(entry);
+    for (const task of graph.tasks.values()) {
+      if (task.identifier === taskIdentifier) {
+        // Don't override if already marked done (task may have succeeded after retry)
+        if (!overrides.has(task.id)) {
+          overrides.set(task.id, 'failed');
+        }
+        break;
+      }
+    }
+  }
+
   return overrides;
 }
 
