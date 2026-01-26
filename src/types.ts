@@ -49,6 +49,9 @@ export interface ExecutionConfig {
   worktree_path?: string;
   cleanup_on_success?: boolean;
   base_branch?: string;
+  // Retry and verification settings
+  max_retries?: number;           // Maximum retry attempts per task (default: 2)
+  verification_timeout?: number;  // Timeout for Linear verification in ms (default: 5000)
   // TUI dashboard options
   tui?: TuiConfig;
 }
@@ -98,6 +101,9 @@ export const DEFAULT_CONFIG: LoopConfig = {
     worktree_path: '../<repo>-worktrees/',
     cleanup_on_success: true,
     base_branch: 'main',
+    // Retry and verification defaults
+    max_retries: 2,
+    verification_timeout: 5000,
   },
 };
 
