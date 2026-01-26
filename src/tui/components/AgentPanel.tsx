@@ -1,26 +1,31 @@
 /**
- * AgentPanel - Displays live agent output in a bordered panel
+ * AgentPanel - Displays task activity status in a bordered panel
  *
- * Uses `tmux capture-pane` to fetch latest output lines and displays
- * with task identifier header. Refresh is driven by parent's tick to
- * consolidate all updates into a single render cycle.
+ * Shows an ActivityIndicator with spinner, elapsed time, and process health
+ * for active tasks. Shows "(available)" header with "Ready for work" for
+ * empty slots.
  */
 
 import { Box, Text } from 'ink';
 import { memo } from 'react';
 import { execa } from 'execa';
 import type { ActiveTask } from '../../types.js';
-import { FROST, STRUCTURE_COLORS, SNOW_STORM } from '../theme.js';
+import { ActivityIndicator } from './ActivityIndicator.js';
+import { FROST, STRUCTURE_COLORS } from '../theme.js';
 
 export interface AgentPanelProps {
   activeTask?: ActiveTask; // undefined = show "(available)"
   lines?: number; // default: 8
-  /** Pre-fetched output lines from parent - no internal fetching */
-  outputLines?: string[];
+  /** Elapsed time in milliseconds for this task */
+  elapsedMs?: number;
+  /** Whether the task's process is still alive */
+  isProcessAlive?: boolean;
 }
 
 /**
  * Capture the last N lines from a tmux pane
+ *
+ * Kept for potential future use (e.g., detailed view mode).
  *
  * @param paneId - tmux pane identifier (e.g., "%0")
  * @param lines - Number of lines to capture
@@ -44,23 +49,37 @@ export async function captureTmuxPane(paneId: string, lines: number): Promise<st
 }
 
 /**
- * AgentPanel component - displays output from a tmux pane
- * Pure display component - output is fetched by parent and passed as props.
- * This eliminates async state updates that cause flickering.
+ * AgentPanel component - displays activity status for a task slot
+ *
+ * Active task panel:
+ * ```
+ * ┌─ MOB-126 ─────────────────────────────────┐
+ * │                                           │
+ * │            ⠋ Running                      │
+ * │            2m 34s                         │
+ * │                                           │
+ * │            Process: active                │
+ * │                                           │
+ * └───────────────────────────────────────────┘
+ * ```
+ *
+ * Empty slot:
+ * ```
+ * ┌─ (available) ─────────────────────────────┐
+ * │                                           │
+ * │            Ready for work                 │
+ * │                                           │
+ * └───────────────────────────────────────────┘
+ * ```
  */
 function AgentPanelImpl({
   activeTask,
   lines = 8,
-  outputLines = [],
+  elapsedMs,
+  isProcessAlive,
 }: AgentPanelProps): JSX.Element {
   // Header text - task identifier or "(available)"
   const headerText = activeTask ? activeTask.id : '(available)';
-
-  // Pad output to fill panel height
-  const paddedOutput = [...outputLines];
-  while (paddedOutput.length < lines) {
-    paddedOutput.push('');
-  }
 
   return (
     <Box
@@ -76,12 +95,13 @@ function AgentPanelImpl({
         </Text>
       </Box>
 
-      {/* Output lines */}
-      {paddedOutput.map((line, index) => (
-        <Text key={index} color={SNOW_STORM.nord4} wrap="truncate">
-          {line || ' '}
-        </Text>
-      ))}
+      {/* Activity Indicator */}
+      <ActivityIndicator
+        isActive={!!activeTask}
+        elapsedMs={elapsedMs}
+        isProcessAlive={isProcessAlive}
+        lines={lines}
+      />
     </Box>
   );
 }
