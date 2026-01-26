@@ -1,17 +1,90 @@
 ---
-name: verify-linear-issue
-description: Verify a completed Linear issue by comparing implementation against acceptance criteria, running tests, and critiquing the work. Adds review notes as a comment on the Linear ticket. Use as the final step in the Linear workflow after execute-issue, when the user mentions "verify", "review", or "check" a Linear issue.
+name: verify-issue
+description: Verify a completed issue by comparing implementation against acceptance criteria, running tests, and critiquing the work. Adds review notes as a comment on the ticket. Supports both Linear and Jira backends via progressive disclosure. Use as the final step in the issue workflow after execute-issue, when the user mentions "verify", "review", or "check" an issue.
+invocation: /verify
 ---
 
 <objective>
-Perform a thorough verification of a completed Linear issue implementation. This skill compares what was actually built against the intended goal and acceptance criteria, identifies gaps, runs validation checks, and documents the review on the Linear ticket.
+Perform a thorough verification of a completed issue implementation. This skill compares what was actually built against the intended goal and acceptance criteria, identifies gaps, runs validation checks, and documents the review on the ticket.
 
-This is the fourth and final step in the Linear issue workflow:
+This is the fourth and final step in the issue workflow:
 1. **define-issue** - Creates well-defined issues with acceptance criteria
 2. **refine-issue** - Breaks issues into single-file-focused sub-tasks with dependencies
 3. **execute-issue** - Implements sub-tasks one at a time
-4. **verify-linear-issue** (this skill) - Validates implementation against acceptance criteria
+4. **verify-issue** (this skill) - Validates implementation against acceptance criteria
 </objective>
+
+<backend_detection>
+**FIRST**: Detect the backend from mobius config before proceeding.
+
+Read `~/.config/mobius/config.yaml` or `mobius.config.yaml` in the project root:
+
+```yaml
+backend: linear  # or 'jira'
+```
+
+**Default**: If no backend is specified, default to `linear`.
+
+The detected backend determines which MCP tools to use throughout this skill. All subsequent tool references use the backend-specific tools from the `<backend_context>` section below.
+</backend_detection>
+
+<backend_context>
+<linear>
+**MCP Tools for Linear**:
+
+- **Fetch issue**: `mcp__plugin_linear_linear__get_issue`
+  - Parameters: `id` (issue ID), `includeRelations` (boolean)
+  - Returns: Issue with status, description, acceptance criteria
+
+- **List comments**: `mcp__plugin_linear_linear__list_comments`
+  - Parameters: `issueId`
+  - Returns: Array of comments with implementation notes
+
+- **List sub-tasks**: `mcp__plugin_linear_linear__list_issues`
+  - Parameters: `parentId`, `includeArchived`
+  - Returns: Array of child issues with status
+
+- **Add comment**: `mcp__plugin_linear_linear__create_comment`
+  - Parameters: `issueId`, `body` (markdown)
+  - Use for: Posting verification report
+
+- **Update status**: `mcp__plugin_linear_linear__update_issue`
+  - Parameters: `id`, `state` (e.g., "Done"), `labels` (optional)
+  - Use for: Marking issue as Done if verified, or adding "needs-revision" label
+
+- **Create follow-up issue**: `mcp__plugin_linear_linear__create_issue`
+  - Parameters: `team`, `title`, `description`, `labels`, `relatedTo`
+  - Use for: Creating follow-up issues for discovered problems
+</linear>
+
+<jira>
+**MCP Tools for Jira**:
+
+- **Fetch issue**: `mcp__plugin_jira_jira__get_issue`
+  - Parameters: `issueIdOrKey` (e.g., "PROJ-123")
+  - Returns: Issue with status, description, acceptance criteria
+
+- **List comments**: `mcp__plugin_jira_jira__get_comments`
+  - Parameters: `issueIdOrKey`
+  - Returns: Array of comments with implementation notes
+
+- **List sub-tasks**: `mcp__plugin_jira_jira__list_issues`
+  - Parameters: `jql` (e.g., "parent = PROJ-123")
+  - Returns: Array of child issues with status
+
+- **Add comment**: `mcp__plugin_jira_jira__add_comment`
+  - Parameters: `issueIdOrKey`, `body` (Jira wiki markup or markdown)
+  - Use for: Posting verification report
+
+- **Update status**: `mcp__plugin_jira_jira__transition_issue`
+  - Parameters: `issueIdOrKey`, `transitionId` or `transitionName`
+  - Use for: Transitioning to Done if verified
+
+- **Create follow-up issue**: `mcp__plugin_jira_jira__create_issue`
+  - Parameters: `projectKey`, `summary`, `description`, `issueType`, `labels`
+  - Use for: Creating follow-up issues for discovered problems
+</jira>
+</backend_context>
 
 <context>
 Verification is critical for catching:
@@ -21,45 +94,40 @@ Verification is critical for catching:
 - **Missing tests**: Functionality without proper test coverage
 - **Regressions**: Changes that break existing functionality
 
-The review adds a structured comment to the Linear ticket documenting findings, making the verification visible to the team.
+The review adds a structured comment to the ticket documenting findings, making the verification visible to the team.
 </context>
 
 <quick_start>
 <invocation>
-Pass the Linear issue identifier:
+Pass the issue identifier:
 
 ```
-/verify-linear-issue VRZ-123
+/verify PROJ-123
 ```
 
 Or invoke programmatically:
 ```
-Skill: verify-linear-issue
-Args: VRZ-123
+Skill: verify-issue
+Args: PROJ-123
 ```
 </invocation>
 
 <workflow>
-1. **Fetch issue context** - Get title, description, acceptance criteria, comments, sub-tasks
-2. **Analyze implementation** - Review recent commits, changed files, code
-3. **Run verification checks** - Tests, typecheck, lint
-4. **Compare against criteria** - Check each acceptance criterion
-5. **Critique implementation** - Identify issues, improvements, concerns
-6. **Generate review report** - Structured analysis with findings
-7. **Post to Linear** - Add review as comment on the ticket
-8. **Report status** - Summary with pass/fail and recommendations
+1. **Detect backend** - Read backend from config (linear or jira)
+2. **Fetch issue context** - Get title, description, acceptance criteria, comments, sub-tasks
+3. **Analyze implementation** - Review recent commits, changed files, code
+4. **Run verification checks** - Tests, typecheck, lint
+5. **Compare against criteria** - Check each acceptance criterion
+6. **Critique implementation** - Identify issues, improvements, concerns
+7. **Generate review report** - Structured analysis with findings
+8. **Post to ticket** - Add review as comment on the issue
+9. **Report status** - Summary with pass/fail and recommendations
 </workflow>
 </quick_start>
 
 <issue_context_phase>
 <fetch_issue>
-First, retrieve full issue details:
-
-```
-mcp__plugin_linear_linear__get_issue
-  id: "{issue-id}"
-  includeRelations: true
-```
+First, retrieve full issue details using the backend-appropriate fetch tool.
 
 Extract:
 - **Title and description**: What was supposed to be built
@@ -70,12 +138,7 @@ Extract:
 </fetch_issue>
 
 <fetch_comments>
-Get implementation context from comments:
-
-```
-mcp__plugin_linear_linear__list_comments
-  issueId: "{issue-id}"
-```
+Get implementation context from comments using the backend-appropriate list comments tool.
 
 Look for:
 - Implementation notes from execute-issue
@@ -85,13 +148,7 @@ Look for:
 </fetch_comments>
 
 <fetch_subtasks>
-If issue has sub-tasks, get their status:
-
-```
-mcp__plugin_linear_linear__list_issues
-  parentId: "{issue-id}"
-  includeArchived: false
-```
+If issue has sub-tasks, get their status using the backend-appropriate list sub-tasks tool.
 
 Verify:
 - All sub-tasks are in "Done" or "In Progress" (ready for review) state
@@ -436,34 +493,31 @@ Generate a structured review report:
 </status_definitions>
 </review_report_phase>
 
-<linear_update_phase>
+<ticket_update_phase>
 <post_review_comment>
-Add the review as a comment on the Linear issue:
+Add the review as a comment on the issue using the backend-appropriate add comment tool:
 
-```
-mcp__plugin_linear_linear__create_comment
-  issueId: "{issue-id}"
-  body: |
-    ## Verification Review
+```markdown
+## Verification Review
 
-    **Status**: {PASS/PASS_WITH_NOTES/NEEDS_WORK/FAIL}
-    **Recommendation**: {APPROVE/REQUEST_CHANGES/DISCUSS}
+**Status**: {PASS/PASS_WITH_NOTES/NEEDS_WORK/FAIL}
+**Recommendation**: {APPROVE/REQUEST_CHANGES/DISCUSS}
 
-    ### Acceptance Criteria
-    {criteria evaluation matrix}
+### Acceptance Criteria
+{criteria evaluation matrix}
 
-    ### Checks
-    - Tests: {status}
-    - Typecheck: {status}
+### Checks
+- Tests: {status}
+- Typecheck: {status}
 
-    ### Findings
-    {condensed findings - critical issues and important issues}
+### Findings
+{condensed findings - critical issues and important issues}
 
-    ### Next Steps
-    {clear action items}
+### Next Steps
+{clear action items}
 
-    ---
-    *Automated verification by verify-linear-issue*
+---
+*Automated verification by verify-issue*
 ```
 </post_review_comment>
 
@@ -471,23 +525,15 @@ mcp__plugin_linear_linear__create_comment
 Based on review outcome:
 
 **If PASS or PASS_WITH_NOTES**:
-```
-mcp__plugin_linear_linear__update_issue
-  id: "{issue-id}"
-  state: "Done"
-```
+Use the backend-appropriate update status tool to move the issue to "Done".
 
 **If NEEDS_WORK or FAIL**:
 Leave in current state. The comment documents what needs to be addressed.
 
-Optionally add labels:
-```
-mcp__plugin_linear_linear__update_issue
-  id: "{issue-id}"
-  labels: ["needs-revision"]
-```
+Optionally add labels (if supported by backend):
+- Add "needs-revision" label for issues that need more work
 </update_issue_status>
-</linear_update_phase>
+</ticket_update_phase>
 
 <completion_report>
 <report_format>
@@ -511,7 +557,7 @@ Output a summary for the user:
 {Top 3-5 findings}
 
 ### Actions Taken
-- [x] Review comment posted to Linear
+- [x] Review comment posted to ticket
 - [x] Issue status updated (if PASS)
 - [ ] Follow-up issues created (if applicable)
 
@@ -521,16 +567,13 @@ Output a summary for the user:
 </report_format>
 
 <follow_up_issues>
-If critical or important issues are found that won't be fixed immediately:
+If critical or important issues are found that won't be fixed immediately, use the backend-appropriate create issue tool to create follow-up issues.
 
-```
-mcp__plugin_linear_linear__create_issue
-  team: "{same team}"
-  title: "Follow-up: {brief description of issue}"
-  description: "Discovered during verification of {parent-id}: {details}"
-  labels: ["follow-up"]
-  relatedTo: ["{original-issue-id}"]
-```
+Include:
+- Clear title describing the issue
+- Reference to the original issue in the description
+- Appropriate labels (e.g., "follow-up")
+- Related issue link
 
 Link follow-up issues in the verification comment.
 </follow_up_issues>
@@ -538,9 +581,9 @@ Link follow-up issues in the verification comment.
 
 <examples>
 <pass_example>
-**Input**: `/verify-linear-issue VRZ-100`
+**Input**: `/verify PROJ-100`
 
-**Issue**: VRZ-100 - Add dark mode support
+**Issue**: PROJ-100 - Add dark mode support
 
 **Findings**:
 - All 5 acceptance criteria met
@@ -578,9 +621,9 @@ All criteria met. Ready to close.
 </pass_example>
 
 <needs_work_example>
-**Input**: `/verify-linear-issue VRZ-200`
+**Input**: `/verify PROJ-200`
 
-**Issue**: VRZ-200 - Fix schedule deactivation error
+**Issue**: PROJ-200 - Fix schedule deactivation error
 
 **Findings**:
 - 2 of 3 acceptance criteria met
@@ -635,8 +678,8 @@ All criteria met. Ready to close.
 - BAD: "2 of 5 criteria met, but PASS"
 - GOOD: NEEDS_WORK until all criteria are addressed
 
-**Don't skip the Linear comment**:
-- BAD: Tell user the results but don't post to Linear
+**Don't skip the ticket comment**:
+- BAD: Tell user the results but don't post to ticket
 - GOOD: Always document verification on the ticket
 
 **Don't forget to check sub-tasks**:
@@ -647,6 +690,7 @@ All criteria met. Ready to close.
 <success_criteria>
 A successful verification achieves:
 
+- [ ] Backend detected from config
 - [ ] Full issue context loaded (description, criteria, comments, sub-tasks)
 - [ ] All sub-tasks verified as complete
 - [ ] Recent commits and changed files analyzed
@@ -656,7 +700,7 @@ A successful verification achieves:
 - [ ] Each acceptance criterion evaluated with evidence
 - [ ] Thorough critique with categorized findings
 - [ ] Structured review report generated
-- [ ] Review comment posted to Linear ticket
+- [ ] Review comment posted to ticket
 - [ ] Issue status updated appropriately
 - [ ] Follow-up issues created if needed
 - [ ] Clear next steps communicated to user
