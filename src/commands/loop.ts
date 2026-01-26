@@ -36,6 +36,7 @@ import {
 import {
   executeParallel,
   calculateParallelism,
+  isPaneStillRunning,
 } from '../lib/parallel-executor.js';
 import {
   createTracker,
@@ -327,13 +328,32 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
           );
           console.log(chalk.yellow(`  ↻ ${result.identifier}: Retrying (${result.error ?? 'verification pending'})`));
         } else {
-          // Permanent failure
-          executionState = failTask(
-            executionState,
-            result.identifier,
-            executionConfig.tui?.state_dir
-          );
-          console.log(chalk.red(`  ✗ ${result.identifier}: ${result.error ?? result.status}`));
+          // Check if pane is still running before marking as permanent failure
+          // This handles cases where Linear verification times out but the agent is still working
+          const paneStillRunning = result.pane ? await isPaneStillRunning(result.pane) : false;
+
+          if (paneStillRunning) {
+            // Pane is still active - queue for retry instead of permanent failure
+            const task = tasksToExecute.find(t => t.identifier === result.identifier);
+            if (task && !retryQueue.some(t => t.identifier === result.identifier)) {
+              retryQueue.push(task);
+            }
+            // Remove from active tasks for retry (will be re-added next iteration)
+            executionState = removeActiveTask(
+              executionState,
+              result.identifier,
+              executionConfig.tui?.state_dir
+            );
+            console.log(chalk.yellow(`  ↻ ${result.identifier}: Pane still active, queuing retry`));
+          } else {
+            // Permanent failure - pane is actually dead
+            executionState = failTask(
+              executionState,
+              result.identifier,
+              executionConfig.tui?.state_dir
+            );
+            console.log(chalk.red(`  ✗ ${result.identifier}: ${result.error ?? result.status}`));
+          }
         }
       }
 

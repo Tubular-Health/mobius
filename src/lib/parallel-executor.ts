@@ -5,6 +5,7 @@
  * execution, with output routed to tmux panes.
  */
 
+import { execa } from 'execa';
 import type { ExecutionConfig } from '../types.js';
 import type { SubTask } from './task-graph.js';
 import {
@@ -418,4 +419,47 @@ export function aggregateResults(results: ExecutionResult[]): {
  */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Check if a tmux pane still exists and has a running process
+ *
+ * This function verifies the actual state of a tmux pane by checking:
+ * 1. Whether the pane exists at all
+ * 2. Whether the pane's process is still running (not dead)
+ *
+ * Use this before marking a task as failed to ensure the agent is actually
+ * dead and not just temporarily unresponsive.
+ *
+ * @param paneId - The tmux pane ID (e.g., "%0", "%1")
+ * @returns true if the pane exists and has an active process, false otherwise
+ */
+export async function isPaneStillRunning(paneId: string): Promise<boolean> {
+  try {
+    // Use tmux list-panes with format to check if pane exists and is alive
+    // #{pane_dead} is "1" if the pane's command has exited, "0" otherwise
+    const { stdout } = await execa('tmux', [
+      'list-panes',
+      '-a', // All panes across all sessions
+      '-F',
+      '#{pane_id}:#{pane_dead}',
+    ]);
+
+    // Parse output to find our pane
+    const lines = stdout.trim().split('\n').filter((line: string) => line.length > 0);
+
+    for (const line of lines) {
+      const [id, dead] = line.split(':');
+      if (id === paneId) {
+        // Pane exists - check if it's still running (not dead)
+        return dead !== '1';
+      }
+    }
+
+    // Pane not found in the list - it doesn't exist
+    return false;
+  } catch {
+    // tmux command failed - pane likely doesn't exist or tmux isn't running
+    return false;
+  }
 }

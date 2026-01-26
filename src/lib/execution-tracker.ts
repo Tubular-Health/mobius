@@ -154,7 +154,7 @@ export async function processResults(
       } else {
         // Agent reported success but Linear doesn't confirm
         // This could be a timing issue or actual failure
-        const canRetry = attempts < tracker.maxRetries;
+        const canRetry = attempts <= tracker.maxRetries;
         verifiedResults.push({
           ...result,
           success: false, // Override to false
@@ -166,7 +166,7 @@ export async function processResults(
       }
     } else {
       // Agent reported failure
-      const canRetry = attempts < tracker.maxRetries;
+      const canRetry = attempts <= tracker.maxRetries;
       verifiedResults.push({
         ...result,
         linearVerified: false,
