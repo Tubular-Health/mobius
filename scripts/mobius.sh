@@ -31,6 +31,12 @@ CONTAINER_NAME="${MOBIUS_CONTAINER:-mobius-sandbox}"
 MODEL="${MOBIUS_MODEL:-opus}"
 USE_SANDBOX="${MOBIUS_SANDBOX_ENABLED:-true}"
 
+# Parallel execution and worktree isolation defaults
+MAX_PARALLEL_AGENTS="${MOBIUS_MAX_PARALLEL_AGENTS:-3}"
+WORKTREE_PATH="${MOBIUS_WORKTREE_PATH:-../<repo>-worktrees/}"
+CLEANUP_ON_SUCCESS="${MOBIUS_CLEANUP_ON_SUCCESS:-true}"
+BASE_BRANCH="${MOBIUS_BASE_BRANCH:-main}"
+
 # Backend skill mappings
 declare -A BACKEND_SKILLS=(
     [linear]="/execute-linear-issue"
@@ -103,6 +109,18 @@ parse_yaml_config() {
                 execution.container_name)
                     [ -z "${MOBIUS_CONTAINER:-}" ] && CONTAINER_NAME="$value"
                     ;;
+                execution.max_parallel_agents)
+                    [ -z "${MOBIUS_MAX_PARALLEL_AGENTS:-}" ] && MAX_PARALLEL_AGENTS="$value"
+                    ;;
+                execution.worktree_path)
+                    [ -z "${MOBIUS_WORKTREE_PATH:-}" ] && WORKTREE_PATH="$value"
+                    ;;
+                execution.cleanup_on_success)
+                    [ -z "${MOBIUS_CLEANUP_ON_SUCCESS:-}" ] && CLEANUP_ON_SUCCESS="$value"
+                    ;;
+                execution.base_branch)
+                    [ -z "${MOBIUS_BASE_BRANCH:-}" ] && BASE_BRANCH="$value"
+                    ;;
             esac
         fi
     done < "$config_file"
@@ -154,6 +172,9 @@ parse_args() {
                 ;;
             --delay=*)
                 DELAY_SECONDS="${arg#*=}"
+                ;;
+            --parallel=*)
+                MAX_PARALLEL_AGENTS="${arg#*=}"
                 ;;
             *)
                 args+=("$arg")
@@ -219,6 +240,7 @@ OPTIONS:
     --backend=NAME       Planning backend to use (default: $DEFAULT_BACKEND)
     --model=MODEL        Claude model: opus, sonnet, haiku (default: $MODEL)
     --delay=SECONDS      Delay between iterations (default: $DELAY_SECONDS)
+    --parallel=N         Max parallel agents for parallel mode (default: $MAX_PARALLEL_AGENTS)
     --local, -l          Run locally (bypass container sandbox)
     --config             Show current configuration and exit
     --version, -v        Show version
@@ -232,12 +254,16 @@ CONFIGURATION:
     Default config:  $DEFAULT_CONFIG
 
     Environment variables override config file settings:
-      MOBIUS_BACKEND          Default backend
-      MOBIUS_DELAY_SECONDS    Delay between iterations
-      MOBIUS_MAX_ITERATIONS   Maximum iterations
-      MOBIUS_MODEL            Claude model
-      MOBIUS_CONTAINER        Docker container name
-      MOBIUS_SANDBOX_ENABLED  Enable sandbox mode (true/false)
+      MOBIUS_BACKEND              Default backend
+      MOBIUS_DELAY_SECONDS        Delay between iterations
+      MOBIUS_MAX_ITERATIONS       Maximum iterations
+      MOBIUS_MODEL                Claude model
+      MOBIUS_CONTAINER            Docker container name
+      MOBIUS_SANDBOX_ENABLED      Enable sandbox mode (true/false)
+      MOBIUS_MAX_PARALLEL_AGENTS  Max concurrent agents (default: 3)
+      MOBIUS_WORKTREE_PATH        Worktree base path (default: ../<repo>-worktrees/)
+      MOBIUS_CLEANUP_ON_SUCCESS   Remove worktree on success (true/false)
+      MOBIUS_BASE_BRANCH          Branch for feature branches (default: main)
 
 EXAMPLES:
     mobius VER-159                    Execute sub-tasks of VER-159 (Linear)
@@ -274,12 +300,18 @@ show_config() {
     fi
     echo ""
     echo "Current settings:"
-    echo "  backend:         $DEFAULT_BACKEND"
-    echo "  model:           $MODEL"
-    echo "  delay_seconds:   $DELAY_SECONDS"
-    echo "  max_iterations:  $MAX_ITERATIONS_DEFAULT"
-    echo "  sandbox:         $USE_SANDBOX"
-    echo "  container:       $CONTAINER_NAME"
+    echo "  backend:              $DEFAULT_BACKEND"
+    echo "  model:                $MODEL"
+    echo "  delay_seconds:        $DELAY_SECONDS"
+    echo "  max_iterations:       $MAX_ITERATIONS_DEFAULT"
+    echo "  sandbox:              $USE_SANDBOX"
+    echo "  container:            $CONTAINER_NAME"
+    echo ""
+    echo "Parallel execution:"
+    echo "  max_parallel_agents:  $MAX_PARALLEL_AGENTS"
+    echo "  worktree_path:        $WORKTREE_PATH"
+    echo "  cleanup_on_success:   $CLEANUP_ON_SUCCESS"
+    echo "  base_branch:          $BASE_BRANCH"
     echo ""
     echo "Available backends: ${!BACKEND_SKILLS[*]}"
 }
