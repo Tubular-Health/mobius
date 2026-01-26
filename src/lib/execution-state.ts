@@ -19,6 +19,22 @@ const DEFAULT_STATE_DIR = join(homedir(), '.mobius', 'state');
 const DEBOUNCE_MS = 150;
 
 /**
+ * Check if new active tasks were added (significant change that needs immediate update)
+ * This ensures the TUI shows tasks as active even if they complete quickly
+ */
+function hasNewActiveTasks(
+  oldState: ExecutionState | null,
+  newState: ExecutionState | null
+): boolean {
+  if (!newState || !newState.activeTasks.length) return false;
+  if (!oldState) return newState.activeTasks.length > 0;
+
+  // Check if there are any new task IDs in activeTasks
+  const oldIds = new Set(oldState.activeTasks.map(t => t.id));
+  return newState.activeTasks.some(t => !oldIds.has(t.id));
+}
+
+/**
  * Get the state directory path
  */
 export function getStateDir(stateDir?: string): string {
@@ -443,20 +459,37 @@ export function watchExecutionState(
         return;
       }
 
-      // Debounce rapid changes
+      // Read state immediately to check for significant changes
+      const newState = readExecutionState(parentId, stateDir);
+
+      // Fast path: immediately notify for new active tasks (ensures TUI shows tasks
+      // even if they complete quickly, before debounce fires)
+      if (hasNewActiveTasks(lastState, newState)) {
+        // Cancel any pending debounced update since we're updating now
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+          debounceTimer = null;
+        }
+        lastState = newState;
+        callback(newState);
+        return;
+      }
+
+      // Debounce other changes (completions, failures, timestamp updates)
       if (debounceTimer) {
         clearTimeout(debounceTimer);
       }
 
       debounceTimer = setTimeout(() => {
         debounceTimer = null;
-        const newState = readExecutionState(parentId, stateDir);
+        // Re-read state in case it changed during debounce
+        const currentState = readExecutionState(parentId, stateDir);
 
         // Only call callback if actual content changed (not just updatedAt timestamp)
         // This prevents unnecessary re-renders when only the timestamp changes
-        if (hasContentChanged(lastState, newState)) {
-          lastState = newState;
-          callback(newState);
+        if (hasContentChanged(lastState, currentState)) {
+          lastState = currentState;
+          callback(currentState);
         }
       }, DEBOUNCE_MS);
     });
