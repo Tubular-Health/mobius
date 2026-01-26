@@ -51,6 +51,7 @@ import {
   completeTask,
   failTask,
   removeActiveTask,
+  updateActiveTaskPane,
 } from '../lib/execution-state.js';
 import type { SubTask } from '../lib/task-graph.js';
 import type { ExecutionState } from '../types.js';
@@ -247,13 +248,14 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       }
 
       // Update execution state with active tasks (for TUI monitoring)
+      // Initially set pane to empty string - will be updated with real pane IDs after executeParallel
       for (const task of tasksToExecute) {
         executionState = addActiveTask(
           executionState,
           {
             id: task.identifier,
             pid: 0, // Will be updated when process spawns
-            pane: `%${tasksToExecute.indexOf(task)}`,
+            pane: '', // Placeholder until real pane ID is available
             startedAt: new Date().toISOString(),
             worktree: worktreeInfo.path,
           },
@@ -281,6 +283,18 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         worktreeInfo.path,
         session
       );
+
+      // Update execution state with real pane IDs from execution results
+      for (const result of results) {
+        if (result.pane) {
+          executionState = updateActiveTaskPane(
+            executionState,
+            result.identifier,
+            result.pane,
+            executionConfig.tui?.state_dir
+          );
+        }
+      }
 
       // Verify results via Linear SDK
       console.log(chalk.gray('Verifying results via Linear...'));

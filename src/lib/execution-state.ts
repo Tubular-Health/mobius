@@ -354,6 +354,35 @@ export function removeActiveTask(
 }
 
 /**
+ * Update the pane ID of an active task
+ *
+ * Used to set the real tmux pane ID after executeParallel() returns,
+ * replacing the initial empty string placeholder.
+ *
+ * @param state - Current execution state
+ * @param taskId - Task identifier (e.g., "MOB-124")
+ * @param paneId - The real tmux pane ID (e.g., "%0", "%1")
+ * @param stateDir - Optional custom state directory
+ * @returns Updated execution state
+ */
+export function updateActiveTaskPane(
+  state: ExecutionState,
+  taskId: string,
+  paneId: string,
+  stateDir?: string
+): ExecutionState {
+  const newState: ExecutionState = {
+    ...state,
+    activeTasks: state.activeTasks.map(task =>
+      task.id === taskId ? { ...task, pane: paneId } : task
+    ),
+  };
+
+  writeExecutionState(newState, stateDir);
+  return newState;
+}
+
+/**
  * Watch the execution state file for changes
  *
  * Uses fs.watch() for instant file change detection with 50ms debouncing.
