@@ -10,6 +10,7 @@ import { checkGit } from '../lib/checks/git.js';
 import { checkJiraMcp } from '../lib/checks/jira-mcp.js';
 import { checkPath, checkSkills } from '../lib/checks/path.js';
 import { checkLinearMcp } from '../lib/checks/linear-mcp.js';
+import { checkNodeVersion, checkJq } from '../lib/checks/optional.js';
 import { checkTmux } from '../lib/checks/tmux.js';
 import type { CheckResult } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
@@ -105,6 +106,14 @@ export async function doctor(): Promise<void> {
   const tmuxResult = await checkTmux();
   results.push(tmuxResult);
   console.log(formatResult(tmuxResult));
+
+  const nodeResult = await checkNodeVersion();
+  results.push(nodeResult);
+  console.log(formatResult(nodeResult));
+
+  const jqResult = await checkJq();
+  results.push(jqResult);
+  console.log(formatResult(jqResult));
 
   // Summary
   console.log('');
