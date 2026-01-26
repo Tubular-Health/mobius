@@ -296,11 +296,12 @@ When running in parallel mode, each agent receives a specific subtask ID to prev
 5. **Mark In Progress** - Move sub-task to "In Progress" immediately before starting work
 6. **Prime context** - Load completed dependent tasks for implementation context
 7. **Implement changes** - Execute the single-file-focused work
-8. **Verify** - Run tests, typecheck, and lint
+8. **Verify standard** - Run tests, typecheck, and lint
 9. **Fix if needed** - Attempt automatic fixes on verification failures
-10. **Commit and push** - Create commit with conventional message, push
-11. **Update status** - Move sub-task to "Done" if all criteria met
-12. **Report completion** - Show what was done and what's next
+10. **Verify sub-task** - Execute `### Verify` command from sub-task if present (with safety checks)
+11. **Commit and push** - Create commit with conventional message, push
+12. **Update status** - Move sub-task to "Done" if all criteria met
+13. **Report completion** - Show what was done and what's next
 </workflow>
 </quick_start>
 
@@ -566,9 +567,165 @@ All checks must pass before proceeding:
 - Tests: PASS (X tests, Y assertions)
 - Lint: PASS
 
-Ready to commit.
+Ready for sub-task verify command (if present).
 ```
 </verification_success>
+
+<subtask_verify_command>
+**After standard verification passes**, check for and execute a `### Verify` command from the sub-task description.
+
+<parse_verify_block>
+Extract the verify command from the sub-task description:
+
+1. Look for `### Verify` section in the sub-task description
+2. Extract the bash code block immediately following the header
+3. The command is the content between ` ```bash ` and ` ``` ` markers
+
+**Example sub-task description**:
+```markdown
+### Verify
+
+```bash
+grep -q "export function" src/utils/helpers.ts && \
+npm test -- --grep "helpers" && \
+echo "PASS: Helper function verified"
+```
+```
+
+**Extraction result**: The bash command to execute.
+</parse_verify_block>
+
+<verify_command_safety>
+**CRITICAL**: Before executing any verify command, check for dangerous patterns.
+
+**Block these patterns** (do NOT execute, report as unsafe):
+- `rm -rf` or `rm -r` with wildcards or root paths
+- `sudo` commands
+- Commands writing to system paths (`/etc`, `/usr`, `/var`)
+- `chmod 777` or overly permissive permission changes
+- `curl | bash` or `wget | sh` piping to shell
+- `dd if=` disk operations
+- `mkfs` or filesystem formatting
+- `:(){:|:&};:` or other fork bombs
+- `> /dev/` device writes
+- Commands containing `$()` or backticks with destructive operations
+
+**Safety check implementation**:
+```bash
+# Patterns to block (regex)
+DANGEROUS_PATTERNS=(
+  "rm\s+(-[rf]+\s+)*(/|~|\*|\.\.|\\$)"
+  "sudo\s+"
+  "chmod\s+777"
+  "curl.*\|\s*(ba)?sh"
+  "wget.*\|\s*(ba)?sh"
+  "dd\s+if="
+  "mkfs"
+  ">\s*/dev/"
+  ":\(\)\s*\{.*\}.*;"
+)
+```
+
+If a dangerous pattern is detected:
+```markdown
+## Verify Command Blocked
+
+**Reason**: Command contains potentially dangerous pattern: `{pattern}`
+**Command**: `{command}`
+
+The verify command was not executed for safety reasons.
+Proceeding to commit phase without sub-task verification.
+
+**Note**: Review the verify command in the sub-task description.
+```
+</verify_command_safety>
+
+<execute_verify_command>
+If the verify command passes safety checks, execute it:
+
+```bash
+# Execute the extracted verify command
+{extracted_verify_command}
+```
+
+**Timeout**: Verify commands have a 60-second timeout to prevent hanging.
+
+**On success** (exit code 0):
+```markdown
+## Sub-task Verify Command
+- Command: `{command_summary}`
+- Result: PASS
+- Output: {last few lines of output}
+
+Verify command passed. Ready to commit.
+```
+
+**On failure** (non-zero exit code):
+The verify command failure triggers an implementation review loop:
+
+1. Read the error output to understand what failed
+2. Review the implementation against the sub-task requirements
+3. Attempt to fix the issue (similar to handling test failures)
+4. Re-run the verify command
+5. Repeat up to 3 times
+
+If verify command still fails after 3 attempts:
+```markdown
+STATUS: VERIFICATION_FAILED
+
+## Sub-task Failed: {sub-task-id}
+
+### Error Summary
+Sub-task verify command failed after 3 attempts
+
+### Verify Command
+```bash
+{command}
+```
+
+### Last Error Output
+```
+{error output}
+```
+
+### Attempted Fixes
+1. {fix attempt 1}
+2. {fix attempt 2}
+3. {fix attempt 3}
+
+### Files Modified (uncommitted)
+- {file1}
+- {file2}
+
+The loop will stop. Review the verify command and implementation.
+```
+
+**CRITICAL**: After outputting this failure report, STOP.
+</execute_verify_command>
+
+<verify_command_fallback>
+**If no `### Verify` section exists** in the sub-task description:
+
+- This is normal and expected for older sub-tasks
+- Proceed directly to commit phase after standard verification passes
+- Include note in completion report:
+
+```markdown
+## Verification Results
+- Typecheck: PASS
+- Tests: PASS
+- Lint: PASS
+- Sub-task verify: N/A (no verify block in sub-task)
+
+Ready to commit.
+```
+
+**Fallback behavior ensures**:
+- Backward compatibility with existing sub-tasks
+- Standard tests/typecheck/lint still required
+- No failure if verify block is missing
+</verify_command_fallback>
+</subtask_verify_command>
 </verification_phase>
 
 <commit_phase>
@@ -741,6 +898,7 @@ STATUS: SUBTASK_COMPLETE
 - Typecheck: PASS
 - Tests: PASS
 - Lint: PASS
+- Sub-task verify: {PASS/N/A}
 
 ---
 
@@ -786,6 +944,7 @@ STATUS: SUBTASK_PARTIAL
 - Typecheck: {PASS/FAIL/NOT_RUN}
 - Tests: {PASS/FAIL/NOT_RUN}
 - Lint: {PASS/FAIL/NOT_RUN}
+- Sub-task verify: {PASS/FAIL/NOT_RUN/N/A}
 
 ### Why Stopping
 {reason - e.g., "context limit reached", "blocking issue discovered", "time constraint"}
@@ -934,6 +1093,7 @@ A successful execution achieves:
 - [ ] Typecheck passes
 - [ ] Tests pass
 - [ ] Lint passes
+- [ ] Sub-task verify command passes (if present in description)
 - [ ] Commit created with conventional message
 - [ ] Changes pushed to remote
 - [ ] Sub-task moved to "Done" (if fully complete)
