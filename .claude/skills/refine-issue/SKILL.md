@@ -193,12 +193,25 @@ For each sub-task, define:
 
 **Change type**: Create | Modify | Delete
 
-**Description**:
-[2-3 sentences describing exactly what to implement in this file]
+### Action
+[2-4 sentences of specific implementation guidance]
+- Use {library/pattern} following `src/existing/example.ts`
+- Handle {error case} by {specific handling}
+- Return {exact output shape}
 
-**Acceptance criteria**:
-- [ ] Specific, verifiable outcome 1
-- [ ] Specific, verifiable outcome 2
+### Avoid
+- Do NOT {anti-pattern 1} because {reason}
+- Do NOT {anti-pattern 2} because {reason}
+
+### Verify
+```bash
+{executable command that proves completion}
+```
+
+### Done
+- [ ] {Measurable outcome 1}
+- [ ] {Measurable outcome 2}
+- [ ] {Measurable outcome 3}
 
 **Blocked by**: [List of sub-task numbers that must complete first, or "None"]
 
@@ -400,34 +413,91 @@ Created {count} sub-tasks for {parent issue ID}:
 
 **Breakdown**:
 
+```markdown
+## Sub-task: 1 - Define theme types
+
+**Target file(s)**: `src/types/theme.ts`
+**Change type**: Create
+
+### Action
+Create TypeScript type definitions for the theme system. Define `Theme` type with light/dark/system modes, `ThemeContextValue` interface with current theme and toggle function.
+- Follow existing type patterns in `src/types/` directory
+- Export all types for use by ThemeProvider and useTheme hook
+
+### Avoid
+- Do NOT include implementation logic in types file because types should be pure declarations
+- Do NOT use `any` type because it defeats type safety
+
+### Verify
+```bash
+grep -q "export type Theme" src/types/theme.ts && \
+grep -q "export interface ThemeContextValue" src/types/theme.ts && \
+echo "PASS"
 ```
-1. Define theme types
-   File: src/types/theme.ts (create)
-   Blocked by: None
 
-2. Create ThemeProvider context
-   File: src/contexts/ThemeContext.tsx (create)
-   Blocked by: 1
+### Done
+- [ ] `Theme` type exported with 'light' | 'dark' | 'system' values
+- [ ] `ThemeContextValue` interface exported with theme and setTheme properties
+- [ ] File compiles without TypeScript errors
 
-3. Implement useTheme hook
-   File: src/hooks/useTheme.ts (create)
-   Blocked by: 2
+**Blocked by**: None
+**Enables**: 2, 3
 
-4. Add ThemeToggle component
-   File: src/components/settings/ThemeToggle.tsx (create)
-   Blocked by: 3
+---
 
-5. Update Header with theme support
-   File: src/components/layout/Header.tsx (modify)
-   Blocked by: 3
+## Sub-task: 2 - Create ThemeProvider context
 
-6. Update Sidebar with theme support
-   File: src/components/layout/Sidebar.tsx (modify)
-   Blocked by: 3
+**Target file(s)**: `src/contexts/ThemeContext.tsx`
+**Change type**: Create
 
-7. Update Card component with theme support
-   File: src/components/ui/Card.tsx (modify)
-   Blocked by: 3
+### Action
+Create React context provider for theme state management. Import types from sub-task 1, implement localStorage persistence, and detect system preference.
+- Follow existing context patterns in `src/contexts/` directory
+- Use `useEffect` for system preference detection via `matchMedia`
+
+### Avoid
+- Do NOT call hooks conditionally because it violates React rules
+- Do NOT forget SSR safety check for localStorage because window may not exist
+
+### Verify
+```bash
+grep -q "createContext" src/contexts/ThemeContext.tsx && \
+grep -q "ThemeProvider" src/contexts/ThemeContext.tsx && \
+echo "PASS"
+```
+
+### Done
+- [ ] ThemeContext created with proper default value
+- [ ] ThemeProvider component exports and wraps children
+- [ ] Theme persisted to localStorage on change
+- [ ] System preference detected on mount
+
+**Blocked by**: 1
+**Enables**: 3
+
+---
+
+## Sub-task: 3 - Implement useTheme hook
+
+**Target file(s)**: `src/hooks/useTheme.ts`
+**Change type**: Create
+**Blocked by**: 2
+**Enables**: 4, 5, 6, 7
+
+---
+
+## Sub-task: 4 - Add ThemeToggle component
+
+**Target file(s)**: `src/components/settings/ThemeToggle.tsx`
+**Change type**: Create
+**Blocked by**: 3
+
+---
+
+## Sub-task: 5-7 - Update existing components
+
+Files: Header.tsx, Sidebar.tsx, Card.tsx (modify)
+**Blocked by**: 3
 ```
 
 **Parallel groups**:
