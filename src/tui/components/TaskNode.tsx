@@ -8,7 +8,8 @@
 import { Text } from 'ink';
 import type { SubTask, TaskGraph } from '../../lib/task-graph.js';
 import { getBlockers } from '../../lib/task-graph.js';
-import { STATUS_COLORS, STATUS_ICONS, STRUCTURE_COLORS } from '../theme.js';
+import { STRUCTURE_COLORS } from '../theme.js';
+import { StatusIndicator } from './StatusIndicator.js';
 
 export interface TaskNodeProps {
   task: SubTask;
@@ -45,14 +46,12 @@ function formatBlockerSuffix(task: SubTask, graph: TaskGraph): string {
  * - │   └── [·] MOB-127: Add tests (blocked by: MOB-126)
  */
 export function TaskNode({ task, graph, prefix, connector }: TaskNodeProps): JSX.Element {
-  const icon = STATUS_ICONS[task.status];
-  const statusColor = STATUS_COLORS[task.status];
   const blockerSuffix = formatBlockerSuffix(task, graph);
 
   return (
     <Text>
       <Text color={STRUCTURE_COLORS.muted}>{prefix}{connector}</Text>
-      <Text color={statusColor}>{icon}</Text>
+      <StatusIndicator status={task.status} />
       <Text color={STRUCTURE_COLORS.text}> {task.identifier}: {task.title}</Text>
       {blockerSuffix && (
         <Text color={STRUCTURE_COLORS.muted}>{blockerSuffix}</Text>
