@@ -12,7 +12,9 @@
     "dev": "tsc --watch",
     "start": "node dist/bin/mobius.js",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run build"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "prepare": "husky"
   },
   "keywords": [
     "claude",
@@ -48,9 +50,12 @@
     "yaml": "^2.3.0"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.3.1",
+    "@commitlint/config-conventional": "^20.3.1",
     "@mermaid-js/mermaid-cli": "^11.0.0",
     "@types/node": "^20.0.0",
     "@types/which": "^3.0.0",
+    "husky": "^9.1.7",
     "typescript": "^5.0.0"
   }
 }
