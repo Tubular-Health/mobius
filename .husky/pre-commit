@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# Check if package.json is staged for commit
+if git diff --cached --name-only | grep -q "^package\.json$"; then
+  # Verify package-lock.json is in sync
+  npm install --package-lock-only --ignore-scripts 2>/dev/null
+
+  if ! git diff --quiet package-lock.json; then
+    echo "Error: package-lock.json is out of sync with package.json"
+    echo "Run 'npm install' and stage the updated lock file"
+    git checkout package-lock.json 2>/dev/null
+    exit 1
+  fi
+fi

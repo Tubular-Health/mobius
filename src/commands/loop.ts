@@ -6,13 +6,13 @@
  */
 
 import chalk from 'chalk';
-import { execa } from 'execa';
 import which from 'which';
 import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
 import { BACKEND_ID_PATTERNS } from '../types.js';
 import type { Backend, Model, ExecutionConfig } from '../types.js';
 import { createWorktree, removeWorktree } from '../lib/worktree.js';
+import { fetchLinearIssue, fetchLinearSubTasks, type ParentIssue } from '../lib/linear.js';
 import {
   buildTaskGraph,
   getReadyTasks,
@@ -20,7 +20,6 @@ import {
   getGraphStats,
   updateTaskStatus,
   type TaskGraph,
-  type LinearIssue,
 } from '../lib/task-graph.js';
 import { renderFullTreeOutput } from '../lib/tree-renderer.js';
 import { renderMermaidWithTitle } from '../lib/mermaid-renderer.js';
@@ -36,9 +35,16 @@ import {
 } from '../lib/tmux-display.js';
 import {
   executeParallel,
-  aggregateResults,
   calculateParallelism,
 } from '../lib/parallel-executor.js';
+import {
+  createTracker,
+  assignTask,
+  processResults,
+  getRetryTasks,
+  hasPermamentFailures,
+} from '../lib/execution-tracker.js';
+import type { SubTask } from '../lib/task-graph.js';
 
 export interface LoopOptions {
   maxIterations?: number;
@@ -47,13 +53,6 @@ export interface LoopOptions {
   model?: Model;
   parallel?: number; // Override max_parallel_agents
   sequential?: boolean; // Use sequential bash loop instead
-}
-
-interface ParentIssue {
-  id: string;
-  identifier: string;
-  title: string;
-  gitBranchName: string;
 }
 
 /**
@@ -152,13 +151,31 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
   let allComplete = false;
   let anyFailed = false;
 
+  // Initialize execution tracker for verification and retry logic
+  const tracker = createTracker(
+    executionConfig.max_retries ?? 2,
+    executionConfig.verification_timeout ?? 5000
+  );
+
+  // Track tasks pending retry
+  let retryQueue: SubTask[] = [];
+
   try {
     // Main execution loop
     while (iteration < maxIterations) {
       iteration++;
 
-      // Get ready tasks
-      const readyTasks = getReadyTasks(graph);
+      // Get ready tasks (combine fresh ready tasks with retry queue)
+      let readyTasks = getReadyTasks(graph);
+
+      // Add retry tasks to ready queue if they're not already there
+      for (const retryTask of retryQueue) {
+        if (!readyTasks.some(t => t.id === retryTask.id)) {
+          readyTasks.push(retryTask);
+        }
+      }
+      retryQueue = []; // Clear retry queue after merging
+
       const stats = getGraphStats(graph);
 
       // Check completion conditions
@@ -181,55 +198,78 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
 
       // Calculate parallelism
       const parallelCount = calculateParallelism(readyTasks.length, executionConfig);
+      const tasksToExecute = readyTasks.slice(0, parallelCount);
+
       console.log(
         chalk.blue(
           `\nIteration ${iteration}: Executing ${parallelCount} task(s) in parallel...`
         )
       );
+      console.log(
+        chalk.gray(`  Tasks: ${tasksToExecute.map(t => t.identifier).join(', ')}`)
+      );
+
+      // Assign tasks to tracker before execution
+      for (const task of tasksToExecute) {
+        assignTask(tracker, task);
+      }
 
       // Update status pane
       const loopStatus: LoopStatus = {
         totalTasks: stats.total,
         completedTasks: stats.done,
-        activeAgents: readyTasks.slice(0, parallelCount).map(t => ({
+        activeAgents: tasksToExecute.map(t => ({
           taskId: t.id,
           identifier: t.identifier,
         })),
         blockedTasks: getBlockedTasks(graph).map(t => t.identifier),
         elapsed: Date.now() - startTime,
       };
-      await updateStatusPane(statusPane, loopStatus);
+      await updateStatusPane(statusPane, loopStatus, sessionName);
 
-      // Execute tasks in parallel
+      // Execute tasks in parallel - each task carries its own identifier
       const results = await executeParallel(
-        readyTasks,
+        tasksToExecute,
         executionConfig,
         worktreeInfo.path,
-        session,
-        taskId
+        session
       );
 
-      // Process results and update graph
-      const aggregated = aggregateResults(results);
+      // Verify results via Linear SDK
+      console.log(chalk.gray('Verifying results via Linear...'));
+      const verifiedResults = await processResults(tracker, results);
+
+      // Process verified results and update graph
+      const verified = verifiedResults.filter(r => r.success && r.linearVerified);
+      const needRetry = getRetryTasks(verifiedResults, tasksToExecute);
+      const permanentFailures = verifiedResults.filter(r => !r.success && !r.shouldRetry);
+
       console.log(
         chalk.gray(
-          `Completed: ${aggregated.succeeded}/${aggregated.total} succeeded`
+          `Verified: ${verified.length}/${verifiedResults.length} | ` +
+          `Retry: ${needRetry.length} | Failed: ${permanentFailures.length}`
         )
       );
 
-      for (const result of results) {
-        if (result.success) {
+      // Update graph for verified successes only
+      for (const result of verifiedResults) {
+        if (result.success && result.linearVerified) {
           graph = updateTaskStatus(graph, result.taskId, 'done');
-          console.log(chalk.green(`  ✓ ${result.identifier}`));
+          console.log(chalk.green(`  ✓ ${result.identifier} (Linear: ${result.linearStatus})`));
+        } else if (result.shouldRetry) {
+          console.log(chalk.yellow(`  ↻ ${result.identifier}: Retrying (${result.error ?? 'verification pending'})`));
         } else {
-          anyFailed = true;
           console.log(chalk.red(`  ✗ ${result.identifier}: ${result.error ?? result.status}`));
         }
       }
 
-      // If any task failed, stop the loop
-      if (anyFailed) {
-        console.log(chalk.red('\nStopping due to task failure.'));
+      // Queue tasks for retry
+      retryQueue = needRetry;
+
+      // Check for permanent failures
+      if (hasPermamentFailures(verifiedResults)) {
+        anyFailed = true;
+        console.log(chalk.red('\nStopping due to permanent task failure (max retries exceeded).'));
         break;
       }
 
@@ -306,56 +346,6 @@ async function fetchParentIssue(
 }
 
 /**
- * Fetch a Linear issue using the Claude MCP bridge
- *
- * This function invokes Claude with a simple prompt to fetch issue data
- * via the Linear MCP tool.
- */
-async function fetchLinearIssue(taskId: string): Promise<ParentIssue | null> {
-  try {
-    // Use Claude with --print to get the issue data
-    const prompt = `Get the Linear issue ${taskId} using mcp__plugin_linear_linear__get_issue. Return ONLY a JSON object with these fields: id, identifier, title, gitBranchName. No explanation, just the JSON.`;
-
-    const { stdout } = await execa('claude', ['-p', '--output-format', 'json'], {
-      input: prompt,
-      timeout: 30000,
-    });
-
-    // Parse the response - Claude's JSON output format wraps the result
-    const response = JSON.parse(stdout);
-    const result = response.result || response;
-
-    // Try to extract JSON from the result if it's a string
-    let issueData: { id?: string; identifier?: string; title?: string; gitBranchName?: string };
-    if (typeof result === 'string') {
-      // Find JSON in the string
-      const jsonMatch = result.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        issueData = JSON.parse(jsonMatch[0]);
-      } else {
-        return null;
-      }
-    } else {
-      issueData = result;
-    }
-
-    if (!issueData.id || !issueData.identifier) {
-      return null;
-    }
-
-    return {
-      id: issueData.id,
-      identifier: issueData.identifier,
-      title: issueData.title || '',
-      gitBranchName: issueData.gitBranchName || `feature/${taskId.toLowerCase()}`,
-    };
-  } catch (error) {
-    console.error(chalk.gray(`Failed to fetch issue: ${error instanceof Error ? error.message : String(error)}`));
-    return null;
-  }
-}
-
-/**
  * Build the initial task graph from Linear sub-tasks
  */
 async function buildInitialGraph(
@@ -385,42 +375,6 @@ async function buildInitialGraph(
 }
 
 /**
- * Fetch Linear sub-tasks using the Claude MCP bridge
- */
-async function fetchLinearSubTasks(parentId: string): Promise<LinearIssue[] | null> {
-  try {
-    const prompt = `List all sub-tasks of Linear issue with ID "${parentId}" using mcp__plugin_linear_linear__list_issues with parentId parameter, then for each sub-task get its relations using mcp__plugin_linear_linear__get_issue with includeRelations: true. Return ONLY a JSON array of objects with these fields: id, identifier, title, status, gitBranchName, relations (containing blockedBy array with id and identifier). No explanation, just the JSON array.`;
-
-    const { stdout } = await execa('claude', ['-p', '--output-format', 'json'], {
-      input: prompt,
-      timeout: 60000, // Longer timeout for multiple API calls
-    });
-
-    const response = JSON.parse(stdout);
-    const result = response.result || response;
-
-    let subTasks: LinearIssue[];
-    if (typeof result === 'string') {
-      const jsonMatch = result.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        subTasks = JSON.parse(jsonMatch[0]);
-      } else {
-        return null;
-      }
-    } else if (Array.isArray(result)) {
-      subTasks = result;
-    } else {
-      return null;
-    }
-
-    return subTasks;
-  } catch (error) {
-    console.error(chalk.gray(`Failed to fetch sub-tasks: ${error instanceof Error ? error.message : String(error)}`));
-    return null;
-  }
-}
-
-/**
  * Post Mermaid diagram as comment on parent Linear issue
  */
 async function postMermaidDiagram(
@@ -432,13 +386,24 @@ async function postMermaidDiagram(
     return;
   }
 
+  const { getLinearClient } = await import('../lib/linear.js');
+  const client = getLinearClient();
+  if (!client) {
+    return;
+  }
+
   try {
     const diagram = renderMermaidWithTitle(graph);
-    const prompt = `Create a comment on Linear issue ${taskId} with this content:\n\n${diagram}\n\nUse mcp__plugin_linear_linear__create_comment. Just confirm it was posted.`;
 
-    await execa('claude', ['-p'], {
-      input: prompt,
-      timeout: 15000,
+    // Find the issue by identifier
+    const issue = await client.issue(taskId);
+    if (!issue) {
+      return;
+    }
+
+    await client.createComment({
+      issueId: issue.id,
+      body: diagram,
     });
 
     console.log(chalk.gray('Posted task dependency diagram to Linear'));

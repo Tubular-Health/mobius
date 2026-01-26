@@ -132,5 +132,5 @@ export function getDefaultConfigPath(): string {
  * Get AGENTS.md template path
  */
 export function getAgentsTemplatePath(): string {
-  return join(getPackageRoot(), 'AGENTS.md');
+  return join(getPackageRoot(), 'templates', 'AGENTS.md');
 }

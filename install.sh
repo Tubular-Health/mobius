@@ -100,7 +100,7 @@ install_skills() {
 }
 
 copy_agents_template() {
-    info "AGENTS.md template available at: $SCRIPT_DIR/AGENTS.md"
+    info "AGENTS.md template available at: $SCRIPT_DIR/templates/AGENTS.md"
     info "Copy it to your project root and customize for your codebase."
 }
 

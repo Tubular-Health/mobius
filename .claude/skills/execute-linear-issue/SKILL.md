@@ -65,31 +65,60 @@ Each sub-task is designed to:
 
 <quick_start>
 <invocation>
-Pass the parent issue ID:
+Pass an issue ID (either parent or subtask):
 
 ```
-/execute-linear-issue VRZ-123
+/execute-linear-issue VRZ-123    # Parent issue - finds next ready subtask
+/execute-linear-issue VRZ-124    # Subtask - executes this specific task
 ```
 
-The skill will find the next ready sub-task automatically.
+When running in parallel mode, each agent receives a specific subtask ID to prevent race conditions.
 </invocation>
 
 <workflow>
-1. **Load parent issue** - Get high-level context and acceptance criteria
-2. **Find ready sub-task** - Identify sub-task with no unresolved blockers
-3. **Prime context** - Load completed dependent tasks for implementation context
-4. **Implement changes** - Execute the single-file-focused work
-5. **Verify** - Run tests, typecheck, and lint
-6. **Fix if needed** - Attempt automatic fixes on verification failures
-7. **Commit and push** - Create commit with conventional message, push
-8. **Update Linear** - Move sub-task to "In Progress" (ready for review)
-9. **Report completion** - Show what was done and what's next
+1. **Detect issue type** - Check if passed ID is a subtask (has parent) or parent issue
+2. **Load parent issue** - Get high-level context and acceptance criteria
+3. **Find ready sub-task** - If parent was passed, find first ready subtask (skip if subtask was passed)
+4. **Mark In Progress** - Move sub-task to "In Progress" immediately before starting work
+5. **Prime context** - Load completed dependent tasks for implementation context
+6. **Implement changes** - Execute the single-file-focused work
+7. **Verify** - Run tests, typecheck, and lint
+8. **Fix if needed** - Attempt automatic fixes on verification failures
+9. **Commit and push** - Create commit with conventional message, push
+10. **Update Linear** - Move sub-task to "Done" if all criteria met
+11. **Report completion** - Show what was done and what's next
 </workflow>
 </quick_start>
 
 <context_priming_phase>
+<detect_issue_type>
+**FIRST**: Determine if the passed issue ID is a subtask or a parent issue.
+
+```
+mcp__plugin_linear_linear__get_issue
+  id: "{issue-id}"
+  includeRelations: true
+```
+
+**Check the `parent` field in the response**:
+
+1. **If `parent` field EXISTS** → This is a **SUBTASK**
+   - The passed ID is the specific subtask to execute (e.g., "MOB-124")
+   - Skip the "find ready subtask" phase entirely
+   - Use this subtask directly for implementation
+   - Load the parent issue for context (the `parent.id` from response)
+
+2. **If `parent` field is NULL/MISSING** → This is a **PARENT ISSUE**
+   - The passed ID is the parent (e.g., "MOB-123")
+   - Continue with the legacy "find ready subtask" flow below
+   - This is the fallback for backward compatibility
+
+**Why this matters**: When running in parallel mode (`mobius loop MOB-123 --parallel=3`), each agent receives a specific subtask ID to prevent race conditions. The orchestrator assigns tasks upfront, so each agent should execute exactly the task it was given.
+</detect_issue_type>
+
 <load_parent_issue>
-First, fetch the parent issue for high-level context:
+If the issue is a subtask, fetch its parent for high-level context.
+If the issue is a parent, this is the issue itself.
 
 ```
 mcp__plugin_linear_linear__get_issue
@@ -105,7 +134,9 @@ Extract and retain:
 </load_parent_issue>
 
 <find_ready_subtask>
-List all sub-tasks of the parent:
+**Skip this section if executing a specific subtask (issue had `parent` field).**
+
+If a parent issue was passed (legacy mode), list all sub-tasks of the parent:
 
 ```
 mcp__plugin_linear_linear__list_issues
@@ -144,6 +175,32 @@ Select the FIRST sub-task where all blockers are resolved.
 
 If any stop condition is met, output the status message and STOP. Do not continue.
 </find_ready_subtask>
+
+<mark_in_progress>
+**IMMEDIATELY** after selecting a sub-task to work on, move it to "In Progress":
+
+```
+mcp__plugin_linear_linear__update_issue
+  id: "{sub-task-id}"
+  state: "In Progress"
+```
+
+Add a comment indicating work has started:
+
+```
+mcp__plugin_linear_linear__create_comment
+  issueId: "{sub-task-id}"
+  body: |
+    🚀 **Work Started**
+
+    Agent beginning implementation of this sub-task.
+```
+
+**Why this matters**: Moving to "In Progress" immediately ensures:
+- Other agents (in parallel mode) won't pick up the same task
+- The TUI/dashboard shows accurate real-time status
+- If the agent crashes or times out, the task remains "In Progress" for the next loop
+</mark_in_progress>
 
 <load_dependency_context>
 For each completed blocker of the selected sub-task:
@@ -400,17 +457,21 @@ Confirm:
 </commit_phase>
 
 <linear_update_phase>
-<update_subtask_status>
-Move sub-task to "In Progress" (ready for review):
+<update_subtask_status_done>
+After successful commit with all acceptance criteria met, move sub-task to "Done":
 
 ```
 mcp__plugin_linear_linear__update_issue
   id: "{sub-task-id}"
-  state: "In Progress"
+  state: "Done"
 ```
 
-**Note**: Using "In Progress" as the review state. Adjust if workspace has a dedicated review state.
-</update_subtask_status>
+**Criteria for moving to "Done"**:
+- All acceptance criteria from the sub-task are implemented
+- All verification checks pass (typecheck, tests, lint)
+- Changes are committed and pushed
+- No outstanding work remains for this sub-task
+</update_subtask_status_done>
 
 <add_completion_comment>
 Add comment documenting the implementation:
@@ -419,7 +480,7 @@ Add comment documenting the implementation:
 mcp__plugin_linear_linear__create_comment
   issueId: "{sub-task-id}"
   body: |
-    ## Implementation Complete
+    ## ✅ Implementation Complete
 
     **Commit**: {commit-hash}
     **Files modified**:
@@ -434,9 +495,49 @@ mcp__plugin_linear_linear__create_comment
     - Tests: PASS
     - Lint: PASS
 
-    Ready for review.
+    **Acceptance Criteria**:
+    - [x] {criterion 1}
+    - [x] {criterion 2}
+    - [x] {criterion 3}
 ```
 </add_completion_comment>
+
+<partial_completion_handling>
+If the agent must wrap up before completing all work (context limits, time constraints, or blocking issues discovered), keep the task "In Progress" and add a detailed progress comment:
+
+```
+mcp__plugin_linear_linear__create_comment
+  issueId: "{sub-task-id}"
+  body: |
+    ## ⏸️ Partial Progress - Continuing Next Loop
+
+    **Progress Made**:
+    - {what was accomplished}
+    - {files modified so far}
+
+    **Remaining Work**:
+    - {what still needs to be done}
+    - {specific acceptance criteria not yet met}
+
+    **Current State**:
+    - Committed: {yes/no - if yes, include commit hash}
+    - Verification: {status of typecheck/tests/lint}
+
+    **Blockers/Issues Discovered** (if any):
+    - {any issues that need attention}
+
+    **Next Steps**:
+    - {what the next loop iteration should focus on}
+```
+
+**CRITICAL**: Do NOT move to "Done" if:
+- Some acceptance criteria are not yet implemented
+- Tests are failing
+- There are uncommitted changes that need more work
+- The implementation is incomplete
+
+Leave the task "In Progress" so the next loop iteration can continue the work.
+</partial_completion_handling>
 </linear_update_phase>
 
 <completion_report>
@@ -449,7 +550,7 @@ After successful execution, report and STOP:
 STATUS: SUBTASK_COMPLETE
 
 ## {Sub-task ID}: {Title}
-**Status**: Moved to In Progress (ready for review)
+**Status**: Moved to Done ✅
 **Commit**: {hash} on {branch}
 
 ### Files Modified
@@ -486,6 +587,44 @@ EXECUTION_COMPLETE: {sub-task-id}
 The loop script will invoke this skill again for the next sub-task.
 </report_format>
 
+<partial_completion_report>
+If wrapping up with incomplete work, output this report instead:
+
+```markdown
+# Sub-task Partial Progress
+
+STATUS: SUBTASK_PARTIAL
+
+## {Sub-task ID}: {Title}
+**Status**: In Progress (continuing next loop)
+**Commit**: {hash if any, or "uncommitted changes"}
+
+### Progress Made
+- {what was accomplished}
+- {files modified}
+
+### Remaining Work
+- [ ] {uncompleted criterion 1}
+- [ ] {uncompleted criterion 2}
+
+### Current State
+- Typecheck: {PASS/FAIL/NOT_RUN}
+- Tests: {PASS/FAIL/NOT_RUN}
+- Lint: {PASS/FAIL/NOT_RUN}
+
+### Why Stopping
+{reason - e.g., "context limit reached", "blocking issue discovered", "time constraint"}
+
+### Notes for Next Loop
+{specific guidance for continuation}
+
+---
+EXECUTION_PARTIAL: {sub-task-id}
+```
+
+This status keeps the task "In Progress" for the next loop iteration to continue.
+</partial_completion_report>
+
 <discovered_issues>
 If issues were discovered during implementation but not addressed:
 
@@ -514,21 +653,23 @@ Consider creating separate issues for these.
 
 3. Select VRZ-125 (first ready task)
 
-4. Load context from VRZ-124:
+4. **Immediately mark VRZ-125 as "In Progress"** and add start comment
+
+5. Load context from VRZ-124:
    - Created `src/types/theme.ts`
    - Exports: `Theme`, `ThemeMode`, `ThemeContextValue`
 
-5. Implement VRZ-125:
+6. Implement VRZ-125:
    - Create `src/contexts/ThemeContext.tsx`
    - Import types from completed dependency
    - Follow existing context patterns in codebase
 
-6. Verify:
+7. Verify:
    - `just typecheck` → PASS
    - `just test-file ThemeContext` → PASS
    - `just lint` → PASS
 
-7. Commit and push:
+8. Commit and push:
    ```
    feat(theme): create ThemeProvider context
 
@@ -540,22 +681,23 @@ Consider creating separate issues for these.
    Part-of: VRZ-100
    ```
 
-8. Update Linear:
-   - VRZ-125 → "In Progress"
-   - Add completion comment
+9. Update Linear:
+   - VRZ-125 → "Done" (all criteria met)
+   - Add completion comment with commit hash and acceptance criteria
 
-9. Report and STOP:
-   ```
-   STATUS: SUBTASK_COMPLETE
+10. Report and STOP:
+    ```
+    STATUS: SUBTASK_COMPLETE
 
-   ## VRZ-125: Create ThemeProvider
-   Completed: 2 of 4 sub-tasks
-   Ready next: VRZ-126
+    ## VRZ-125: Create ThemeProvider
+    **Status**: Moved to Done ✅
+    Completed: 2 of 4 sub-tasks
+    Ready next: VRZ-126
 
-   EXECUTION_COMPLETE: VRZ-125
-   ```
+    EXECUTION_COMPLETE: VRZ-125
+    ```
 
-10. **STOP** - Do not continue to VRZ-126. The loop will invoke again.
+11. **STOP** - Do not continue to VRZ-126. The loop will invoke again.
 </execution_example>
 </examples>
 
@@ -590,6 +732,14 @@ Consider creating separate issues for these.
 - BAD: Complete work but leave sub-task in Backlog
 - GOOD: Update status and add completion comment
 
+**Don't misuse status transitions**:
+- BAD: Leave task in Backlog while working on it
+- BAD: Move to Done before all acceptance criteria are met
+- BAD: Move to Done when tests are failing
+- GOOD: Move to "In Progress" immediately when starting work
+- GOOD: Move to "Done" only after successful commit with all criteria met
+- GOOD: Keep "In Progress" with progress comment if wrapping up incomplete
+
 **Don't ask user questions**:
 - BAD: Using AskUserQuestion during automated loop execution
 - GOOD: Make reasonable decisions or output failure STATUS and stop
@@ -600,6 +750,7 @@ A successful execution achieves:
 
 - [ ] Parent issue context loaded and understood
 - [ ] Correct ready sub-task selected (no unresolved blockers)
+- [ ] Sub-task moved to "In Progress" immediately when starting work
 - [ ] Context from completed dependencies incorporated
 - [ ] Implementation addresses all acceptance criteria
 - [ ] Only specified files modified (scope discipline)
@@ -608,7 +759,8 @@ A successful execution achieves:
 - [ ] Lint passes
 - [ ] Commit created with conventional message
 - [ ] Changes pushed to remote
-- [ ] Sub-task moved to "In Progress" in Linear
+- [ ] Sub-task moved to "Done" in Linear (if fully complete)
+- [ ] Or: Sub-task kept "In Progress" with progress comment (if partial)
 - [ ] Completion comment added to sub-task
 - [ ] Completion report output with STATUS marker
 - [ ] **STOPPED after one sub-task** (no continuation)
@@ -619,7 +771,8 @@ The skill outputs these status markers for loop script parsing:
 
 | Status | Meaning | Loop Action |
 |--------|---------|-------------|
-| `STATUS: SUBTASK_COMPLETE` | One sub-task was implemented | Continue loop |
+| `STATUS: SUBTASK_COMPLETE` | Sub-task fully implemented, moved to Done | Continue loop |
+| `STATUS: SUBTASK_PARTIAL` | Partial progress made, stays In Progress | Continue loop |
 | `STATUS: ALL_COMPLETE` | All sub-tasks are done | Exit loop |
 | `STATUS: ALL_BLOCKED` | Remaining sub-tasks are blocked | Exit loop |
 | `STATUS: NO_SUBTASKS` | No sub-tasks exist | Exit loop |

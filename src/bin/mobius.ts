@@ -6,6 +6,7 @@ import { doctor } from '../commands/doctor.js';
 import { setup } from '../commands/setup.js';
 import { run } from '../commands/run.js';
 import { loop } from '../commands/loop.js';
+import { tree } from '../commands/tree.js';
 import { showConfig } from '../commands/config.js';
 import { submit } from '../commands/submit.js';
 import type { Backend, Model } from '../types.js';
@@ -39,6 +40,18 @@ program
   .option('-e, --edit', 'Open config in editor')
   .action(async (options) => {
     await showConfig(options);
+  });
+
+program
+  .command('tree <task-id>')
+  .description('Display sub-task dependency tree without execution')
+  .option('-b, --backend <backend>', 'Backend: linear or jira')
+  .option('-m, --mermaid', 'Also output Mermaid diagram')
+  .action(async (taskId: string, options) => {
+    await tree(taskId, {
+      backend: options.backend as Backend | undefined,
+      mermaid: options.mermaid,
+    });
   });
 
 program
@@ -109,7 +122,7 @@ program
     }
 
     // If task ID looks like a command, let commander handle it
-    if (['setup', 'doctor', 'config', 'run', 'loop', 'submit', 'help'].includes(taskId)) {
+    if (['setup', 'doctor', 'config', 'tree', 'run', 'loop', 'submit', 'help'].includes(taskId)) {
       return;
     }
 

@@ -39,15 +39,17 @@
     "scripts",
     ".claude",
     "mobius.config.yaml",
-    "AGENTS.md"
+    "templates"
   ],
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
+    "@linear/sdk": "^71.0.0",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "execa": "^8.0.0",
     "ink": "^5.0.0",
     "ink-spinner": "^5.0.0",
+    "ora": "^9.1.0",
     "react": "^18.0.0",
     "which": "^4.0.0",
     "yaml": "^2.3.0"

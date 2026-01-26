@@ -6,11 +6,13 @@
  */
 
 import { execa } from 'execa';
+import { writeFile, unlink } from 'node:fs/promises';
 import type { SubTask } from './task-graph.js';
 
 export interface TmuxSession {
   name: string;
   id: string;
+  initialPaneId: string;
 }
 
 export interface TmuxPane {
@@ -26,6 +28,13 @@ export interface LoopStatus {
   activeAgents: Array<{ taskId: string; identifier: string }>;
   blockedTasks: string[];
   elapsed: number;
+}
+
+/**
+ * Get the path to the status file for a session
+ */
+export function getStatusFilePath(sessionName: string): string {
+  return `/tmp/mobius-status-${sessionName}.txt`;
 }
 
 /**
@@ -56,35 +65,39 @@ export async function sessionExists(sessionName: string): Promise<boolean> {
 export async function createSession(sessionName: string): Promise<TmuxSession> {
   // Check if session already exists
   if (await sessionExists(sessionName)) {
-    // Get existing session ID
+    // Get existing session ID and current pane
     const { stdout } = await execa('tmux', [
       'display-message',
       '-t',
       sessionName,
       '-p',
-      '#{session_id}',
+      '#{session_id}:#{pane_id}',
     ]);
+    const [sessionId, paneId] = stdout.trim().split(':');
     return {
       name: sessionName,
-      id: stdout.trim(),
+      id: sessionId,
+      initialPaneId: paneId,
     };
   }
 
   // Create new detached session
   await execa('tmux', ['new-session', '-d', '-s', sessionName]);
 
-  // Get the session ID
+  // Get the session ID and initial pane ID
   const { stdout } = await execa('tmux', [
     'display-message',
     '-t',
     sessionName,
     '-p',
-    '#{session_id}',
+    '#{session_id}:#{pane_id}',
   ]);
+  const [sessionId, paneId] = stdout.trim().split(':');
 
   return {
     name: sessionName,
-    id: stdout.trim(),
+    id: sessionId,
+    initialPaneId: paneId,
   };
 }
 
@@ -93,14 +106,20 @@ export async function createSession(sessionName: string): Promise<TmuxSession> {
  *
  * @param session - The tmux session
  * @param task - The sub-task this agent will work on
+ * @param sourcePaneId - Optional pane ID to split from (defaults to initial pane)
  * @returns TmuxPane handle
  */
-export async function createAgentPane(session: TmuxSession, task: SubTask): Promise<TmuxPane> {
-  // Split horizontally to create a new pane
+export async function createAgentPane(
+  session: TmuxSession,
+  task: SubTask,
+  sourcePaneId?: string
+): Promise<TmuxPane> {
+  // Split horizontally from the specified pane (or initial pane if not specified)
+  const targetPane = sourcePaneId ?? session.initialPaneId;
   const { stdout } = await execa('tmux', [
     'split-window',
     '-t',
-    session.name,
+    targetPane,
     '-h',
     '-P',
     '-F',
@@ -127,6 +146,11 @@ export async function createAgentPane(session: TmuxSession, task: SubTask): Prom
  * @returns TmuxPane handle for the status pane
  */
 export async function createStatusPane(session: TmuxSession): Promise<TmuxPane> {
+  const statusFile = getStatusFilePath(session.name);
+
+  // Create empty status file
+  await execa('touch', [statusFile]);
+
   // Split vertically at the bottom for status bar (15% height)
   const { stdout } = await execa('tmux', [
     'split-window',
@@ -144,6 +168,15 @@ export async function createStatusPane(session: TmuxSession): Promise<TmuxPane> 
 
   // Set the pane title
   await execa('tmux', ['select-pane', '-t', paneId, '-T', 'Status']);
+
+  // Start watch command to display status file with 0.5s refresh
+  await execa('tmux', [
+    'send-keys',
+    '-t',
+    paneId,
+    `watch -t -n 0.5 cat ${statusFile}`,
+    'Enter',
+  ]);
 
   return {
     id: paneId,
@@ -167,8 +200,13 @@ export async function runInPane(pane: TmuxPane, command: string): Promise<void> 
  *
  * @param pane - The status pane
  * @param status - Current loop status
+ * @param sessionName - The tmux session name (for status file path)
  */
-export async function updateStatusPane(pane: TmuxPane, status: LoopStatus): Promise<void> {
+export async function updateStatusPane(
+  _pane: TmuxPane,
+  status: LoopStatus,
+  sessionName: string
+): Promise<void> {
   // Format elapsed time
   const elapsed = formatElapsed(status.elapsed);
 
@@ -182,19 +220,17 @@ export async function updateStatusPane(pane: TmuxPane, status: LoopStatus): Prom
   const blockedList =
     status.blockedTasks.length > 0 ? status.blockedTasks.join(', ') : 'none';
 
-  // Build status display
-  const statusLines = [
+  // Build status content
+  const content = [
     `Progress: ${status.completedTasks}/${status.totalTasks} tasks completed`,
     `Active agents: ${agentsList}`,
     `Blocked: ${blockedList}`,
     `Elapsed: ${elapsed}`,
-  ];
+  ].join('\n');
 
-  // Clear pane and write status
-  await execa('tmux', ['send-keys', '-t', pane.id, 'C-l']); // Clear screen
-  for (const line of statusLines) {
-    await execa('tmux', ['send-keys', '-t', pane.id, `echo "${line}"`, 'Enter']);
-  }
+  // Write to status file (watch command will auto-refresh)
+  const statusFile = getStatusFilePath(sessionName);
+  await writeFile(statusFile, content + '\n');
 }
 
 /**
@@ -227,6 +263,13 @@ export async function layoutPanes(session: TmuxSession, paneCount: number): Prom
  * @param session - The session to destroy
  */
 export async function destroySession(session: TmuxSession): Promise<void> {
+  // Clean up status file
+  try {
+    await unlink(getStatusFilePath(session.name));
+  } catch {
+    // File may not exist, ignore
+  }
+
   try {
     await execa('tmux', ['kill-session', '-t', session.name]);
   } catch {

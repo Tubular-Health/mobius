@@ -376,7 +376,7 @@ Each backend has corresponding skills at `.claude/skills/<backend>/`. The patter
 Copy the template to your project root to provide context each iteration:
 
 ```bash
-cp /path/to/mobius/AGENTS.md ./AGENTS.md
+cp /path/to/mobius/templates/AGENTS.md ./AGENTS.md
 ```
 
 This file tells Claude about your project:

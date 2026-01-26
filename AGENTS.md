@@ -1,71 +1,78 @@
 # AGENTS.md
 
-Operational guide for autonomous Mobius execution. This file is loaded each iteration to provide project-specific context to Claude.
-
-**Copy this template to your project root and customize for your codebase.**
+Operational guide for autonomous Mobius development.
 
 ## Build & Validation
 
-Run these commands after implementing changes to get immediate feedback:
+Run these commands after implementing changes:
 
-- **Tests:** `npm test` or `pytest` or `go test ./...`
-- **Single test:** `npm test -- path/to/test.spec.ts`
-- **Typecheck:** `npm run typecheck` or `mypy .`
-- **Lint:** `npm run lint` or `ruff check .`
-- **Build:** `npm run build` or `go build ./...`
+- **Build:** `npm run build`
+- **Typecheck:** `npm run typecheck`
+- **Tests:** `bun test` or `bun test src/lib/task-graph.test.ts`
+- **Run locally:** `bun src/bin/mobius.ts <command>`
 
-## Operational Notes
+## Commit Conventions
 
-Guidelines for autonomous execution:
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) enforced by commitlint and husky.
 
-- Always run validation commands after making changes
-- Commit frequently with descriptive messages
-- If tests fail, fix them before moving to the next sub-task
-- When blocked, add a comment to the issue explaining the blocker
-- Prefer small, focused changes over large refactors
-- **After completing a sub-task:** Mark it as "Done" once the commit is pushed and expected work is complete
+Format: `<type>(<scope>): <description>` or `MOB-<id>: <description>`
 
-## Codebase Patterns
+Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`
 
-Document your project's conventions here:
-
-- **Components:** `src/components/` - React components, PascalCase naming
-- **Services:** `src/services/` - Business logic, singleton pattern
-- **API:** `src/api/` - REST endpoints, OpenAPI documented
-- **Tests:** `__tests__/` directories, `.spec.ts` suffix
-- **Types:** `src/types/` - Shared TypeScript interfaces
-
-## Common Issues
-
-Known gotchas and their solutions:
-
-- **Mock setup:** Always reset mocks in `beforeEach`
-- **Async tests:** Use `await` with all async operations
-- **Import paths:** Use absolute imports from `@/`
-- **Environment:** Test env vars are in `.env.test`
+Examples:
+- `feat(loop): add retry logic for failed tasks`
+- `fix(worktree): handle spaces in branch names`
+- `MOB-30: implement tree visualization command`
 
 ## Project Structure
 
 ```
-your-project/
+mobius/
 ├── src/
-│   ├── components/     # UI components
-│   ├── services/       # Business logic
-│   ├── api/            # API routes
-│   ├── types/          # TypeScript types
-│   └── utils/          # Shared utilities
-├── tests/
-│   ├── unit/           # Unit tests
-│   └── integration/    # Integration tests
-├── docs/               # Documentation
-└── scripts/            # Build/deploy scripts
+│   ├── bin/              # CLI entry point (mobius.ts)
+│   ├── commands/         # Command implementations (run, setup, doctor, loop, tree)
+│   ├── lib/              # Core library code
+│   │   ├── checks/       # Health check modules (claude, docker, tmux, etc.)
+│   │   ├── config.ts     # Configuration loading/copying
+│   │   ├── paths.ts      # Path resolution (local vs global install)
+│   │   ├── task-graph.ts # Linear task tree parsing
+│   │   ├── worktree.ts   # Git worktree management
+│   │   └── parallel-executor.ts  # Parallel task execution
+│   └── types.ts          # Shared TypeScript interfaces
+├── .claude/
+│   ├── skills/           # Claude Code skills (execute/refine/verify-linear-issue)
+│   └── commands/         # Claude Code slash commands
+├── scripts/              # Shell scripts (mobius.sh)
+├── templates/            # User templates (AGENTS.md template)
+└── dist/                 # Compiled output (git-ignored)
 ```
 
-## Mobius-Specific Instructions
+## Codebase Patterns
 
-Add any special instructions for the autonomous Mobius loop:
+- **ES Modules:** All imports use `.js` extension (e.g., `import { foo } from './bar.js'`)
+- **Async/Await:** Prefer async/await over raw promises
+- **Chalk for output:** Use `chalk` for colored terminal output
+- **Commander for CLI:** Commands defined via `commander` in `src/bin/mobius.ts`
+- **Types in types.ts:** Shared interfaces live in `src/types.ts`
+- **Test files:** Co-located with source as `*.test.ts`
 
-- Priority order for sub-tasks (if not using blockedBy)
-- Files that should never be modified
-- Required reviewers for certain changes
-- Branch naming conventions
+## Key Files
+
+- `src/bin/mobius.ts` - CLI entry point with all command definitions
+- `src/commands/loop.ts` - Main loop execution logic
+- `src/lib/task-graph.ts` - Parses Linear issues into execution DAG
+- `src/lib/parallel-executor.ts` - Runs Claude agents in parallel worktrees
+- `src/types.ts` - All shared TypeScript types
+- `mobius.config.yaml` - Default configuration template
+
+## Common Issues
+
+- **Import extensions:** Always use `.js` extension for local imports, even for `.ts` files
+- **Bun vs Node:** Project uses Bun for development/testing, but must be Node-compatible for npm publishing
+- **Path resolution:** Use `getPackageRoot()` from `paths.ts` to reference package files
+
+## Files Not to Modify
+
+- `package-lock.json` - Auto-generated (we use bun.lock primarily)
+- `dist/` - Compiled output
+- `.release-please-manifest.json` - Managed by release-please
