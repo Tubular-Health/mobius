@@ -111,6 +111,7 @@ export async function executeParallel(
         status: 'ERROR',
         duration: Date.now() - handle.startTime,
         error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+        pane: handle.pane.id,
       });
     }
 
@@ -220,11 +221,12 @@ async function waitForAgent(
 ): Promise<ExecutionResult> {
   const startTime = handle.startTime;
   const deadline = startTime + timeout;
+  const paneId = handle.pane.id;
 
   while (Date.now() < deadline) {
     // Check pane content for completion markers
     const content = await capturePaneContent(handle.pane, 200);
-    const result = parseAgentOutput(content, handle.task, startTime);
+    const result = parseAgentOutput(content, handle.task, startTime, paneId);
 
     if (result) {
       // Update pane title to show completion status
@@ -245,16 +247,23 @@ async function waitForAgent(
     status: 'ERROR',
     duration: Date.now() - startTime,
     error: `Agent timed out after ${timeout}ms`,
+    pane: paneId,
   };
 }
 
 /**
  * Parse agent output to detect completion status
+ *
+ * @param content - The captured pane content
+ * @param task - The sub-task being monitored
+ * @param startTime - When the task started
+ * @param paneId - The tmux pane ID where the agent is running
  */
 function parseAgentOutput(
   content: string,
   task: SubTask,
-  startTime: number
+  startTime: number,
+  paneId: string
 ): ExecutionResult | null {
   const duration = Date.now() - startTime;
 
@@ -266,6 +275,7 @@ function parseAgentOutput(
       success: true,
       status: 'SUBTASK_COMPLETE',
       duration,
+      pane: paneId,
     };
   }
 
@@ -282,6 +292,7 @@ function parseAgentOutput(
       status: 'VERIFICATION_FAILED',
       duration,
       error,
+      pane: paneId,
     };
   }
 
@@ -293,6 +304,7 @@ function parseAgentOutput(
       success: true,
       status: 'SUBTASK_COMPLETE',
       duration,
+      pane: paneId,
     };
   }
 
@@ -304,6 +316,7 @@ function parseAgentOutput(
       status: 'ERROR',
       duration,
       error: 'No actionable sub-tasks available',
+      pane: paneId,
     };
   }
 
