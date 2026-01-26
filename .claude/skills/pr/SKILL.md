@@ -247,12 +247,15 @@ git config --get init.defaultBranch || echo "main"
 
 Regex patterns to extract issue IDs:
 ```
-# Linear/Jira style: MOB-123, PROJ-456, ABC-789
+# Linear/Jira style: MOB-123, PROJ-456, ABC-789 (case-insensitive)
 /([A-Z]{2,10}-\d+)/gi
 
 # GitHub issue style: #123 or refs/123
 /#?(\d+)/g
 ```
+
+**Note**: Branch names often contain lowercase issue IDs (e.g., `mob-72` instead of `MOB-72`).
+Always use case-insensitive matching and normalize to uppercase for display.
 
 **From commit messages** (secondary source):
 
@@ -457,8 +460,8 @@ Common branch naming conventions:
 Scan commit messages for additional references:
 
 ```bash
-# Get all commit messages on branch
-git log origin/main..HEAD --pretty=format:"%B" | grep -oE "[A-Z]{2,10}-[0-9]+"
+# Get all commit messages on branch (case-insensitive, normalize to uppercase)
+git log origin/main..HEAD --pretty=format:"%B" | grep -oiE "[A-Z]{2,10}-[0-9]+" | tr '[:lower:]' '[:upper:]' | sort -u
 ```
 
 Deduplicate and combine with branch-detected issues.
@@ -892,6 +895,60 @@ If any check fails, report the issue and provide the fix command.
 </pre_flight_checks>
 </error_handling>
 
+<edge_cases>
+<no_issue_detected>
+**Branch without issue ID**:
+
+When no issue reference is found in branch name or commits:
+1. Proceed with PR creation without issue linking
+2. Inform user: "No issue references detected. PR will be created without issue linking."
+3. Do NOT block PR creation or prompt user to enter an issue ID
+4. `Refs:` line will be omitted from PR body
+</no_issue_detected>
+
+<multiple_issues>
+**Multiple issue IDs found**:
+
+When multiple issue references are detected:
+1. Collect all unique issue IDs from branch name and commits
+2. Validate each issue via backend MCP tools
+3. Include all validated issues in `Refs:` line: `Refs: MOB-72, MOB-74, MOB-75`
+4. Link PR to all validated issues after creation
+5. Add comment to each linked issue
+</multiple_issues>
+
+<no_changes>
+**No changes to commit**:
+
+Detected when `git diff --name-only origin/main...HEAD` returns empty:
+1. Report: "No changes detected between current branch and main."
+2. Suggest: "Ensure you have committed your changes before creating a PR."
+3. Do NOT attempt to create an empty PR
+</no_changes>
+
+<pr_already_exists>
+**PR already exists for branch**:
+
+Detected by `gh pr list --head {branch}`:
+1. Report: "A pull request already exists for this branch."
+2. Show existing PR URL and title
+3. Offer options:
+   - **View PR** - Open existing PR in browser
+   - **Update PR** - Modify the existing PR description
+   - **Cancel** - Abort operation
+4. Do NOT create a duplicate PR
+</pr_already_exists>
+
+<lowercase_issue_ids>
+**Lowercase issue IDs in branch names**:
+
+Branch names often use lowercase (e.g., `drverzal/mob-72-feature`):
+1. Use case-insensitive regex matching: `grep -oiE "[A-Z]{2,10}-[0-9]+"`
+2. Normalize extracted IDs to uppercase for display and API calls
+3. Example: `mob-72` -> `MOB-72`
+</lowercase_issue_ids>
+</edge_cases>
+
 <anti_patterns>
 **Don't put issue numbers in title**:
 - BAD: `feat(auth): add OAuth login (MOB-45)`
@@ -925,18 +982,30 @@ If any check fails, report the issue and provide the fix command.
 <success_criteria>
 A successful PR creation achieves:
 
-- [ ] Branch has commits relative to base
-- [ ] Branch is pushed to remote
-- [ ] Issue references detected from branch/commits
+**Pre-flight checks**:
+- [ ] Branch has commits relative to base (or graceful exit if none)
+- [ ] Branch is pushed to remote (or auto-push offered)
+- [ ] No existing PR for this branch (or offer to update/view)
+- [ ] GitHub CLI authenticated (`gh auth status`)
+
+**Issue detection**:
+- [ ] Issue references detected from branch/commits (case-insensitive)
+- [ ] Lowercase issue IDs normalized to uppercase
+- [ ] Multiple issues handled correctly (deduplicated, all validated)
 - [ ] Detected issues validated via backend MCP tools (if available)
+- [ ] Graceful handling when no issues detected (PR created without linking)
+
+**PR content**:
 - [ ] PR title follows conventional commit format
 - [ ] Type correctly reflects the nature of changes
 - [ ] Summary is 1-2 sentences, user-impact focused
 - [ ] Changes section has clear bullet points
 - [ ] Test plan includes verification steps
-- [ ] Issue references included with `Refs:` or `Closes:`
+- [ ] Issue references included with `Refs:` or `Closes:` (if detected)
 - [ ] Agent context section is collapsible
 - [ ] Files changed list has paths and descriptions
+
+**Execution**:
 - [ ] User confirmed before creation
 - [ ] PR created successfully with `gh pr create`
 - [ ] PR linked to validated issues via backend MCP tools
