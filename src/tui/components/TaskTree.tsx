@@ -8,7 +8,8 @@
 import { Box, Text } from 'ink';
 import { memo, useMemo } from 'react';
 import type { SubTask, TaskGraph, TaskStatus } from '../../lib/task-graph.js';
-import type { ExecutionState } from '../../types.js';
+import type { ActiveTask, CompletedTask, ExecutionState } from '../../types.js';
+import { normalizeCompletedTask, getCompletedTaskId } from '../../lib/execution-state.js';
 import { TaskNode } from './TaskNode.js';
 import { STRUCTURE_COLORS } from '../theme.js';
 
@@ -82,9 +83,10 @@ function getStatusOverrides(
   }
 
   // Mark completed tasks as done
-  for (const completedId of executionState.completedTasks) {
+  for (const entry of executionState.completedTasks) {
+    const taskIdentifier = getCompletedTaskId(entry);
     for (const task of graph.tasks.values()) {
-      if (task.identifier === completedId) {
+      if (task.identifier === taskIdentifier) {
         overrides.set(task.id, 'done');
         break;
       }
@@ -92,6 +94,45 @@ function getStatusOverrides(
   }
 
   return overrides;
+}
+
+/**
+ * Build lookup maps for task timing info from execution state
+ * Returns maps from task identifier -> timing info
+ */
+function buildTimingMaps(
+  executionState?: ExecutionState
+): {
+  completedTaskMap: Map<string, CompletedTask>;
+  activeTaskMap: Map<string, ActiveTask>;
+  failedTaskMap: Map<string, CompletedTask>;
+} {
+  const completedTaskMap = new Map<string, CompletedTask>();
+  const activeTaskMap = new Map<string, ActiveTask>();
+  const failedTaskMap = new Map<string, CompletedTask>();
+
+  if (!executionState) {
+    return { completedTaskMap, activeTaskMap, failedTaskMap };
+  }
+
+  // Build active task map (by identifier)
+  for (const activeTask of executionState.activeTasks) {
+    activeTaskMap.set(activeTask.id, activeTask);
+  }
+
+  // Build completed task map (by identifier)
+  for (const entry of executionState.completedTasks) {
+    const normalized = normalizeCompletedTask(entry);
+    completedTaskMap.set(normalized.id, normalized);
+  }
+
+  // Build failed task map (by identifier)
+  for (const entry of executionState.failedTasks) {
+    const normalized = normalizeCompletedTask(entry);
+    failedTaskMap.set(normalized.id, normalized);
+  }
+
+  return { completedTaskMap, activeTaskMap, failedTaskMap };
 }
 
 /**
@@ -110,6 +151,9 @@ interface TaskTreeNodeProps {
   graph: TaskGraph;
   childrenMap: Map<string, SubTask[]>;
   statusOverrides: Map<string, TaskStatus>;
+  completedTaskMap: Map<string, CompletedTask>;
+  activeTaskMap: Map<string, ActiveTask>;
+  failedTaskMap: Map<string, CompletedTask>;
   prefix: string;
   isLast: boolean;
 }
@@ -123,6 +167,9 @@ const TaskTreeNode = memo(function TaskTreeNode({
   graph,
   childrenMap,
   statusOverrides,
+  completedTaskMap,
+  activeTaskMap,
+  failedTaskMap,
   prefix,
   isLast,
 }: TaskTreeNodeProps): JSX.Element {
@@ -135,6 +182,10 @@ const TaskTreeNode = memo(function TaskTreeNode({
   // Determine the new prefix for children
   const childPrefix = prefix + (isLast ? '    ' : '│   ');
 
+  // Get timing info for this task (use task.identifier to look up)
+  const completedTaskInfo = completedTaskMap.get(task.identifier) ?? failedTaskMap.get(task.identifier);
+  const activeTaskInfo = activeTaskMap.get(task.identifier);
+
   return (
     <Box flexDirection="column">
       <TaskNode
@@ -142,6 +193,8 @@ const TaskTreeNode = memo(function TaskTreeNode({
         graph={graph}
         prefix={prefix}
         connector={connector}
+        completedTaskInfo={completedTaskInfo}
+        activeTaskInfo={activeTaskInfo}
       />
       {children.map((child, index) => {
         const childIsLast = index === children.length - 1;
@@ -152,6 +205,9 @@ const TaskTreeNode = memo(function TaskTreeNode({
             graph={graph}
             childrenMap={childrenMap}
             statusOverrides={statusOverrides}
+            completedTaskMap={completedTaskMap}
+            activeTaskMap={activeTaskMap}
+            failedTaskMap={failedTaskMap}
             prefix={childPrefix}
             isLast={childIsLast}
           />
@@ -184,6 +240,12 @@ export function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element 
     [graph, executionState]
   );
 
+  // Build timing maps for task runtime display
+  const { completedTaskMap, activeTaskMap, failedTaskMap } = useMemo(
+    () => buildTimingMaps(executionState),
+    [executionState]
+  );
+
   return (
     <Box flexDirection="column">
       <Text color={STRUCTURE_COLORS.header}>
@@ -198,6 +260,9 @@ export function TaskTree({ graph, executionState }: TaskTreeProps): JSX.Element 
             graph={graph}
             childrenMap={childrenMap}
             statusOverrides={statusOverrides}
+            completedTaskMap={completedTaskMap}
+            activeTaskMap={activeTaskMap}
+            failedTaskMap={failedTaskMap}
             prefix=""
             isLast={isLast}
           />

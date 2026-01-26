@@ -61,6 +61,12 @@ function AgentPanelImpl({
       return;
     }
 
+    // Skip capture if pane ID is empty (tmux not available)
+    if (!activeTask.pane) {
+      setOutput(['(live output not available - tmux required)']);
+      return;
+    }
+
     // Fetch and only update if content changed
     const fetchOutput = async () => {
       const content = await captureTmuxPane(activeTask.pane, lines);
