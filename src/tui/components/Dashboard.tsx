@@ -6,7 +6,7 @@
  */
 
 import { Box, Text, useApp, useInput } from 'ink';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { TaskGraph } from '../../lib/task-graph.js';
 import { getGraphStats } from '../../lib/task-graph.js';
 import type { ExecutionState, TuiConfig } from '../../types.js';
@@ -71,71 +71,70 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
   const panelRefreshMs = config?.panel_refresh_ms ?? 500;
   const panelLines = config?.panel_lines ?? 8;
 
+  // Memoize the state change handler to prevent recreating on each render
+  // This callback is passed to watchExecutionState and called when state file changes
+  const handleStateChange = useCallback(
+    (state: ExecutionState | null) => {
+      setExecutionState(state);
+      setIsComplete(isExecutionComplete(graph, state));
+    },
+    [graph]
+  );
+
   // Subscribe to execution state file changes
   useEffect(() => {
     // Read initial state
     const initialState = readExecutionState(parentId, stateDir);
-    setExecutionState(initialState);
-    setIsComplete(isExecutionComplete(graph, initialState));
+    handleStateChange(initialState);
 
-    // Watch for changes
-    const cleanup = watchExecutionState(
-      parentId,
-      (state) => {
-        setExecutionState(state);
-        setIsComplete(isExecutionComplete(graph, state));
-      },
-      stateDir
-    );
+    // Watch for changes - uses memoized callback
+    const cleanup = watchExecutionState(parentId, handleStateChange, stateDir);
 
     return cleanup;
-  }, [parentId, stateDir, graph]);
+  }, [parentId, stateDir, handleStateChange]);
+
+  // Memoize the exit handler to prevent recreating on each render
+  // Used by both auto-exit effect and keypress handler
+  const handleExit = useCallback(() => {
+    // Kill the loop process if still running
+    if (executionState?.loopPid) {
+      try {
+        process.kill(executionState.loopPid, 'SIGTERM');
+      } catch {
+        // Process may have already exited
+      }
+    }
+
+    // Determine exit code based on failures
+    const hasFailures = (executionState?.failedTasks.length ?? 0) > 0;
+    exit();
+    process.exitCode = hasFailures ? 1 : 0;
+  }, [executionState?.loopPid, executionState?.failedTasks.length, exit]);
 
   // Auto-exit when execution completes
   useEffect(() => {
     if (!isComplete) return;
 
     // Brief delay to show completion summary before exiting
-    const exitTimer = setTimeout(() => {
-      // Kill the loop process if still running
-      if (executionState?.loopPid) {
-        try {
-          process.kill(executionState.loopPid, 'SIGTERM');
-        } catch {
-          // Process may have already exited
-        }
-      }
-
-      // Determine exit code based on failures
-      const hasFailures = (executionState?.failedTasks.length ?? 0) > 0;
-      exit();
-      process.exitCode = hasFailures ? 1 : 0;
-    }, 2000); // Show summary for 2 seconds
+    const exitTimer = setTimeout(handleExit, 2000);
 
     return () => clearTimeout(exitTimer);
-  }, [isComplete, executionState, exit]);
+  }, [isComplete, handleExit]);
 
   // Handle keypress for immediate exit when complete
-  useInput((input, key) => {
-    if (isComplete && (key.return || input === 'q' || input === ' ')) {
-      // Kill the loop process if still running
-      if (executionState?.loopPid) {
-        try {
-          process.kill(executionState.loopPid, 'SIGTERM');
-        } catch {
-          // Process may have already exited
+  useInput(
+    useCallback(
+      (input, key) => {
+        if (isComplete && (key.return || input === 'q' || input === ' ')) {
+          handleExit();
         }
-      }
+      },
+      [isComplete, handleExit]
+    )
+  );
 
-      // Determine exit code based on failures
-      const hasFailures = (executionState?.failedTasks.length ?? 0) > 0;
-      exit();
-      process.exitCode = hasFailures ? 1 : 0;
-    }
-  });
-
-  // Calculate stats for completion summary
-  const stats = getGraphStats(graph);
+  // Memoize stats calculation to avoid recalculating on each render
+  const stats = useMemo(() => getGraphStats(graph), [graph]);
   const completedCount = executionState?.completedTasks.length ?? 0;
   const failedCount = executionState?.failedTasks.length ?? 0;
 
