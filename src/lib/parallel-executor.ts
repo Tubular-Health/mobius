@@ -52,11 +52,13 @@ const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per task
 /**
  * Execute multiple sub-tasks in parallel using tmux panes
  *
- * @param tasks - Array of ready sub-tasks to execute
+ * Each agent receives its specific subtask identifier (task.identifier) to prevent
+ * race conditions where multiple agents would otherwise pick the same "first ready" subtask.
+ *
+ * @param tasks - Array of ready sub-tasks to execute (each contains its identifier)
  * @param config - Execution configuration
  * @param worktreePath - Path to the shared worktree
  * @param session - The tmux session to use
- * @param parentId - The parent issue identifier (e.g., "MOB-123")
  * @param timeout - Maximum time to wait for each agent (default: 30 minutes)
  * @returns Array of execution results
  */
@@ -65,7 +67,6 @@ export async function executeParallel(
   config: ExecutionConfig,
   worktreePath: string,
   session: TmuxSession,
-  parentId: string,
   timeout: number = DEFAULT_TIMEOUT_MS
 ): Promise<ExecutionResult[]> {
   // Calculate actual parallelism
@@ -79,8 +80,8 @@ export async function executeParallel(
   // Only take as many tasks as we can run in parallel
   const tasksToRun = tasks.slice(0, actualParallel);
 
-  // Spawn agents in parallel
-  const handles = await spawnAgents(tasksToRun, session, worktreePath, parentId, config);
+  // Spawn agents in parallel - each agent gets its specific subtask identifier
+  const handles = await spawnAgents(tasksToRun, session, worktreePath, config);
 
   // Layout panes for visibility
   await layoutPanes(session, handles.length);
@@ -120,24 +121,44 @@ export async function executeParallel(
 
 /**
  * Spawn Claude agents in tmux panes for each task
+ *
+ * Each agent receives its specific subtask identifier to prevent race conditions
+ * where multiple agents would otherwise pick the same "first ready" subtask.
+ *
+ * Uses the session's initial pane for the first agent to avoid creating
+ * an unused blank pane.
  */
 async function spawnAgents(
   tasks: SubTask[],
   session: TmuxSession,
   worktreePath: string,
-  parentId: string,
   config: ExecutionConfig
 ): Promise<AgentHandle[]> {
   const handles: AgentHandle[] = [];
   const skill = BACKEND_SKILLS.linear; // Currently only linear is supported
 
-  for (const task of tasks) {
-    // Create a pane for this agent
-    const pane = await createAgentPane(session, task);
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
+    let pane: TmuxPane;
 
-    // Build the Claude command
-    // The command runs in the worktree directory and executes the skill
-    const claudeCommand = buildClaudeCommand(parentId, skill, worktreePath, config);
+    if (i === 0) {
+      // Reuse the initial session pane for the first agent
+      pane = {
+        id: session.initialPaneId,
+        sessionId: session.id,
+        taskId: task.id,
+        type: 'agent',
+      };
+      // Set the pane title
+      await setPaneTitle(pane, `${task.identifier}: ${task.title}`);
+    } else {
+      // Create new panes for subsequent agents
+      pane = await createAgentPane(session, task);
+    }
+
+    // Build the Claude command with the specific subtask identifier
+    // This ensures each agent works on its assigned task, not racing for the same one
+    const claudeCommand = buildClaudeCommand(task.identifier, skill, worktreePath, config);
 
     const handle: AgentHandle = {
       task,
@@ -157,9 +178,12 @@ async function spawnAgents(
 
 /**
  * Build the Claude command string for executing a skill
+ *
+ * @param subtaskIdentifier - The specific subtask identifier (e.g., "MOB-124")
+ *                            Each agent gets its own subtask ID to prevent race conditions
  */
 function buildClaudeCommand(
-  parentId: string,
+  subtaskIdentifier: string,
   skill: string,
   worktreePath: string,
   config: ExecutionConfig
@@ -169,15 +193,15 @@ function buildClaudeCommand(
 
   // The command:
   // 1. cd to worktree
-  // 2. echo the skill invocation to claude
-  // 3. pipe through cclean for clean output
+  // 2. echo the skill invocation to claude with the specific subtask ID
+  // 3. pipe through cclean for clean output (requires stream-json format)
   // Note: We use a subshell to change directory without affecting the parent shell
   const command = [
     `cd "${worktreePath}"`,
     '&&',
-    `echo '${skill} ${parentId}'`,
+    `echo '${skill} ${subtaskIdentifier}'`,
     '|',
-    `claude -p ${modelFlag}`.trim(),
+    `claude -p --dangerously-skip-permissions --output-format stream-json ${modelFlag}`.trim(),
     '|',
     'cclean',
   ].join(' ');
@@ -288,25 +312,23 @@ function parseAgentOutput(
 /**
  * Spawn a single agent in a specific pane (for cases where you want direct control)
  *
- * @param task - The sub-task for this agent
+ * @param task - The sub-task for this agent (includes its identifier)
  * @param pane - The tmux pane to run in
  * @param worktreePath - Path to the shared worktree
  * @param config - Execution configuration
- * @param parentId - The parent issue identifier
  * @returns ExecutionResult when the agent completes
  */
 export async function spawnAgentInPane(
   task: SubTask,
   pane: TmuxPane,
   worktreePath: string,
-  config: ExecutionConfig,
-  parentId: string
+  config: ExecutionConfig
 ): Promise<ExecutionResult> {
   const startTime = Date.now();
   const skill = BACKEND_SKILLS.linear;
 
-  // Build and run the command
-  const command = buildClaudeCommand(parentId, skill, worktreePath, config);
+  // Build and run the command with the task's specific identifier
+  const command = buildClaudeCommand(task.identifier, skill, worktreePath, config);
   await runInPane(pane, command);
 
   // Create handle for monitoring

@@ -37,6 +37,9 @@ WORKTREE_PATH="${MOBIUS_WORKTREE_PATH:-../<repo>-worktrees/}"
 CLEANUP_ON_SUCCESS="${MOBIUS_CLEANUP_ON_SUCCESS:-true}"
 BASE_BRANCH="${MOBIUS_BASE_BRANCH:-main}"
 
+# State file for TUI monitoring
+STATE_DIR="${MOBIUS_STATE_DIR:-$HOME/.mobius/state}"
+
 # Backend skill mappings
 declare -A BACKEND_SKILLS=(
     [linear]="/execute-linear-issue"
@@ -318,6 +321,157 @@ show_config() {
 
 log() { echo "[mobius] $1"; }
 
+# ============================================================================
+# State File Management for TUI Monitoring
+# ============================================================================
+# The state file allows a separate TUI process to monitor execution progress.
+# Location: ~/.mobius/state/<parent-id>.json
+#
+# Schema:
+# {
+#   "parentId": "MOB-11",
+#   "parentTitle": "Parent issue title",
+#   "activeTasks": [{ "id": "MOB-126", "pid": 12345, "pane": "%0", "startedAt": "ISO-8601" }],
+#   "completedTasks": ["MOB-124", "MOB-125"],
+#   "failedTasks": [],
+#   "startedAt": "ISO-8601",
+#   "updatedAt": "ISO-8601"
+# }
+
+STATE_FILE=""
+STATE_STARTED_AT=""
+COMPLETED_TASKS_JSON="[]"
+FAILED_TASKS_JSON="[]"
+ACTIVE_TASKS_JSON="[]"
+
+# Initialize state directory and file
+init_state_file() {
+    local parent_id="$1"
+    local parent_title="${2:-}"
+
+    # Create state directory if it doesn't exist
+    mkdir -p "$STATE_DIR"
+
+    STATE_FILE="$STATE_DIR/${parent_id}.json"
+    STATE_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+    COMPLETED_TASKS_JSON="[]"
+    FAILED_TASKS_JSON="[]"
+    ACTIVE_TASKS_JSON="[]"
+
+    write_state_file "$parent_id" "$parent_title"
+    log "State file: $STATE_FILE"
+}
+
+# Write state file atomically (temp file + rename)
+write_state_file() {
+    local parent_id="$1"
+    local parent_title="${2:-}"
+    local updated_at
+    updated_at=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+    # Escape the title for JSON (handle quotes and backslashes)
+    local escaped_title
+    escaped_title=$(echo "$parent_title" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+    local json
+    json=$(cat <<EOF
+{
+  "parentId": "${parent_id}",
+  "parentTitle": "${escaped_title}",
+  "activeTasks": ${ACTIVE_TASKS_JSON},
+  "completedTasks": ${COMPLETED_TASKS_JSON},
+  "failedTasks": ${FAILED_TASKS_JSON},
+  "startedAt": "${STATE_STARTED_AT}",
+  "updatedAt": "${updated_at}"
+}
+EOF
+)
+
+    # Atomic write: write to temp file, then rename
+    local temp_file="${STATE_FILE}.tmp"
+    echo "$json" > "$temp_file"
+    mv "$temp_file" "$STATE_FILE"
+}
+
+# Add a task to activeTasks when agent spawns
+add_active_task() {
+    local task_id="$1"
+    local pid="$2"
+    local pane="${3:-}"
+    local worktree="${4:-}"
+    local started_at
+    started_at=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+    # Build new task JSON
+    local task_json="{\"id\":\"${task_id}\",\"pid\":${pid},\"pane\":\"${pane}\",\"startedAt\":\"${started_at}\""
+    if [ -n "$worktree" ]; then
+        task_json="${task_json},\"worktree\":\"${worktree}\""
+    fi
+    task_json="${task_json}}"
+
+    # Append to activeTasks array
+    if [ "$ACTIVE_TASKS_JSON" = "[]" ]; then
+        ACTIVE_TASKS_JSON="[${task_json}]"
+    else
+        # Remove trailing ] and append new task
+        ACTIVE_TASKS_JSON="${ACTIVE_TASKS_JSON%]},${task_json}]"
+    fi
+
+    write_state_file "$TASK_ID" ""
+}
+
+# Remove a task from activeTasks and add to completedTasks
+complete_task() {
+    local task_id="$1"
+
+    # Remove from activeTasks using a simple approach
+    # This works for arrays with single or multiple entries
+    if command -v jq &> /dev/null; then
+        ACTIVE_TASKS_JSON=$(echo "$ACTIVE_TASKS_JSON" | jq -c "[.[] | select(.id != \"$task_id\")]")
+    else
+        # Fallback: if jq not available, reset to empty (less accurate but functional)
+        ACTIVE_TASKS_JSON="[]"
+    fi
+
+    # Add to completedTasks
+    if [ "$COMPLETED_TASKS_JSON" = "[]" ]; then
+        COMPLETED_TASKS_JSON="[\"${task_id}\"]"
+    else
+        COMPLETED_TASKS_JSON="${COMPLETED_TASKS_JSON%]},\"${task_id}\"]"
+    fi
+
+    write_state_file "$TASK_ID" ""
+}
+
+# Remove a task from activeTasks and add to failedTasks
+fail_task() {
+    local task_id="$1"
+
+    # Remove from activeTasks
+    if command -v jq &> /dev/null; then
+        ACTIVE_TASKS_JSON=$(echo "$ACTIVE_TASKS_JSON" | jq -c "[.[] | select(.id != \"$task_id\")]")
+    else
+        ACTIVE_TASKS_JSON="[]"
+    fi
+
+    # Add to failedTasks
+    if [ "$FAILED_TASKS_JSON" = "[]" ]; then
+        FAILED_TASKS_JSON="[\"${task_id}\"]"
+    else
+        FAILED_TASKS_JSON="${FAILED_TASKS_JSON%]},\"${task_id}\"]"
+    fi
+
+    write_state_file "$TASK_ID" ""
+}
+
+# Clear all active tasks (used on clean shutdown)
+clear_active_tasks() {
+    ACTIVE_TASKS_JSON="[]"
+    write_state_file "$TASK_ID" ""
+}
+
+# ============================================================================
+
 # Sandbox delegation (optional - requires container setup)
 delegate_to_sandbox() {
     local args="$TASK_ID"
@@ -342,9 +496,31 @@ delegate_to_sandbox() {
     fi
 }
 
+# Extract sub-task ID from Claude output
+# Looks for "EXECUTION_COMPLETE: MOB-XXX" marker
+extract_completed_subtask() {
+    local output="$1"
+    # Look for EXECUTION_COMPLETE: followed by task ID
+    if echo "$output" | grep -qE 'EXECUTION_COMPLETE:[[:space:]]*[A-Z]+-[0-9]+'; then
+        echo "$output" | grep -oE 'EXECUTION_COMPLETE:[[:space:]]*[A-Z]+-[0-9]+' | head -1 | sed 's/EXECUTION_COMPLETE:[[:space:]]*//'
+        return 0
+    fi
+    return 1
+}
+
+# Check if execution should stop (all complete, all blocked, verification failed)
+should_stop_execution() {
+    local output="$1"
+    if echo "$output" | grep -qE 'STATUS:[[:space:]]*(ALL_COMPLETE|ALL_BLOCKED|NO_SUBTASKS|VERIFICATION_FAILED)'; then
+        return 0
+    fi
+    return 1
+}
+
 # The main loop
 run_loop() {
-    trap 'echo ""; log "Stopped"; exit 0' INT TERM
+    # Clean up state file on exit
+    trap 'echo ""; clear_active_tasks; log "Stopped"; exit 0' INT TERM
 
     local skill="${BACKEND_SKILLS[$BACKEND]}"
 
@@ -366,13 +542,19 @@ run_loop() {
     log "Press Ctrl+C to stop"
     echo ""
 
+    # Initialize state file for TUI monitoring
+    init_state_file "$TASK_ID" ""
+
     local iteration=0
+    local current_subtask_id=""
+    local claude_pid=""
 
     while true; do
         # Check max iterations
         if [ "$MAX_ITERATIONS" -gt 0 ] && [ "$iteration" -ge "$MAX_ITERATIONS" ]; then
             echo ""
             log "Reached max iterations: $MAX_ITERATIONS"
+            clear_active_tasks
             break
         fi
 
@@ -387,14 +569,70 @@ run_loop() {
             chrome_flag="--chrome"
         fi
 
+        # Create a temp file to capture the output for parsing
+        local output_file
+        output_file=$(mktemp)
+
         # The skill will find the next ready sub-task and execute it
         # If no sub-tasks remain, Claude will indicate completion
+        # Run in background to get PID, then wait
         echo "$skill $TASK_ID" | claude -p \
             --dangerously-skip-permissions \
             --verbose \
             --output-format=stream-json \
             --model "$MODEL" \
-            $chrome_flag | cclean
+            $chrome_flag 2>&1 | tee "$output_file" | cclean &
+        claude_pid=$!
+
+        # Try to detect the current sub-task from the output
+        # The skill outputs "STATUS: SUBTASK_COMPLETE" and "## {Sub-task ID}:" in the completion report
+        # For now, we track the Claude process as the active task
+        # In parallel mode, more sophisticated tracking would be needed
+        add_active_task "$TASK_ID" "$claude_pid" "" ""
+
+        # Wait for Claude to finish
+        wait $claude_pid || true
+        local exit_code=$?
+
+        # Parse output for completion status
+        # Look for STATUS markers in the output
+        local status_line
+        status_line=$(grep -E "^STATUS:|STATUS:" "$output_file" 2>/dev/null | tail -1 || true)
+
+        # Extract completed sub-task ID if present (from "EXECUTION_COMPLETE: MOB-XX")
+        local completed_id
+        completed_id=$(grep -oE "EXECUTION_COMPLETE: [A-Z]+-[0-9]+" "$output_file" 2>/dev/null | tail -1 | cut -d' ' -f2 || true)
+
+        # Extract failed sub-task ID if present (from "Sub-task Failed: MOB-XX")
+        local failed_id
+        failed_id=$(grep -oE "Sub-task Failed: [A-Z]+-[0-9]+" "$output_file" 2>/dev/null | head -1 | sed 's/Sub-task Failed: //' || true)
+
+        # Clean up temp file
+        rm -f "$output_file"
+
+        # Update state based on status
+        if [[ "$status_line" == *"SUBTASK_COMPLETE"* ]] && [ -n "$completed_id" ]; then
+            complete_task "$completed_id"
+            log "Sub-task completed: $completed_id"
+        elif [[ "$status_line" == *"VERIFICATION_FAILED"* ]]; then
+            if [ -n "$failed_id" ]; then
+                fail_task "$failed_id"
+                log "Sub-task failed: $failed_id"
+            else
+                clear_active_tasks
+            fi
+        elif [[ "$status_line" == *"ALL_COMPLETE"* ]]; then
+            clear_active_tasks
+            log "All sub-tasks completed!"
+            break
+        elif [[ "$status_line" == *"ALL_BLOCKED"* ]] || [[ "$status_line" == *"NO_SUBTASKS"* ]]; then
+            clear_active_tasks
+            log "No more sub-tasks to execute"
+            break
+        else
+            # Unknown status or no status marker - just clear active tasks
+            clear_active_tasks
+        fi
 
         echo ""
         log "Waiting ${DELAY_SECONDS}s..."

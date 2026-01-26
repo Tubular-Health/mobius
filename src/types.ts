@@ -1,6 +1,46 @@
 export type Backend = 'linear' | 'jira';
 export type Model = 'opus' | 'sonnet' | 'haiku';
 
+/**
+ * TUI dashboard configuration options
+ */
+export interface TuiConfig {
+  show_legend?: boolean;        // Default: true
+  state_dir?: string;           // Default: ~/.mobius/state/
+  panel_refresh_ms?: number;    // Default: 300
+  panel_lines?: number;         // Default: 8 (lines per agent panel)
+}
+
+/**
+ * Represents an actively running task with its process info
+ */
+export interface ActiveTask {
+  id: string;                    // Task identifier (e.g., "MOB-126")
+  pid: number;                   // Claude process ID
+  pane: string;                  // tmux pane identifier (e.g., "%0")
+  startedAt: string;             // ISO timestamp
+  worktree?: string;             // Worktree path if applicable
+}
+
+/**
+ * Execution state file schema for TUI state tracking
+ * Written by mobius.sh, read by TUI dashboard
+ */
+export interface ExecutionState {
+  parentId: string;              // Parent issue identifier (e.g., "MOB-11")
+  parentTitle: string;           // Parent issue title for display
+
+  activeTasks: ActiveTask[];     // Currently running tasks
+  completedTasks: string[];      // Completed task identifiers
+  failedTasks: string[];         // Failed task identifiers
+
+  startedAt: string;             // ISO timestamp - loop start
+  updatedAt: string;             // ISO timestamp - last update
+
+  loopPid?: number;              // PID of the loop process (for cleanup)
+  totalTasks?: number;           // Total number of tasks (for completion detection)
+}
+
 export interface ExecutionConfig {
   delay_seconds: number;
   max_iterations: number;
@@ -12,6 +52,11 @@ export interface ExecutionConfig {
   worktree_path?: string;
   cleanup_on_success?: boolean;
   base_branch?: string;
+  // Retry and verification settings
+  max_retries?: number;           // Maximum retry attempts per task (default: 2)
+  verification_timeout?: number;  // Timeout for Linear verification in ms (default: 5000)
+  // TUI dashboard options
+  tui?: TuiConfig;
 }
 
 export interface LinearConfig {
@@ -59,6 +104,9 @@ export const DEFAULT_CONFIG: LoopConfig = {
     worktree_path: '../<repo>-worktrees/',
     cleanup_on_success: true,
     base_branch: 'main',
+    // Retry and verification defaults
+    max_retries: 2,
+    verification_timeout: 5000,
   },
 };
 
