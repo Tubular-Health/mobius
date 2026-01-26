@@ -13,6 +13,7 @@ import { BACKEND_ID_PATTERNS } from '../types.js';
 import type { Backend, Model, ExecutionConfig } from '../types.js';
 import { createWorktree, removeWorktree } from '../lib/worktree.js';
 import { fetchLinearIssue, fetchLinearSubTasks, type ParentIssue } from '../lib/linear.js';
+import { fetchJiraIssue, fetchJiraSubTasks, postJiraDiagram } from '../lib/jira.js';
 import {
   buildTaskGraph,
   getReadyTasks,
@@ -394,7 +395,7 @@ async function checkTmuxAvailable(): Promise<boolean> {
 }
 
 /**
- * Fetch parent issue from Linear (or Jira)
+ * Fetch parent issue from Linear or Jira
  */
 async function fetchParentIssue(
   taskId: string,
@@ -403,27 +404,42 @@ async function fetchParentIssue(
   if (backend === 'linear') {
     return fetchLinearIssue(taskId);
   }
-  // TODO: Implement Jira support
-  console.error(chalk.red(`Backend ${backend} not yet supported for parallel execution`));
+  if (backend === 'jira') {
+    return fetchJiraIssue(taskId);
+  }
+  console.error(chalk.red(`Backend ${backend} not supported`));
   return null;
 }
 
 /**
- * Build the initial task graph from Linear sub-tasks
+ * Fetch sub-tasks from Linear or Jira
+ */
+async function fetchSubTasks(
+  parentId: string,
+  parentIdentifier: string,
+  backend: Backend
+): Promise<ReturnType<typeof fetchLinearSubTasks>> {
+  if (backend === 'linear') {
+    return fetchLinearSubTasks(parentId);
+  }
+  if (backend === 'jira') {
+    // For Jira, use the identifier (key) instead of internal ID
+    return fetchJiraSubTasks(parentIdentifier);
+  }
+  return null;
+}
+
+/**
+ * Build the initial task graph from Linear or Jira sub-tasks
  */
 async function buildInitialGraph(
   taskId: string,
   parentIssue: ParentIssue,
   backend: Backend
 ): Promise<TaskGraph | null> {
-  if (backend !== 'linear') {
-    console.error(chalk.red(`Backend ${backend} not yet supported for task graph`));
-    return null;
-  }
-
   try {
-    // Fetch sub-tasks
-    const subTasks = await fetchLinearSubTasks(parentIssue.id);
+    // Fetch sub-tasks using the appropriate backend
+    const subTasks = await fetchSubTasks(parentIssue.id, parentIssue.identifier, backend);
     if (!subTasks || subTasks.length === 0) {
       console.log(chalk.yellow(`No sub-tasks found for ${taskId}`));
       return null;
@@ -438,13 +454,20 @@ async function buildInitialGraph(
 }
 
 /**
- * Post Mermaid diagram as comment on parent Linear issue
+ * Post Mermaid diagram as comment on parent issue (Linear or Jira)
  */
 async function postMermaidDiagram(
   taskId: string,
   graph: TaskGraph,
   backend: Backend
 ): Promise<void> {
+  const diagram = renderMermaidWithTitle(graph);
+
+  if (backend === 'jira') {
+    await postJiraDiagram(taskId, diagram);
+    return;
+  }
+
   if (backend !== 'linear') {
     return;
   }
@@ -456,8 +479,6 @@ async function postMermaidDiagram(
   }
 
   try {
-    const diagram = renderMermaidWithTitle(graph);
-
     // Find the issue by identifier
     const issue = await client.issue(taskId);
     if (!issue) {
