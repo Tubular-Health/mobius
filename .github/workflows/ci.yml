@@ -31,6 +31,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Test
+        run: npx bun test
+
   commitlint:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
