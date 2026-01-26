@@ -46,6 +46,7 @@ npm install -g mobius-loop && mobius setup
 - [Project Setup](#project-setup-agentsmd)
 - [Sandbox Mode](#sandbox-mode)
 - [Requirements](#requirements)
+- [Environment Variables](#environment-variables)
 - [CLI Reference](#cli-reference)
 - [Troubleshooting](#troubleshooting)
 
@@ -600,9 +601,28 @@ execution:
 |-------------|-------|
 | **Node.js 18+** | For npm installation |
 | **Claude Code CLI** | Install from [claude.ai/code](https://claude.ai/code) |
+| **Git** | Required for worktree operations; remote must be configured |
 | **Linear or Jira account** | Both backends fully supported |
 | **tmux** (optional) | Required for parallel execution; use `--sequential` without it |
 | **Docker** (optional) | For sandbox mode |
+
+---
+
+## Environment Variables
+
+| Variable | Backend | Required | Description |
+|----------|---------|----------|-------------|
+| `LINEAR_API_KEY` | linear | Yes | API key from [Linear Settings > API](https://linear.app/settings/api) |
+| `JIRA_API_TOKEN` | jira | Yes | API token from [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens) |
+| `JIRA_EMAIL` | jira | Yes | Email address associated with your Atlassian account |
+
+Set environment variables in your shell profile:
+```bash
+export LINEAR_API_KEY="lin_api_xxxxx"
+# or for Jira:
+export JIRA_API_TOKEN="your-api-token"
+export JIRA_EMAIL="you@company.com"
+```
 
 ---
 
@@ -642,6 +662,18 @@ Install Claude Code CLI from [claude.ai/code](https://claude.ai/code).
 ### "cclean not found"
 
 The `cclean` utility formats Claude's JSON output. Mobius works without it, but output will be less readable.
+
+### "Git not configured"
+
+Ensure you're in a git repository with a remote configured:
+```bash
+git remote -v  # Should show origin URL
+```
+
+If no remote, add one:
+```bash
+git remote add origin https://github.com/your/repo.git
+```
 
 ### Mobius stops unexpectedly
 
