@@ -1,15 +1,15 @@
 ---
 name: verify-linear-issue
-description: Verify a completed Linear issue by comparing implementation against acceptance criteria, running tests, and critiquing the work. Adds review notes as a comment on the Linear ticket. Use as the final step in the Linear workflow after execute-linear-issue, when the user mentions "verify", "review", or "check" a Linear issue.
+description: Verify a completed Linear issue by comparing implementation against acceptance criteria, running tests, and critiquing the work. Adds review notes as a comment on the Linear ticket. Use as the final step in the Linear workflow after execute-issue, when the user mentions "verify", "review", or "check" a Linear issue.
 ---
 
 <objective>
 Perform a thorough verification of a completed Linear issue implementation. This skill compares what was actually built against the intended goal and acceptance criteria, identifies gaps, runs validation checks, and documents the review on the Linear ticket.
 
 This is the fourth and final step in the Linear issue workflow:
-1. **define-linear-issue** - Creates well-defined issues with acceptance criteria
-2. **refine-linear-issue** - Breaks issues into single-file-focused sub-tasks with dependencies
-3. **execute-linear-issue** - Implements sub-tasks one at a time
+1. **define-issue** - Creates well-defined issues with acceptance criteria
+2. **refine-issue** - Breaks issues into single-file-focused sub-tasks with dependencies
+3. **execute-issue** - Implements sub-tasks one at a time
 4. **verify-linear-issue** (this skill) - Validates implementation against acceptance criteria
 </objective>
 
@@ -78,7 +78,7 @@ mcp__plugin_linear_linear__list_comments
 ```
 
 Look for:
-- Implementation notes from execute-linear-issue
+- Implementation notes from execute-issue
 - Design decisions or constraints
 - Questions or clarifications
 - Commit references

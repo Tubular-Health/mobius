@@ -42,8 +42,8 @@ STATE_DIR="${MOBIUS_STATE_DIR:-$HOME/.mobius/state}"
 
 # Backend skill mappings
 declare -A BACKEND_SKILLS=(
-    [linear]="/execute-linear-issue"
-    [jira]="/execute-jira-issue"  # Future: implement Jira skill
+    [linear]="/execute-issue"
+    [jira]="/execute-issue"
 )
 
 declare -A BACKEND_ID_PATTERNS=(

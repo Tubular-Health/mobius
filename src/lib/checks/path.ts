@@ -36,13 +36,13 @@ export async function checkSkills(paths: PathConfig): Promise<CheckResult> {
     };
   }
 
-  // Check for Linear skills specifically
-  const executeSkill = `${paths.skillsPath}/execute-linear-issue`;
+  // Check for execute-issue skill
+  const executeSkill = `${paths.skillsPath}/execute-issue`;
   if (!existsSync(executeSkill)) {
     return {
       name,
       status: 'warn',
-      message: 'Linear execute skill not found',
+      message: 'Execute skill not found',
       required: false,
       details: "Run 'loop setup' to install skills",
     };

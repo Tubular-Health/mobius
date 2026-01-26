@@ -123,8 +123,8 @@ export const DEFAULT_CONFIG: LoopConfig = {
 };
 
 export const BACKEND_SKILLS: Record<Backend, string> = {
-  linear: '/execute-linear-issue',
-  jira: '/execute-jira-issue',
+  linear: '/execute-issue',
+  jira: '/execute-issue',
 };
 
 export const BACKEND_ID_PATTERNS: Record<Backend, RegExp> = {

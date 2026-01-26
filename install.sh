@@ -82,7 +82,7 @@ install_skills() {
     mkdir -p "$SKILLS_DIR"
 
     # Copy skills
-    local skills=("define-linear-issue" "refine-linear-issue" "execute-linear-issue" "verify-linear-issue")
+    local skills=("define-issue" "refine-issue" "execute-issue" "verify-linear-issue")
 
     for skill in "${skills[@]}"; do
         local src="$SCRIPT_DIR/.claude/skills/$skill"
