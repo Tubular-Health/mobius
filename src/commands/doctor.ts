@@ -1,11 +1,13 @@
 import chalk from 'chalk';
 import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
+import { checkApiKeys } from '../lib/checks/api-keys.js';
 import { checkClaude } from '../lib/checks/claude.js';
 import { checkDocker } from '../lib/checks/docker.js';
 import { checkCclean } from '../lib/checks/cclean.js';
 import { checkConfig } from '../lib/checks/config.js';
 import { checkGit } from '../lib/checks/git.js';
+import { checkJiraMcp } from '../lib/checks/jira-mcp.js';
 import { checkPath, checkSkills } from '../lib/checks/path.js';
 import { checkLinearMcp } from '../lib/checks/linear-mcp.js';
 import { checkTmux } from '../lib/checks/tmux.js';
@@ -77,12 +79,20 @@ export async function doctor(): Promise<void> {
   results.push(gitResult);
   console.log(formatResult(gitResult));
 
+  const apiKeysResult = await checkApiKeys(backend);
+  results.push(apiKeysResult);
+  console.log(formatResult(apiKeysResult));
+
   // Optional checks
   console.log(chalk.bold('\nOptional:'));
 
   const linearResult = await checkLinearMcp(backend);
   results.push(linearResult);
   console.log(formatResult(linearResult));
+
+  const jiraResult = await checkJiraMcp(backend);
+  results.push(jiraResult);
+  console.log(formatResult(jiraResult));
 
   const dockerResult = await checkDocker(sandboxEnabled);
   results.push(dockerResult);
