@@ -172,6 +172,41 @@ export function validateConfig(config: LoopConfig): { valid: boolean; errors: st
     if (!['opus', 'sonnet', 'haiku'].includes(config.execution.model)) {
       errors.push(`Invalid model: ${config.execution.model}. Must be 'opus', 'sonnet', or 'haiku'`);
     }
+
+    // Validate parallel execution and worktree options (optional fields)
+    if (config.execution.max_parallel_agents !== undefined) {
+      if (
+        typeof config.execution.max_parallel_agents !== 'number' ||
+        !Number.isInteger(config.execution.max_parallel_agents) ||
+        config.execution.max_parallel_agents < 1 ||
+        config.execution.max_parallel_agents > 10
+      ) {
+        errors.push('execution.max_parallel_agents must be an integer between 1 and 10');
+      }
+    }
+
+    if (config.execution.worktree_path !== undefined) {
+      if (typeof config.execution.worktree_path !== 'string') {
+        errors.push('execution.worktree_path must be a string');
+      } else if (config.execution.worktree_path.trim() === '') {
+        errors.push('execution.worktree_path cannot be empty');
+      }
+      // Note: <repo> placeholder is valid and will be replaced at runtime
+    }
+
+    if (config.execution.cleanup_on_success !== undefined) {
+      if (typeof config.execution.cleanup_on_success !== 'boolean') {
+        errors.push('execution.cleanup_on_success must be a boolean (true or false)');
+      }
+    }
+
+    if (config.execution.base_branch !== undefined) {
+      if (typeof config.execution.base_branch !== 'string') {
+        errors.push('execution.base_branch must be a string');
+      } else if (config.execution.base_branch.trim() === '') {
+        errors.push('execution.base_branch cannot be empty');
+      }
+    }
   }
 
   return { valid: errors.length === 0, errors };
