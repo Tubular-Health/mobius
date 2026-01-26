@@ -208,6 +208,125 @@ Each criterion should be:
 </acceptance_criteria_rules>
 </issue_structure>
 
+<checkpoint_issues>
+<purpose>
+Checkpoint issues represent decision points where human input is required before work can proceed. They're used when the implementation approach is genuinely ambiguous and an agent cannot make the decision autonomously.
+</purpose>
+
+<when_to_create_checkpoints>
+Create a checkpoint issue when:
+- **Technology choice** - Multiple valid libraries/frameworks could solve the problem
+- **Architecture decision** - The approach has long-term implications
+- **Business logic ambiguity** - The "right" behavior depends on product decisions
+- **Trade-off evaluation** - Options have meaningfully different pros/cons
+
+Do NOT create checkpoints for:
+- Implementation details an agent can reasonably decide
+- Standard patterns with clear best practices
+- Decisions that can be easily changed later
+- Personal style preferences
+</when_to_create_checkpoints>
+
+<checkpoint_template>
+```markdown
+## Summary
+[Brief description of the decision that needs to be made]
+
+## Type: checkpoint:decision
+
+## Decision Required
+[Specific question that needs answering - one decision per checkpoint]
+
+## Options
+1. **Option A** - [Name]
+   - Pros: [Benefits of this approach]
+   - Cons: [Drawbacks or trade-offs]
+   - Example: [Code snippet or reference if helpful]
+
+2. **Option B** - [Name]
+   - Pros: [Benefits of this approach]
+   - Cons: [Drawbacks or trade-offs]
+   - Example: [Code snippet or reference if helpful]
+
+3. **Option C** - [Name] (optional)
+   - Pros: [Benefits of this approach]
+   - Cons: [Drawbacks or trade-offs]
+   - Example: [Code snippet or reference if helpful]
+
+## Recommendation
+[If the agent has a recommendation, state it with reasoning. Otherwise: "No strong recommendation - depends on team preference."]
+
+## Default Behavior
+If no decision is made within [timeframe, e.g., "24 hours" or "before next sprint"], proceed with: **[Option X]**
+Reason: [Why this is a safe default]
+
+## Blocks
+This decision blocks: [List of dependent sub-tasks or issues]
+```
+</checkpoint_template>
+
+<checkpoint_example>
+**Scenario**: Implementing dark mode feature requires deciding how to persist theme preference.
+
+```markdown
+## Summary
+Choose the approach for persisting user theme preference.
+
+## Type: checkpoint:decision
+
+## Decision Required
+How should we persist the user's theme preference across sessions?
+
+## Options
+1. **localStorage only**
+   - Pros: Simple implementation, no server changes, immediate read
+   - Cons: Not available during SSR, can flash wrong theme on load
+   - Example: `localStorage.setItem('theme', 'dark')`
+
+2. **Cookie only**
+   - Pros: Available during SSR, no theme flash
+   - Cons: Sent with every request, 4KB limit, requires cookie parsing
+   - Example: `document.cookie = 'theme=dark; max-age=31536000'`
+
+3. **Cookie + localStorage hybrid**
+   - Pros: SSR-friendly AND fast client reads, best UX
+   - Cons: More complex, must keep in sync
+   - Example: Cookie for SSR, localStorage for client preference changes
+
+## Recommendation
+**Option 3 (hybrid)** if SSR is used, otherwise **Option 1 (localStorage)**.
+Our app uses Next.js with SSR, so the hybrid approach prevents theme flash.
+
+## Default Behavior
+If no decision is made within 24 hours, proceed with: **Option 1 (localStorage)**
+Reason: Simplest implementation; theme flash is acceptable for initial release.
+
+## Blocks
+This decision blocks: MOB-125 (Create ThemeProvider), MOB-126 (Add useTheme hook)
+```
+</checkpoint_example>
+
+<timeout_handling>
+Every checkpoint must have a default behavior to prevent indefinite blocking:
+
+1. **Specify a timeout** - Usually 24-48 hours or "before next sprint"
+2. **Choose a safe default** - The option that is easiest to change later
+3. **Explain the reasoning** - Why this default won't cause problems
+
+If the checkpoint is critical and has no safe default, escalate to the issue creator.
+</timeout_handling>
+
+<checkpoint_resolution>
+When a decision is made:
+1. Add a comment with the decision and reasoning
+2. Update the issue description with "**Decision**: Option X selected"
+3. Move the checkpoint to Done
+4. Unblock dependent issues
+
+The agent executing dependent tasks should read the checkpoint's decision before implementing.
+</checkpoint_resolution>
+</checkpoint_issues>
+
 <context_gathering>
 <linear_context>
 Before creating an issue with Linear backend:
