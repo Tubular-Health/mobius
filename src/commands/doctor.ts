@@ -5,6 +5,7 @@ import { checkClaude } from '../lib/checks/claude.js';
 import { checkDocker } from '../lib/checks/docker.js';
 import { checkCclean } from '../lib/checks/cclean.js';
 import { checkConfig } from '../lib/checks/config.js';
+import { checkGit } from '../lib/checks/git.js';
 import { checkPath, checkSkills } from '../lib/checks/path.js';
 import { checkLinearMcp } from '../lib/checks/linear-mcp.js';
 import { checkTmux } from '../lib/checks/tmux.js';
@@ -71,6 +72,10 @@ export async function doctor(): Promise<void> {
   const skillsResult = await checkSkills(paths);
   results.push(skillsResult);
   console.log(formatResult(skillsResult));
+
+  const gitResult = await checkGit();
+  results.push(gitResult);
+  console.log(formatResult(gitResult));
 
   // Optional checks
   console.log(chalk.bold('\nOptional:'));
