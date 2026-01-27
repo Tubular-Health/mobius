@@ -91,9 +91,8 @@ Mobius uses **your existing issue tracker** as the source of truth. No new syste
 
 The complete Mobius workflow transforms an idea into a merged PR through 5 structured steps. Each step builds on the previous, maintaining traceability from requirements to implementation.
 
-<!-- TODO: Add workflow diagram (MOB-105) -->
 <p align="center">
-  <img src="assets/diagrams/workflow.svg" alt="Mobius Workflow" width="700" />
+  <img src="assets/diagrams/workflow-lifecycle.svg" alt="Workflow Lifecycle: /define → /refine → mobius loop → /verify → mobius submit" width="700" />
 </p>
 
 ### Step 1: `/define` — Create the Issue
@@ -190,14 +189,76 @@ mobius submit ABC-123
 
 ## TUI Dashboard
 
-<!-- TODO: Add TUI Dashboard content (MOB-108) -->
+The TUI (Terminal User Interface) Dashboard provides real-time visualization of parallel agent execution. It appears automatically when you run `mobius loop`.
 
-Real-time visualization of parallel agent execution status.
+```bash
+mobius loop MOB-123
+```
 
-<p align="center">
-  <!-- TODO: Add TUI diagram/screenshot (MOB-108) -->
-  <em>TUI Dashboard showing parallel agent status</em>
-</p>
+### Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Task Tree** | Hierarchical view of all sub-tasks with dependency relationships and current status |
+| **Agent Panel Grid** | Live output from up to 4 parallel Claude agents working simultaneously |
+| **Elapsed Time Tracking** | Per-task and total execution time displayed in real-time |
+| **Process Health Monitoring** | Visual indicators showing agent process status (active/stalled) |
+| **Auto-Exit** | Dashboard automatically exits when all tasks complete (2s delay to review) |
+
+### Dashboard Layout
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Task Tree for MOB-123:                                    [00:05:32]   │
+│  ├── [✓] MOB-124: Setup base types                                      │
+│  ├── [✓] MOB-125: Create utility functions                              │
+│  ├── [⟳] MOB-126: Implement parser (blocked by: MOB-124, MOB-125)       │
+│  │   └── [·] MOB-127: Add tests (blocked by: MOB-126)                   │
+│  ├── [⟳] MOB-128: Build CLI interface (blocked by: MOB-125)             │
+│  └── [·] MOB-129: Integration tests (blocked by: MOB-126, MOB-128)      │
+├─────────────────────────────────┬───────────────────────────────────────┤
+│ MOB-126                         │ MOB-128                               │
+│      ⠋ Running                  │      ⠋ Running                        │
+│      2m 34s                     │      1m 12s                           │
+│      Process: active            │      Process: active                  │
+├─────────────────────────────────┼───────────────────────────────────────┤
+│ (available)                     │ (available)                           │
+│      Ready for work             │      Ready for work                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│  Legend: [✓] Done  [→] Ready  [·] Blocked  [⟳] In Progress  [✗] Failed  │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### Status Icons
+
+| Icon | Status | Meaning |
+|------|--------|---------|
+| `[✓]` | Done | Task completed successfully |
+| `[→]` | Ready | All blockers resolved, ready for execution |
+| `[·]` | Blocked | Waiting on other tasks to complete |
+| `[⟳]` | In Progress | Currently being executed by an agent |
+| `[✗]` | Failed | Task failed verification |
+
+### TUI Configuration
+
+Configure the TUI in `~/.config/mobius/config.yaml`:
+
+```yaml
+execution:
+  tui:
+    show_legend: true       # Show status legend at bottom (default: true)
+    panel_lines: 8          # Lines per agent panel (default: 8)
+    panel_refresh_ms: 300   # Agent output refresh rate in ms (default: 300)
+```
+
+### Keyboard Controls
+
+| Key | Action |
+|-----|--------|
+| `q` | Exit immediately (when execution complete) |
+| `Enter` / `Space` | Exit immediately (when execution complete) |
+
+The TUI automatically exits 2 seconds after all tasks complete, giving you time to review the final status.
 
 ---
 
