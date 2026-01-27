@@ -216,6 +216,10 @@ mobius submit ABC-123
 
 📄 [Skill documentation](.claude/skills/pr/SKILL.md)
 
+<p align="center">
+  <img src="assets/terminal/completion.svg" alt="Mobius Workflow Completion" width="700" />
+</p>
+
 ---
 
 ## TUI Dashboard
@@ -311,112 +315,32 @@ mobius ABC-123
   <img src="assets/terminal/setup.svg" alt="Mobius Setup" width="700" />
 </p>
 
-<details>
-<summary>Alternative installation methods</summary>
+Once running, the **TUI Dashboard** provides real-time monitoring of all parallel agents—see the [TUI Dashboard](#tui-dashboard) section for details.
 
-### Manual Installation
-
-```bash
-git clone https://github.com/Tubular-Health/mobius.git
-cd mobius
-./install.sh
-```
-
-The installer places:
-- `mobius` command in `~/.local/bin/`
-- Config at `~/.config/mobius/config.yaml`
-- Claude skills in `~/.claude/skills/`
-
-Ensure `~/.local/bin` is in your PATH:
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-</details>
+**Alternative installation:** Clone from GitHub and run `./install.sh` for manual setup.
 
 ---
 
 ## The 4 Skills
 
-Mobius provides four unified skills for the complete issue lifecycle, supporting both Linear and Jira backends. The skills automatically detect your configured backend and use the appropriate API.
+Mobius provides four unified skills for the complete issue lifecycle. Skills auto-detect your configured backend (Linear or Jira).
 
-<details>
-<summary><code>/define</code> — Create well-defined issues</summary>
+| Skill | Purpose | Command |
+|-------|---------|---------|
+| `/define` | Create well-defined issues with acceptance criteria | `claude "/define"` |
+| `/refine` | Break issues into single-file focused sub-tasks | `claude "/refine ABC-123"` |
+| `/execute` | Implement one sub-task (or use `mobius loop` for all) | `claude "/execute ABC-123"` |
+| `/verify` | Validate implementation against acceptance criteria | `claude "/verify ABC-123"` |
 
-Through Socratic questioning, Claude helps you create issues with:
-- Clear title and description
-- Measurable acceptance criteria
-- Appropriate labels and priority
+**`/define`** uses Socratic questioning to create issues with clear titles, measurable acceptance criteria, and appropriate labels.
 
-```bash
-claude "/define"
-```
+**`/refine`** analyzes your codebase and creates sub-tasks ordered by blocking dependencies, each targeting a single file (or source + test pair).
 
-Works with both Linear and Jira based on your `backend` config setting.
+**`/execute`** implements the next ready sub-task: reads context → implements → validates → commits → marks complete. Use `mobius loop` to run continuously.
 
-</details>
+**`/verify`** reviews the complete implementation, runs final validation, adds review notes as comments, and marks the issue complete if all criteria pass.
 
-<details>
-<summary><code>/refine</code> — Break into sub-tasks</summary>
-
-Analyzes your codebase and creates sub-tasks that are:
-- Small enough for single-file focus
-- Ordered with blocking dependencies
-- Detailed with specific files and changes
-
-```bash
-claude "/refine ABC-123"    # Linear
-claude "/refine PROJ-123"   # Jira
-```
-
-</details>
-
-<details>
-<summary><code>/execute</code> — Implement one sub-task</summary>
-
-Executes the next ready sub-task:
-1. Reads parent issue context
-2. Implements the change
-3. Runs validation commands
-4. Commits and pushes
-5. Marks sub-task complete
-
-```bash
-claude "/execute ABC-123"
-```
-
-Or use the CLI for continuous execution:
-```bash
-mobius ABC-123
-```
-
-</details>
-
-<details>
-<summary><code>/verify</code> — Validate completion</summary>
-
-Reviews implementation against acceptance criteria:
-- Compares changes to requirements
-- Runs final validation
-- Adds review notes as issue comment
-- Marks issue complete if passing
-
-```bash
-claude "/verify ABC-123"
-```
-
-</details>
-
-### Backend-Specific Aliases
-
-For explicit backend selection, you can also use:
-
-| Unified Command | Linear Alias | Jira Alias |
-|-----------------|--------------|------------|
-| `/define` | `/linear:define` | `/jira:define` |
-| `/refine` | `/linear:refine` | `/jira:refine` |
-| `/execute` | `/linear:execute` | `/jira:execute` |
-| `/verify` | `/linear:verify` | `/jira:verify` |
+For explicit backend selection, use prefixed aliases: `/linear:define`, `/jira:refine`, etc.
 
 ---
 
@@ -468,25 +392,6 @@ mobius loop MOB-123
 6. Loop continues until all tasks complete
 7. Worktree cleaned up on success
 ```
-
-### Task Dependency Visualization
-
-Before execution, Mobius displays the task tree in your terminal:
-
-```
-Task Tree for MOB-123:
-├── [✓] MOB-124: Setup base types
-├── [✓] MOB-125: Create utility functions
-├── [→] MOB-126: Implement parser (blocked by: MOB-124, MOB-125)
-│   └── [·] MOB-127: Add tests (blocked by: MOB-126)
-├── [→] MOB-128: Build CLI interface (blocked by: MOB-125)
-└── [·] MOB-129: Integration tests (blocked by: MOB-126, MOB-128)
-
-Legend: [✓] Done  [→] Ready  [·] Blocked  [!] In Progress
-Ready for parallel execution: MOB-126, MOB-128 (2 agents)
-```
-
-A Mermaid diagram is also posted to the parent Linear issue for team visibility.
 
 ### Commands
 
