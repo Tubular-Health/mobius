@@ -1,104 +1,92 @@
 /**
  * Jira API integration for fetching issues and sub-tasks
  *
- * Uses execa to call Claude with Jira MCP tools since there's no
- * direct Jira SDK integration. This mirrors the pattern used for
- * Linear but via MCP tool calls through Claude.
+ * Uses the jira.js SDK (Version3Client) for direct Jira API access.
+ * Credentials are read from environment variables:
+ * - JIRA_HOST: Jira instance hostname (e.g., "yourcompany.atlassian.net")
+ * - JIRA_EMAIL: User email for API authentication
+ * - JIRA_API_TOKEN: Jira API token
  */
 
 import chalk from 'chalk';
-import { execa } from 'execa';
+import { Version3Client } from 'jira.js';
 import type { ParentIssue } from './linear.js';
 import type { LinearIssue } from './task-graph.js';
 
 /**
- * Jira issue response structure from MCP tool
+ * Jira issue link structure from SDK response
  */
-interface JiraIssueResponse {
-  key: string;
-  id: string;
-  fields: {
-    summary: string;
-    status: {
-      name: string;
-    };
-    issuetype?: {
-      name: string;
-      subtask?: boolean;
-    };
-    parent?: {
-      key: string;
-      id: string;
-    };
-    issuelinks?: Array<{
-      type: {
-        name: string;
-        inward: string;
-        outward: string;
-      };
-      inwardIssue?: {
-        key: string;
-        id: string;
-      };
-      outwardIssue?: {
-        key: string;
-        id: string;
-      };
-    }>;
-    subtasks?: Array<{
-      key: string;
-      id: string;
-      fields: {
-        summary: string;
-        status: {
-          name: string;
-        };
-      };
-    }>;
+interface JiraIssueLink {
+  type?: {
+    name?: string;
+    inward?: string;
+    outward?: string;
+  };
+  inwardIssue?: {
+    key?: string;
+    id?: string;
+  };
+  outwardIssue?: {
+    key?: string;
+    id?: string;
   };
 }
 
 /**
- * Parse Claude MCP response to extract JSON result
+ * Get a Jira client instance
+ *
+ * Reads credentials from environment variables:
+ * - JIRA_HOST: Jira instance hostname (e.g., "yourcompany.atlassian.net")
+ * - JIRA_EMAIL: User email for API authentication
+ * - JIRA_API_TOKEN: Jira API token
  */
-function parseMcpResponse<T>(response: string): T | null {
-  try {
-    // Claude with --output-format json returns structured response
-    const parsed = JSON.parse(response);
-    // The actual result may be nested in the response
-    if (parsed.result) {
-      return parsed.result as T;
-    }
-    return parsed as T;
-  } catch {
-    // Try to extract JSON from the response text
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[0]) as T;
-      } catch {
-        return null;
-      }
-    }
+export function getJiraClient(): Version3Client | null {
+  const host = process.env.JIRA_HOST;
+  const email = process.env.JIRA_EMAIL;
+  const apiToken = process.env.JIRA_API_TOKEN;
+
+  if (!host) {
+    console.error(chalk.red('JIRA_HOST environment variable is not set'));
     return null;
   }
+  if (!email) {
+    console.error(chalk.red('JIRA_EMAIL environment variable is not set'));
+    return null;
+  }
+  if (!apiToken) {
+    console.error(chalk.red('JIRA_API_TOKEN environment variable is not set'));
+    return null;
+  }
+
+  // Normalize host - ensure it has https:// prefix
+  const normalizedHost = host.startsWith('https://') ? host : `https://${host}`;
+
+  return new Version3Client({
+    host: normalizedHost,
+    authentication: {
+      basic: {
+        email,
+        apiToken,
+      },
+    },
+  });
 }
 
 /**
  * Fetch a Jira issue by key (e.g., PROJ-123)
  */
 export async function fetchJiraIssue(taskId: string): Promise<ParentIssue | null> {
-  try {
-    const prompt = `Use the mcp_plugin_atlassian_jira__get_issue tool to fetch the Jira issue with key "${taskId}". Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
+  const client = getJiraClient();
+  if (!client) {
+    return null;
+  }
 
-    const result = await execa('claude', ['-p', '--output-format', 'json'], {
-      input: prompt,
-      timeout: 30000,
+  try {
+    const issue = await client.issues.getIssue({
+      issueIdOrKey: taskId,
     });
 
-    const issue = parseMcpResponse<JiraIssueResponse>(result.stdout);
     if (!issue) {
-      console.error(chalk.gray('Failed to parse Jira issue response'));
       return null;
     }
 
@@ -106,9 +94,9 @@ export async function fetchJiraIssue(taskId: string): Promise<ParentIssue | null
     const branchName = `feature/${taskId.toLowerCase()}`;
 
     return {
-      id: issue.id,
-      identifier: issue.key,
-      title: issue.fields.summary,
+      id: issue.id ?? taskId,
+      identifier: issue.key ?? taskId,
+      title: issue.fields?.summary ?? '',
       gitBranchName: branchName,
     };
   } catch (error) {
@@ -130,86 +118,35 @@ export async function fetchJiraIssue(taskId: string): Promise<ParentIssue | null
  * for compatibility with the task graph.
  */
 export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[] | null> {
+  const client = getJiraClient();
+  if (!client) {
+    return null;
+  }
+
   try {
-    // First, get the parent issue to find its subtasks and linked issues
-    const parentPrompt = `Use the mcp_plugin_atlassian_jira__get_issue tool to fetch the Jira issue with key "${parentKey}" including its subtasks and issue links. Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
-
-    const parentResult = await execa('claude', ['-p', '--output-format', 'json'], {
-      input: parentPrompt,
-      timeout: 30000,
+    // Use JQL to find all sub-tasks of the parent
+    const searchResponse = await client.issueSearch.searchForIssuesUsingJql({
+      jql: `parent = ${parentKey}`,
+      fields: ['summary', 'status', 'issuelinks', 'issuetype'],
     });
-
-    const parentIssue = parseMcpResponse<JiraIssueResponse>(parentResult.stdout);
-    if (!parentIssue) {
-      console.error(chalk.gray('Failed to parse parent Jira issue'));
-      return null;
-    }
 
     const subTasks: LinearIssue[] = [];
 
-    // Process direct subtasks
-    if (parentIssue.fields.subtasks) {
-      for (const subtask of parentIssue.fields.subtasks) {
-        // Fetch full subtask details to get issue links
-        const subtaskPrompt = `Use the mcp_plugin_atlassian_jira__get_issue tool to fetch the Jira issue with key "${subtask.key}" including its issue links. Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
+    if (searchResponse.issues) {
+      for (const issue of searchResponse.issues) {
+        const blockedBy = extractBlockedByRelations(issue.fields?.issuelinks as JiraIssueLink[] | undefined);
 
-        const subtaskResult = await execa('claude', ['-p', '--output-format', 'json'], {
-          input: subtaskPrompt,
-          timeout: 30000,
+        subTasks.push({
+          id: issue.id ?? '',
+          identifier: issue.key ?? '',
+          title: issue.fields?.summary ?? '',
+          status: (issue.fields?.status as { name?: string })?.name ?? 'To Do',
+          gitBranchName: `feature/${(issue.key ?? '').toLowerCase()}`,
+          relations: {
+            blockedBy,
+          },
         });
-
-        const fullSubtask = parseMcpResponse<JiraIssueResponse>(subtaskResult.stdout);
-        if (fullSubtask) {
-          const blockedBy = extractBlockedByRelations(fullSubtask);
-
-          subTasks.push({
-            id: fullSubtask.id,
-            identifier: fullSubtask.key,
-            title: fullSubtask.fields.summary,
-            status: fullSubtask.fields.status.name,
-            gitBranchName: `feature/${fullSubtask.key.toLowerCase()}`,
-            relations: {
-              blockedBy,
-            },
-          });
-        }
       }
-    }
-
-    // Also search for issues linked as sub-tasks via JQL
-    // This handles cases where issues aren't true Jira subtasks but are linked
-    const searchPrompt = `Use the mcp_plugin_atlassian_jira__search_issues tool with JQL "parent = ${parentKey}" to find all sub-tasks. Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
-
-    try {
-      const searchResult = await execa('claude', ['-p', '--output-format', 'json'], {
-        input: searchPrompt,
-        timeout: 30000,
-      });
-
-      const searchResponse = parseMcpResponse<{ issues: JiraIssueResponse[] }>(searchResult.stdout);
-      if (searchResponse?.issues) {
-        for (const issue of searchResponse.issues) {
-          // Skip if already added from subtasks array
-          if (subTasks.some(t => t.id === issue.id)) {
-            continue;
-          }
-
-          const blockedBy = extractBlockedByRelations(issue);
-
-          subTasks.push({
-            id: issue.id,
-            identifier: issue.key,
-            title: issue.fields.summary,
-            status: issue.fields.status.name,
-            gitBranchName: `feature/${issue.key.toLowerCase()}`,
-            relations: {
-              blockedBy,
-            },
-          });
-        }
-      }
-    } catch {
-      // JQL search may fail if no results, continue with subtasks we have
     }
 
     return subTasks;
@@ -227,20 +164,22 @@ export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[
  * In Jira, blocking relationships are represented via issue links with
  * types like "Blocks" where the inward description is "is blocked by"
  */
-function extractBlockedByRelations(issue: JiraIssueResponse): Array<{ id: string; identifier: string }> {
+function extractBlockedByRelations(issuelinks: JiraIssueLink[] | undefined): Array<{ id: string; identifier: string }> {
   const blockedBy: Array<{ id: string; identifier: string }> = [];
 
-  if (!issue.fields.issuelinks) {
+  if (!issuelinks) {
     return blockedBy;
   }
 
-  for (const link of issue.fields.issuelinks) {
+  for (const link of issuelinks) {
     // Check for "is blocked by" relationship (inward link)
     // The inward description typically contains "is blocked by"
     if (
       link.inwardIssue &&
-      (link.type.inward.toLowerCase().includes('blocked by') ||
-        link.type.name.toLowerCase() === 'blocks')
+      link.inwardIssue.id &&
+      link.inwardIssue.key &&
+      (link.type?.inward?.toLowerCase().includes('blocked by') ||
+        link.type?.name?.toLowerCase() === 'blocks')
     ) {
       blockedBy.push({
         id: link.inwardIssue.id,
