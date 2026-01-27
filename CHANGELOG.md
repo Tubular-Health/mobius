@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.2.1...mobius-ai-v1.2.2) (2026-01-27)
+
+
+### Bug Fixes
+
+* **jira:** migrate to new JQL enhanced search API ([#27](https://github.com/Tubular-Health/mobius/issues/27)) ([f1eb1d8](https://github.com/Tubular-Health/mobius/commit/f1eb1d8de8c40eff413c2e6cd133099552093e81))
+
 ## [1.2.1](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.2.0...mobius-ai-v1.2.1) (2026-01-27)
 
 
