@@ -100,14 +100,13 @@ export async function verifyLinearCompletion(
 
     // Check if status indicates completion
     const completedStatuses = ['done', 'completed', 'cancelled', 'canceled'];
-    const inProgressStatuses = ['in progress', 'in review', 'started'];
 
     const lowerStatus = statusName.toLowerCase();
     const isCompleted = completedStatuses.some(s => lowerStatus.includes(s));
-    const isInProgress = inProgressStatuses.some(s => lowerStatus.includes(s));
 
-    // Consider "In Progress" as verified since the skill moves tasks there after implementation
-    const verified = isCompleted || isInProgress;
+    // Only mark as verified when Linear shows task is actually completed
+    // "In Progress" means the agent is still working - don't mark as done yet
+    const verified = isCompleted;
 
     return { verified, status: statusName };
   } catch (error) {

@@ -86,6 +86,7 @@ program
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
   .option('-p, --parallel <count>', 'Max parallel agents (overrides config)', parseInt)
   .option('-n, --max-iterations <count>', 'Maximum iterations', parseInt)
+  .option('-f, --fresh', 'Clear stale state from previous executions before starting')
   .action(async (taskId: string, options) => {
     await loop(taskId, {
       local: options.local,
@@ -93,6 +94,7 @@ program
       model: options.model as Model | undefined,
       parallel: options.parallel,
       maxIterations: options.maxIterations,
+      fresh: options.fresh,
     });
   });
 
@@ -137,6 +139,7 @@ program
   .option('-p, --parallel <count>', 'Max parallel agents (overrides config)', parseInt)
   .option('-n, --max-iterations <count>', 'Maximum iterations', parseInt)
   .option('-d, --delay <seconds>', 'Delay between iterations (sequential mode)', parseInt)
+  .option('-f, --fresh', 'Clear stale state from previous executions before starting')
   .option('--no-tui', 'Disable TUI dashboard (use traditional output)')
   .action(async (taskId: string | undefined, options) => {
     // If no task ID, show help
@@ -170,6 +173,7 @@ program
         model: options.model as Model | undefined,
         parallel: options.parallel,
         maxIterations: options.maxIterations,
+        fresh: options.fresh,
       });
       return;
     }
@@ -182,6 +186,7 @@ program
     if (options.model) loopArgs.push('--model', options.model);
     if (options.parallel) loopArgs.push('--parallel', String(options.parallel));
     if (options.maxIterations) loopArgs.push('--max-iterations', String(options.maxIterations));
+    if (options.fresh) loopArgs.push('--fresh');
 
     // Spawn the loop process in the background
     const loopProcess = spawn(process.execPath, [join(__dirname, 'mobius.js'), ...loopArgs], {
