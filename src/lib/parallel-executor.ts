@@ -206,7 +206,7 @@ function buildClaudeCommand(
     '&&',
     `echo '${skill} ${subtaskIdentifier}'`,
     '|',
-    `claude -p --dangerously-skip-permissions --output-format stream-json ${modelFlag}`.trim(),
+    `claude -p --dangerously-skip-permissions --verbose --output-format stream-json ${modelFlag}`.trim(),
     '|',
     'cclean',
   ].join(' ');
