@@ -58,7 +58,7 @@ export function mapLinearStatus(linearStatus: string): TaskStatus {
   }
 
   // In progress states
-  if (statusLower === 'in progress' || statusLower === 'in review' || statusLower === 'started') {
+  if (statusLower === 'in progress' || statusLower === 'in review' || statusLower === 'started' || statusLower === 'active') {
     return 'in_progress';
   }
 

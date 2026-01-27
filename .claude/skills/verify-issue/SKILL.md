@@ -60,27 +60,27 @@ The detected backend determines which MCP tools to use throughout this skill. Al
 <jira>
 **MCP Tools for Jira**:
 
-- **Fetch issue**: `mcp__plugin_jira_jira__get_issue`
+- **Fetch issue**: `mcp_plugin_atlassian_jira__get_issue`
   - Parameters: `issueIdOrKey` (e.g., "PROJ-123")
   - Returns: Issue with status, description, acceptance criteria
 
-- **List comments**: `mcp__plugin_jira_jira__get_comments`
+- **List comments**: `mcp_plugin_atlassian_jira__get_comments`
   - Parameters: `issueIdOrKey`
   - Returns: Array of comments with implementation notes
 
-- **List sub-tasks**: `mcp__plugin_jira_jira__list_issues`
+- **List sub-tasks**: `mcp_plugin_atlassian_jira__list_issues`
   - Parameters: `jql` (e.g., "parent = PROJ-123")
   - Returns: Array of child issues with status
 
-- **Add comment**: `mcp__plugin_jira_jira__add_comment`
+- **Add comment**: `mcp_plugin_atlassian_jira__add_comment`
   - Parameters: `issueIdOrKey`, `body` (Jira wiki markup or markdown)
   - Use for: Posting verification report
 
-- **Update status**: `mcp__plugin_jira_jira__transition_issue`
+- **Update status**: `mcp_plugin_atlassian_jira__transition_issue`
   - Parameters: `issueIdOrKey`, `transitionId` or `transitionName`
   - Use for: Transitioning to Done if verified
 
-- **Create follow-up issue**: `mcp__plugin_jira_jira__create_issue`
+- **Create follow-up issue**: `mcp_plugin_atlassian_jira__create_issue`
   - Parameters: `projectKey`, `summary`, `description`, `issueType`, `labels`
   - Use for: Creating follow-up issues for discovered problems
 </jira>

@@ -38,6 +38,51 @@ export async function getRepoName(): Promise<string> {
 }
 
 /**
+ * Get the git repository root (handles both main repo and worktrees)
+ *
+ * If we're in a worktree, this returns the main repo's path, not the worktree path.
+ * This ensures consistent worktree path calculation regardless of where mobius is run from.
+ */
+async function getGitRepoRoot(): Promise<string> {
+  try {
+    // First check if we're in a worktree
+    const { stdout: gitDir } = await execa('git', ['rev-parse', '--git-dir']);
+    const gitDirPath = gitDir.trim();
+
+    // If .git is a file (not a directory), we're in a worktree
+    // The file contains: "gitdir: /path/to/main/repo/.git/worktrees/xxx"
+    if (!gitDirPath.startsWith('/') && gitDirPath !== '.git') {
+      // Relative path like ".git" means we're in the main repo
+      const { stdout: toplevel } = await execa('git', ['rev-parse', '--show-toplevel']);
+      return toplevel.trim();
+    }
+
+    // Check if this is a worktree by looking for commondir
+    try {
+      const { stdout: commonDir } = await execa('git', ['rev-parse', '--git-common-dir']);
+      const commonDirPath = commonDir.trim();
+
+      // If common dir is different from git dir, we're in a worktree
+      // The common dir points to the main repo's .git directory
+      if (commonDirPath !== gitDirPath && commonDirPath !== '.git') {
+        // Get the main repo root from the common dir
+        // commonDir is like "/path/to/main/repo/.git"
+        return resolve(commonDirPath, '..');
+      }
+    } catch {
+      // No common dir, we're in main repo
+    }
+
+    // We're in the main repo
+    const { stdout: toplevel } = await execa('git', ['rev-parse', '--show-toplevel']);
+    return toplevel.trim();
+  } catch {
+    // Fallback to cwd if git commands fail
+    return process.cwd();
+  }
+}
+
+/**
  * Get the worktree path for a given task
  */
 export async function getWorktreePath(taskId: string, config: ExecutionConfig): Promise<string> {
@@ -47,8 +92,11 @@ export async function getWorktreePath(taskId: string, config: ExecutionConfig): 
   // Replace <repo> placeholder with actual repo name
   const basePath = worktreePathTemplate.replace('<repo>', repoName);
 
-  // Resolve path relative to current working directory
-  return resolve(process.cwd(), basePath, taskId);
+  // Get the main repo root (not the worktree we might be in)
+  const repoRoot = await getGitRepoRoot();
+
+  // Resolve path relative to the main repo root
+  return resolve(repoRoot, basePath, taskId);
 }
 
 /**

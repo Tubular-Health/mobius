@@ -89,7 +89,7 @@ function parseMcpResponse<T>(response: string): T | null {
  */
 export async function fetchJiraIssue(taskId: string): Promise<ParentIssue | null> {
   try {
-    const prompt = `Use the mcp__plugin_jira_jira__get_issue tool to fetch the Jira issue with key "${taskId}". Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
+    const prompt = `Use the mcp_plugin_atlassian_jira__get_issue tool to fetch the Jira issue with key "${taskId}". Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
 
     const result = await execa('claude', ['-p', '--output-format', 'json'], {
       input: prompt,
@@ -132,7 +132,7 @@ export async function fetchJiraIssue(taskId: string): Promise<ParentIssue | null
 export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[] | null> {
   try {
     // First, get the parent issue to find its subtasks and linked issues
-    const parentPrompt = `Use the mcp__plugin_jira_jira__get_issue tool to fetch the Jira issue with key "${parentKey}" including its subtasks and issue links. Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
+    const parentPrompt = `Use the mcp_plugin_atlassian_jira__get_issue tool to fetch the Jira issue with key "${parentKey}" including its subtasks and issue links. Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
 
     const parentResult = await execa('claude', ['-p', '--output-format', 'json'], {
       input: parentPrompt,
@@ -151,7 +151,7 @@ export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[
     if (parentIssue.fields.subtasks) {
       for (const subtask of parentIssue.fields.subtasks) {
         // Fetch full subtask details to get issue links
-        const subtaskPrompt = `Use the mcp__plugin_jira_jira__get_issue tool to fetch the Jira issue with key "${subtask.key}" including its issue links. Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
+        const subtaskPrompt = `Use the mcp_plugin_atlassian_jira__get_issue tool to fetch the Jira issue with key "${subtask.key}" including its issue links. Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
 
         const subtaskResult = await execa('claude', ['-p', '--output-format', 'json'], {
           input: subtaskPrompt,
@@ -178,7 +178,7 @@ export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[
 
     // Also search for issues linked as sub-tasks via JQL
     // This handles cases where issues aren't true Jira subtasks but are linked
-    const searchPrompt = `Use the mcp__plugin_jira_jira__search_issues tool with JQL "parent = ${parentKey}" to find all sub-tasks. Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
+    const searchPrompt = `Use the mcp_plugin_atlassian_jira__search_issues tool with JQL "parent = ${parentKey}" to find all sub-tasks. Return ONLY the raw JSON response from the tool, no additional text or formatting.`;
 
     try {
       const searchResult = await execa('claude', ['-p', '--output-format', 'json'], {

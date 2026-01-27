@@ -39,10 +39,10 @@ The backend determines which MCP tools to use for issue operations.
 
 <jira>
 **Jira MCP Tools**:
-- `mcp__plugin_jira_jira__create_issue` - Create issues
-- `mcp__plugin_jira_jira__list_issues` - Search existing issues
-- `mcp__plugin_jira_jira__get_issue` - Get issue details
-- `mcp__plugin_jira_jira__list_projects` - List available projects
+- `mcp_plugin_atlassian_jira__create_issue` - Create issues
+- `mcp_plugin_atlassian_jira__list_issues` - Search existing issues
+- `mcp_plugin_atlassian_jira__get_issue` - Get issue details
+- `mcp_plugin_atlassian_jira__list_projects` - List available projects
 
 **Jira Configuration**:
 Requires `project_key` from jira config section:
@@ -351,13 +351,13 @@ Before creating an issue with Jira backend:
 
 ```
 # Search for related issues
-mcp__plugin_jira_jira__list_issues with JQL query
+mcp_plugin_atlassian_jira__list_issues with JQL query
 
 # Get issue details
-mcp__plugin_jira_jira__get_issue
+mcp_plugin_atlassian_jira__get_issue
 
 # List available projects
-mcp__plugin_jira_jira__list_projects
+mcp_plugin_atlassian_jira__list_projects
 ```
 </jira_context>
 
@@ -450,7 +450,7 @@ mcp__plugin_linear_linear__create_issue
 
 **Jira**:
 ```
-mcp__plugin_jira_jira__create_issue
+mcp_plugin_atlassian_jira__create_issue
   project: "PROJECT_KEY"
   summary: "Issue title"
   description: "Full markdown description"
@@ -514,7 +514,7 @@ Schedule deactivates successfully with confirmation message.
 
 **Jira** resulting issue:
 ```
-mcp__plugin_jira_jira__create_issue
+mcp_plugin_atlassian_jira__create_issue
   project: "PROJ"
   summary: "Schedule deactivation throws 500 error"
   description: "...same description..."

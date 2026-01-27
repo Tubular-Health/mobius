@@ -96,18 +96,11 @@ function getStatusOverrides(
     }
   }
 
-  // Mark completed tasks as done
-  for (const entry of executionState.completedTasks) {
-    const taskIdentifier = getCompletedTaskId(entry);
-    for (const task of graph.tasks.values()) {
-      if (task.identifier === taskIdentifier) {
-        overrides.set(task.id, 'done');
-        break;
-      }
-    }
-  }
+  // Note: completedTasks from state file are NOT used for status overrides.
+  // Linear is the source of truth - the graph is built from fresh Linear data at startup.
+  // completedTasks are only used for timing info (duration display).
 
-  // Mark failed tasks as failed
+  // Mark failed tasks as failed (only for currently active execution)
   for (const entry of executionState.failedTasks) {
     const taskIdentifier = getCompletedTaskId(entry);
     for (const task of graph.tasks.values()) {

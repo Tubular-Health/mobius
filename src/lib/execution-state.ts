@@ -612,6 +612,68 @@ export function removeActiveTask(
 }
 
 /**
+ * Clear all active tasks
+ *
+ * Used to clean up stale state when the loop exits (success, failure, or signal).
+ * This prevents the TUI from showing tasks as "active" when they're not running.
+ *
+ * Uses atomic read-modify-write to prevent race conditions in concurrent scenarios.
+ *
+ * @param parentId - The parent task identifier (e.g., "MOB-11")
+ * @param stateDir - Optional custom state directory
+ * @returns Updated execution state or null if no state file exists
+ */
+export function clearAllActiveTasks(
+  parentId: string,
+  stateDir?: string
+): ExecutionState | null {
+  const currentState = readExecutionState(parentId, stateDir);
+  if (!currentState) {
+    return null;
+  }
+
+  return withExecutionStateSync(
+    parentId,
+    (state) => {
+      const baseState = state ?? currentState;
+      return {
+        ...baseState,
+        activeTasks: [],
+      };
+    },
+    stateDir
+  );
+}
+
+/**
+ * Delete the execution state file for a parent task
+ *
+ * Used with --fresh flag to clear stale state from previous executions.
+ * This allows reprocessing tasks that were manually moved back to non-done states.
+ *
+ * @param parentId - The parent task identifier (e.g., "MOB-11")
+ * @param stateDir - Optional custom state directory
+ * @returns true if file was deleted, false if it didn't exist
+ */
+export function deleteExecutionState(
+  parentId: string,
+  stateDir?: string
+): boolean {
+  const filePath = getStateFilePath(parentId, stateDir);
+
+  if (!existsSync(filePath)) {
+    return false;
+  }
+
+  try {
+    unlinkSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Update the pane ID of an active task
  *
  * Used to set the real tmux pane ID after executeParallel() returns,
