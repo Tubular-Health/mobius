@@ -23,11 +23,4 @@ Show
 Type "mobius -n 4 MOB-1"
 Sleep 1s
 Enter
-Sleep 20s
-
-# Clear and show TUI
-Hide
-Type "clear"
-Enter
-Sleep 100ms
-Show
+Sleep 10s
