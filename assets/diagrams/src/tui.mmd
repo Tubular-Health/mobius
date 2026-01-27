@@ -1,0 +1,75 @@
+%%{init: {'theme': 'dark', 'themeVariables': { 'primaryColor': '#8B5CF6', 'primaryTextColor': '#fff', 'primaryBorderColor': '#7C3AED', 'lineColor': '#6366F1', 'secondaryColor': '#3B82F6', 'tertiaryColor': '#10B981'}}}%%
+flowchart TB
+    subgraph Dashboard["<b>TUI Dashboard</b>"]
+        subgraph Header[" "]
+            direction LR
+            Title["<b>Task Tree for MOB-123:</b>"]
+            Timer["<b>[00:05:32]</b>"]
+        end
+
+        subgraph Body[" "]
+            direction LR
+            subgraph TaskTree["<b>Task Tree</b>"]
+                direction TB
+                T1["[✓] MOB-124: Setup types"]
+                T2["[✓] MOB-125: Create utils"]
+                T3["[⟳] MOB-126: Parser"]
+                T4["[·] MOB-127: Tests"]
+                T5["[⟳] MOB-128: CLI"]
+                T6["[·] MOB-129: Integration"]
+            end
+
+            subgraph AgentGrid["<b>Agent Panel Grid</b>"]
+                direction TB
+                subgraph Row1[" "]
+                    direction LR
+                    A1["<b>Agent 1</b><br/>MOB-126<br/>⠋ Running<br/>2m 34s"]
+                    A2["<b>Agent 2</b><br/>MOB-128<br/>⠋ Running<br/>1m 12s"]
+                end
+                subgraph Row2[" "]
+                    direction LR
+                    A3["<b>Agent 3</b><br/>(available)<br/>Ready"]
+                    A4["<b>Agent 4</b><br/>(available)<br/>Ready"]
+                end
+            end
+        end
+
+        subgraph Legend[" "]
+            direction LR
+            L1["[✓] Done"]
+            L2["[→] Ready"]
+            L3["[·] Blocked"]
+            L4["[⟳] In Progress"]
+            L5["[✗] Failed"]
+        end
+    end
+
+    style Title fill:transparent,color:#94A3B8,stroke:none
+    style Timer fill:#10B981,color:#fff,stroke:#059669
+
+    style T1 fill:#10B981,color:#fff,stroke:#059669
+    style T2 fill:#10B981,color:#fff,stroke:#059669
+    style T3 fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style T4 fill:#374151,color:#9CA3AF,stroke:#4B5563
+    style T5 fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style T6 fill:#374151,color:#9CA3AF,stroke:#4B5563
+
+    style A1 fill:#3B82F6,color:#fff,stroke:#2563EB
+    style A2 fill:#3B82F6,color:#fff,stroke:#2563EB
+    style A3 fill:#374151,color:#9CA3AF,stroke:#4B5563
+    style A4 fill:#374151,color:#9CA3AF,stroke:#4B5563
+
+    style L1 fill:#10B981,color:#fff,stroke:#059669
+    style L2 fill:#3B82F6,color:#fff,stroke:#2563EB
+    style L3 fill:#374151,color:#9CA3AF,stroke:#4B5563
+    style L4 fill:#8B5CF6,color:#fff,stroke:#7C3AED
+    style L5 fill:#EF4444,color:#fff,stroke:#DC2626
+
+    style Header fill:transparent,stroke:#475569,stroke-width:1px
+    style Body fill:transparent,stroke:none
+    style TaskTree fill:transparent,stroke:#475569,stroke-width:1px
+    style AgentGrid fill:transparent,stroke:#475569,stroke-width:1px
+    style Row1 fill:transparent,stroke:none
+    style Row2 fill:transparent,stroke:none
+    style Legend fill:transparent,stroke:#475569,stroke-width:1px
+    style Dashboard fill:#1E293B,stroke:#475569,stroke-width:2px

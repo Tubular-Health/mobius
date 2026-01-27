@@ -226,6 +226,10 @@ The TUI (Terminal User Interface) Dashboard provides real-time visualization of 
 mobius loop MOB-123
 ```
 
+<p align="center">
+  <img src="assets/diagrams/tui.svg" alt="TUI Dashboard Layout: Task Tree + Agent Panel Grid with Legend" width="700" />
+</p>
+
 ### Key Features
 
 | Feature | Description |
