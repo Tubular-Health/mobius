@@ -63,6 +63,13 @@ function getRootTasks(graph: TaskGraph): SubTask[] {
 /**
  * Apply execution state updates to task status
  * Returns a map of taskId -> updated status
+ *
+ * IMPORTANT: Linear is the source of truth for terminal states (done).
+ * If Linear says a task is done, we trust that over stale execution state.
+ * This handles cases where:
+ * - The loop process died before updating the state file
+ * - Tasks were completed manually in Linear
+ * - Race conditions between agents and state updates
  */
 function getStatusOverrides(
   graph: TaskGraph,
@@ -74,12 +81,16 @@ function getStatusOverrides(
     return overrides;
   }
 
-  // Mark active tasks as in_progress
+  // Mark active tasks as in_progress, unless already done in Linear
   for (const activeTask of executionState.activeTasks) {
     // Find task by identifier
     for (const task of graph.tasks.values()) {
       if (task.identifier === activeTask.id) {
-        overrides.set(task.id, 'in_progress');
+        // Don't override if Linear says it's already done - Linear is source of truth
+        // This handles stale state files when the loop process died
+        if (task.status !== 'done') {
+          overrides.set(task.id, 'in_progress');
+        }
         break;
       }
     }
@@ -220,6 +231,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
       <TaskNode
         task={taskWithOverride}
         graph={graph}
+        statusOverrides={statusOverrides}
         prefix={prefix}
         connector={connector}
         completedTaskInfo={completedTaskInfo}
