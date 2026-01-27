@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.1](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.1.0...mobius-ai-v1.1.1) (2026-01-27)
+
+
+### Bug Fixes
+
+* **tui:** correctly resolve blocker status using runtime overrides ([#17](https://github.com/Tubular-Health/mobius/issues/17)) ([9f52718](https://github.com/Tubular-Health/mobius/commit/9f52718af728e8f49421fecd0cdc028ba9430c60))
+
+
+### Documentation
+
+* **readme:** overhaul README with TUI Dashboard documentation and workflow lifecycle ([#19](https://github.com/Tubular-Health/mobius/issues/19)) ([4514170](https://github.com/Tubular-Health/mobius/commit/451417057faf599fd58578d6456276712da7ff5a))
+
 ## [1.1.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.0.1...mobius-ai-v1.1.0) (2026-01-26)
 
 
