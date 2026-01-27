@@ -8,7 +8,7 @@
 
 import { Text } from 'ink';
 import { memo } from 'react';
-import type { SubTask, TaskGraph } from '../../lib/task-graph.js';
+import type { SubTask, TaskGraph, TaskStatus } from '../../lib/task-graph.js';
 import { getBlockers } from '../../lib/task-graph.js';
 import type { CompletedTask } from '../../types.js';
 import { STRUCTURE_COLORS } from '../theme.js';
@@ -18,6 +18,7 @@ import { formatDuration } from '../utils/formatDuration.js';
 export interface TaskNodeProps {
   task: SubTask;
   graph: TaskGraph;
+  statusOverrides?: Map<string, TaskStatus>;  // Runtime status overrides from execution state
   prefix: string;     // Box-drawing characters for indentation
   connector: string;  // "├── " or "└── "
   completedTaskInfo?: CompletedTask;  // Timing info for completed/failed tasks
@@ -26,15 +27,33 @@ export interface TaskNodeProps {
 }
 
 /**
- * Format the blocker suffix for a task, showing unresolved blocker identifiers
+ * Get effective status for a task, considering runtime overrides
  */
-function formatBlockerSuffix(task: SubTask, graph: TaskGraph): string {
+function getEffectiveStatus(
+  task: SubTask,
+  overrides?: Map<string, TaskStatus>
+): TaskStatus {
+  return overrides?.get(task.id) ?? task.status;
+}
+
+/**
+ * Format the blocker suffix for a task, showing unresolved blocker identifiers
+ * Uses status overrides to correctly identify blockers that completed at runtime
+ */
+function formatBlockerSuffix(
+  task: SubTask,
+  graph: TaskGraph,
+  statusOverrides?: Map<string, TaskStatus>
+): string {
   if (task.blockedBy.length === 0) {
     return '';
   }
 
   const blockers = getBlockers(graph, task.id);
-  const unresolvedBlockers = blockers.filter((b) => b.status !== 'done');
+  // Check effective status (with overrides) to correctly identify completed blockers
+  const unresolvedBlockers = blockers.filter(
+    (b) => getEffectiveStatus(b, statusOverrides) !== 'done'
+  );
 
   if (unresolvedBlockers.length === 0) {
     return '';
@@ -75,12 +94,13 @@ function formatRuntimeSuffix(
 export const TaskNode = memo(function TaskNode({
   task,
   graph,
+  statusOverrides,
   prefix,
   connector,
   completedTaskInfo,
   activeElapsedMs,
 }: TaskNodeProps): JSX.Element {
-  const blockerSuffix = formatBlockerSuffix(task, graph);
+  const blockerSuffix = formatBlockerSuffix(task, graph, statusOverrides);
   const runtimeSuffix = formatRuntimeSuffix(completedTaskInfo, activeElapsedMs);
 
   return (
