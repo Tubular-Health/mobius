@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.1](https://github.com/Tubular-Health/mobius/compare/mobius-loop-v1.1.0...mobius-loop-v1.1.1) (2026-01-27)
+## [1.1.1](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.1.0...mobius-ai-v1.1.1) (2026-01-27)
 
 
 ### Bug Fixes
@@ -12,7 +12,7 @@
 
 * **readme:** overhaul README with TUI Dashboard documentation and workflow lifecycle ([#19](https://github.com/Tubular-Health/mobius/issues/19)) ([4514170](https://github.com/Tubular-Health/mobius/commit/451417057faf599fd58578d6456276712da7ff5a))
 
-## [1.1.0](https://github.com/Tubular-Health/mobius/compare/mobius-loop-v1.0.1...mobius-loop-v1.1.0) (2026-01-26)
+## [1.1.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.0.1...mobius-ai-v1.1.0) (2026-01-26)
 
 
 ### Features
@@ -32,10 +32,10 @@
 
 * consolidate npm publish into release-please workflow ([#10](https://github.com/Tubular-Health/mobius/issues/10)) ([4438c51](https://github.com/Tubular-Health/mobius/commit/4438c514d773128a0872041eb83813e485e911c0))
 
-## [1.0.1](https://github.com/Tubular-Health/mobius/compare/mobius-loop-v1.0.0...mobius-loop-v1.0.1) (2026-01-26)
+## [1.0.1](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.0.0...mobius-ai-v1.0.1) (2026-01-26)
 
 
 ### Miscellaneous Chores
 
-* rename package to mobius-loop for npm publishing ([8126391](https://github.com/Tubular-Health/mobius/commit/81263919b7630a16d5fca9206ed59ac96a7d7c35))
+* rename package to mobius-ai for npm publishing ([8126391](https://github.com/Tubular-Health/mobius/commit/81263919b7630a16d5fca9206ed59ac96a7d7c35))
 * update package name to @tubular/mobius for npm publishing ([e50165d](https://github.com/Tubular-Health/mobius/commit/e50165db15d60cb02a47269ea28245fe3162e04c))
