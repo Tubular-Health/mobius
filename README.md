@@ -43,7 +43,7 @@ npm install -g mobius-loop && mobius setup
 - [Jira Setup](#jira-setup)
 - [Switching Backends](#switching-backends)
 - [Backend Architecture](#backend-architecture)
-- [Project Setup](#project-setup-agentsmd)
+- [Project Setup: AGENTS.md](#project-setup-agentsmd)
 - [Sandbox Mode](#sandbox-mode)
 - [Requirements](#requirements)
 - [Environment Variables](#environment-variables)
