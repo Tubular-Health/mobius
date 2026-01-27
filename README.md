@@ -13,14 +13,14 @@
 
 **Define issues in Linear or Jira. Let Claude implement them. Review and ship.**
 
-[![npm version](https://img.shields.io/npm/v/mobius-loop?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/mobius-loop)
+[![npm version](https://img.shields.io/npm/v/mobius-ai?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/mobius-ai)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 
 <br>
 
 ```bash
-npm install -g mobius-loop && mobius setup
+npm install -g mobius-ai && mobius setup
 ```
 
 **Works on Mac, Windows, and Linux.**
@@ -65,7 +65,7 @@ Instead of feeding entire codebases into a single context window, Mobius breaks 
 ## Quick Start
 
 ```bash
-npm install -g mobius-loop
+npm install -g mobius-ai
 mobius setup
 mobius ABC-123
 ```
@@ -355,5 +355,5 @@ mobius ABC-123 --local   # Bypass sandbox
 </p>
 
 <p align="center">
-  <code>npm install -g mobius-loop && mobius setup</code>
+  <code>npm install -g mobius-ai && mobius setup</code>
 </p>
