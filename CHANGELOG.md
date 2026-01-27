@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.3](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.2.2...mobius-ai-v1.2.3) (2026-01-27)
+
+
+### Bug Fixes
+
+* **parallel-executor:** add --verbose flag for stream-json output ([#29](https://github.com/Tubular-Health/mobius/issues/29)) ([f22da29](https://github.com/Tubular-Health/mobius/commit/f22da298ae622304366e582542acc66f81c17258))
+
 ## [1.2.2](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.2.1...mobius-ai-v1.2.2) (2026-01-27)
 
 
