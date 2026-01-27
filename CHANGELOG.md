@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.2.0...mobius-ai-v1.2.1) (2026-01-27)
+
+
+### Bug Fixes
+
+* **jira:** improve error logging for sub-task fetch failures ([#25](https://github.com/Tubular-Health/mobius/issues/25)) ([6d71f53](https://github.com/Tubular-Health/mobius/commit/6d71f530782709ea7302a7c5cf675db2a3e47160))
+
 ## [1.2.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.1.1...mobius-ai-v1.2.0) (2026-01-27)
 
 
