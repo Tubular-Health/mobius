@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.2.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.1.1...mobius-ai-v1.2.0) (2026-01-27)
+
+
+### Features
+
+* **doctor:** add comprehensive runtime validation checks ([#14](https://github.com/Tubular-Health/mobius/issues/14)) ([34b014c](https://github.com/Tubular-Health/mobius/commit/34b014cfa648d603c53e1562dda91c636ae27780))
+* **jira:** migrate Jira integration to Atlassian marketplace plugin ([#22](https://github.com/Tubular-Health/mobius/issues/22)) ([8421925](https://github.com/Tubular-Health/mobius/commit/8421925183e54dce7ede222458912e9e3f8ed322))
+* **skills:** add PR creation skill with structured template ([#13](https://github.com/Tubular-Health/mobius/issues/13)) ([a619ebb](https://github.com/Tubular-Health/mobius/commit/a619ebb16ce68aaf5aac0b94596f0f52858ce2ac))
+* **skills:** enhance task definition and refinement skills with structured verification ([#15](https://github.com/Tubular-Health/mobius/issues/15)) ([406c25c](https://github.com/Tubular-Health/mobius/commit/406c25cd11e4cf3ae6a6412ba8a7cbdbe32d6691))
+* **tui:** add exit confirmation modal with tmux session cleanup ([#23](https://github.com/Tubular-Health/mobius/issues/23)) ([bb7ece5](https://github.com/Tubular-Health/mobius/commit/bb7ece5414141910cebf4193737f54316907a3a1))
+* **tui:** add Jira backend support for TUI dashboard ([#24](https://github.com/Tubular-Health/mobius/issues/24)) ([d46ef6a](https://github.com/Tubular-Health/mobius/commit/d46ef6a5b503991db1ef93b9116cea0b73c31c39))
+
+
+### Bug Fixes
+
+* **loop:** prevent incorrect task failure marking during parallel execution ([#16](https://github.com/Tubular-Health/mobius/issues/16)) ([8dc1d62](https://github.com/Tubular-Health/mobius/commit/8dc1d629eecad2f025086646fe5dff9b441f23ae))
+* resolve state file race conditions and display failed tasks correctly ([#7](https://github.com/Tubular-Health/mobius/issues/7)) ([ff9de56](https://github.com/Tubular-Health/mobius/commit/ff9de56ea4e2fa5cff84da7930077998ebe084ed))
+* **tui:** correctly resolve blocker status using runtime overrides ([#17](https://github.com/Tubular-Health/mobius/issues/17)) ([9f52718](https://github.com/Tubular-Health/mobius/commit/9f52718af728e8f49421fecd0cdc028ba9430c60))
+
+
+### Documentation
+
+* **readme:** overhaul README with TUI Dashboard documentation and workflow lifecycle ([#19](https://github.com/Tubular-Health/mobius/issues/19)) ([4514170](https://github.com/Tubular-Health/mobius/commit/451417057faf599fd58578d6456276712da7ff5a))
+
+
+### Miscellaneous Chores
+
+* consolidate npm publish into release-please workflow ([#10](https://github.com/Tubular-Health/mobius/issues/10)) ([4438c51](https://github.com/Tubular-Health/mobius/commit/4438c514d773128a0872041eb83813e485e911c0))
+* **main:** release mobius-loop 1.0.1 ([#4](https://github.com/Tubular-Health/mobius/issues/4)) ([fa247b4](https://github.com/Tubular-Health/mobius/commit/fa247b4e51dd1a6d01d567490043eaf6b97dee07))
+* **main:** release mobius-loop 1.1.0 ([#8](https://github.com/Tubular-Health/mobius/issues/8)) ([c563ba0](https://github.com/Tubular-Health/mobius/commit/c563ba05d19a2ffa7faa5b88d6cdf3dccf0bf8a8))
+* **main:** release mobius-loop 1.1.1 ([#18](https://github.com/Tubular-Health/mobius/issues/18)) ([bb10b77](https://github.com/Tubular-Health/mobius/commit/bb10b77c89d0158712d936a25928f05e40da7fd5))
+* rename package from mobius-loop to mobius-ai ([#20](https://github.com/Tubular-Health/mobius/issues/20)) ([a261763](https://github.com/Tubular-Health/mobius/commit/a2617630db9abdb07656f92f987ce6c1a9d483ce))
+* rename package to mobius-loop for npm publishing ([8126391](https://github.com/Tubular-Health/mobius/commit/81263919b7630a16d5fca9206ed59ac96a7d7c35))
+* update package name to @tubular/mobius for npm publishing ([e50165d](https://github.com/Tubular-Health/mobius/commit/e50165db15d60cb02a47269ea28245fe3162e04c))
+
 ## [1.1.1](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.1.0...mobius-ai-v1.1.1) (2026-01-27)
 
 
