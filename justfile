@@ -60,3 +60,7 @@ deps:
 # Lint commit messages (useful for debugging commitlint issues)
 lint-commit msg:
     echo "{{msg}}" | bunx commitlint
+
+# Generate workflow demo recording from VHS tape file
+tape:
+    cd assets/terminal/tapes && vhs workflow-demo.tape

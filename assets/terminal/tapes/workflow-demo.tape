@@ -1,7 +1,7 @@
 # VHS tape file for Mobius workflow demo
 # https://github.com/charmbracelet/vhs
 
-Output workflow-demo.gif
+Output ../workflow-demo.gif
 Set Shell bash
 Set FontSize 18
 Set Width 1920
@@ -23,7 +23,7 @@ Show
 Type "mobius -n 4 MOB-1"
 Sleep 1s
 Enter
-Sleep 15s
+Sleep 20s
 
 # Clear and show TUI
 Hide
