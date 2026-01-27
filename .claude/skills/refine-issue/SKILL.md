@@ -73,16 +73,16 @@ mcp__plugin_linear_linear__create_issue
 <jira>
 **MCP Tools for Jira backend**:
 
-- `mcp__plugin_jira_jira__get_issue` - Fetch issue details with relations
-- `mcp__plugin_jira_jira__create_issue` - Create sub-tasks with parent link
-- `mcp__plugin_jira_jira__update_issue` - Set blocking relationships via issue links
-- `mcp__plugin_jira_jira__create_comment` - Post Mermaid dependency diagram
+- `mcp_plugin_atlassian_jira__get_issue` - Fetch issue details with relations
+- `mcp_plugin_atlassian_jira__create_issue` - Create sub-tasks with parent link
+- `mcp_plugin_atlassian_jira__update_issue` - Set blocking relationships via issue links
+- `mcp_plugin_atlassian_jira__add_comment` - Post Mermaid dependency diagram
 
 **Issue ID format**: `PROJ-123` (project key + number)
 
 **Creating sub-tasks**:
 ```
-mcp__plugin_jira_jira__create_issue
+mcp_plugin_atlassian_jira__create_issue
   project: "{same project as parent}"
   summary: "[{parent-id}] {sub-task title}"
   description: "{full sub-task description with acceptance criteria}"
@@ -129,7 +129,7 @@ Args: MOB-123
 Retrieve issue details using the backend-appropriate get_issue tool (see `<backend_context>` for tool names):
 
 - Linear: `mcp__plugin_linear_linear__get_issue` with `includeRelations: true`
-- Jira: `mcp__plugin_jira_jira__get_issue`
+- Jira: `mcp_plugin_atlassian_jira__get_issue`
 
 **Extract from response**:
 - Title and description
@@ -422,7 +422,7 @@ mcp__plugin_linear_linear__create_comment
 
 **For Jira**:
 ```
-mcp__plugin_jira_jira__create_comment
+mcp_plugin_atlassian_jira__add_comment
   issueIdOrKey: "{parent-issue-key}"
   body: |
     ## Sub-task Dependency Graph

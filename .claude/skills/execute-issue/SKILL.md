@@ -75,19 +75,19 @@ The detected backend determines which MCP tools to use throughout this skill. Al
 <jira>
 **MCP Tools for Jira**:
 
-- **Fetch issue**: `mcp__plugin_jira_jira__get_issue`
+- **Fetch issue**: `mcp_plugin_atlassian_jira__get_issue`
   - Parameters: `issueIdOrKey` (e.g., "PROJ-123")
   - Returns: Issue with status, description, links (blocking relationships)
 
-- **List sub-tasks**: `mcp__plugin_jira_jira__list_issues`
+- **List sub-tasks**: `mcp_plugin_atlassian_jira__list_issues`
   - Parameters: `jql` (e.g., "parent = PROJ-123")
   - Returns: Array of child issues
 
-- **Update status**: `mcp__plugin_jira_jira__transition_issue`
+- **Update status**: `mcp_plugin_atlassian_jira__transition_issue`
   - Parameters: `issueIdOrKey`, `transitionId` or `transitionName`
   - Transitions: To Do -> In Progress -> Done
 
-- **Add comment**: `mcp__plugin_jira_jira__add_comment`
+- **Add comment**: `mcp_plugin_atlassian_jira__add_comment`
   - Parameters: `issueIdOrKey`, `body` (markdown or Jira wiki markup)
   - Use for: Work started, completion notes, progress updates
 </jira>
@@ -175,7 +175,7 @@ Checkpoints are only used for **non-trivial tasks** (estimated >5 minutes or inv
 
 Use the backend-appropriate comment tool:
 - **Linear**: `mcp__plugin_linear_linear__create_comment`
-- **Jira**: `mcp__plugin_jira_jira__add_comment`
+- **Jira**: `mcp_plugin_atlassian_jira__add_comment`
 
 **Checkpoint comment format** (structured for parsing):
 
@@ -311,7 +311,7 @@ When running in parallel mode, each agent receives a specific subtask ID to prev
 
 Use the backend-appropriate fetch tool:
 - **Linear**: `mcp__plugin_linear_linear__get_issue` with `includeRelations: true`
-- **Jira**: `mcp__plugin_jira_jira__get_issue`
+- **Jira**: `mcp_plugin_atlassian_jira__get_issue`
 
 **Check the `parent` field in the response**:
 
@@ -345,7 +345,7 @@ Use the backend-appropriate fetch tool to get:
 
 If a parent issue was passed, list all sub-tasks:
 - **Linear**: `mcp__plugin_linear_linear__list_issues` with `parentId`
-- **Jira**: `mcp__plugin_jira_jira__list_issues` with JQL `parent = {issue-key}`
+- **Jira**: `mcp_plugin_atlassian_jira__list_issues` with JQL `parent = {issue-key}`
 
 For each sub-task, check:
 1. State is not "Done" or "Canceled"
@@ -383,7 +383,7 @@ If any stop condition is met, output the status message and STOP. Do not continu
 **IMMEDIATELY** after selecting a sub-task to work on, move it to "In Progress":
 
 - **Linear**: `mcp__plugin_linear_linear__update_issue` with `state: "In Progress"`
-- **Jira**: `mcp__plugin_jira_jira__transition_issue` to "In Progress"
+- **Jira**: `mcp_plugin_atlassian_jira__transition_issue` to "In Progress"
 
 Add a comment indicating work has started using the backend-appropriate comment tool.
 
@@ -950,7 +950,7 @@ Confirm:
 After successful commit with all acceptance criteria met, move sub-task to "Done":
 
 - **Linear**: `mcp__plugin_linear_linear__update_issue` with `state: "Done"`
-- **Jira**: `mcp__plugin_jira_jira__transition_issue` to "Done"
+- **Jira**: `mcp_plugin_atlassian_jira__transition_issue` to "Done"
 
 **Criteria for moving to "Done"**:
 - All acceptance criteria from the sub-task are implemented

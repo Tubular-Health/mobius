@@ -13,7 +13,7 @@ export async function checkJiraMcp(backend: Backend): Promise<CheckResult> {
     };
   }
 
-  // Try to check if Claude can access Jira MCP tools
+  // Try to check if Claude can access Atlassian Jira plugin tools
   // This is a lightweight check - we can't fully verify without running Claude
   try {
     // Check if claude has MCP configured by looking at settings
@@ -22,11 +22,11 @@ export async function checkJiraMcp(backend: Backend): Promise<CheckResult> {
       reject: false,
     });
 
-    if (stdout.toLowerCase().includes('jira')) {
+    if (stdout.toLowerCase().includes('atlassian')) {
       return {
         name,
         status: 'pass',
-        message: 'Jira MCP tools available',
+        message: 'Atlassian Jira plugin available',
         required: false,
       };
     }
@@ -34,17 +34,17 @@ export async function checkJiraMcp(backend: Backend): Promise<CheckResult> {
     return {
       name,
       status: 'warn',
-      message: 'Jira MCP not detected in Claude config',
+      message: 'Atlassian Jira plugin not detected in Claude config',
       required: false,
-      details: 'Jira MCP may be configured at project level. Run a test task to verify.',
+      details: 'Atlassian plugin may be configured at project level. Run a test task to verify.',
     };
   } catch {
     return {
       name,
       status: 'warn',
-      message: 'Could not verify Jira MCP status',
+      message: 'Could not verify Atlassian Jira plugin status',
       required: false,
-      details: 'Jira MCP may still work - run a test task to verify',
+      details: 'Atlassian Jira plugin may still work - run a test task to verify',
     };
   }
 }

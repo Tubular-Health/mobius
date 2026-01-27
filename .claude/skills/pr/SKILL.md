@@ -105,17 +105,17 @@ The detected backend determines which MCP tools to use for issue linking. See `<
 <jira>
 **MCP Tools for Jira Issue Linking**:
 
-- **Validate issue exists**: `mcp__plugin_jira_jira__get_issue`
+- **Validate issue exists**: `mcp_plugin_atlassian_jira__get_issue`
   - Parameters: `issueIdOrKey` (e.g., "PROJ-123")
   - Returns: Issue details including summary, description, status
   - Use before PR creation to validate issue reference is valid
 
-- **Add PR link to issue**: `mcp__plugin_jira_jira__add_link`
+- **Add PR link to issue**: `mcp_plugin_atlassian_jira__add_link`
   - Parameters: `issueIdOrKey`, `url`, `title`
   - Adds the PR as a remote link (web link) on the Jira issue
   - Title format: `"PR #123: feat(auth): add OAuth login"`
 
-- **Add comment to issue**: `mcp__plugin_jira_jira__add_comment`
+- **Add comment to issue**: `mcp_plugin_atlassian_jira__add_comment`
   - Parameters: `issueIdOrKey`, `body` (Jira wiki markup or markdown)
   - Use to document that a PR was created for this issue
   - Example body: `"🔗 *PR Created*: [#123 - feat(auth): add OAuth login|https://github.com/...]"`
@@ -156,7 +156,7 @@ mcp__plugin_linear_linear__get_issue(id: "MOB-123")
 
 **Jira validation**:
 ```
-mcp__plugin_jira_jira__get_issue(issueIdOrKey: "PROJ-123")
+mcp_plugin_atlassian_jira__get_issue(issueIdOrKey: "PROJ-123")
 ```
 
 If validation fails:
@@ -183,7 +183,7 @@ mcp__plugin_linear_linear__update_issue(
 
 For **Jira**:
 ```
-mcp__plugin_jira_jira__add_link(
+mcp_plugin_atlassian_jira__add_link(
   issueIdOrKey: "PROJ-123",
   url: "https://github.com/owner/repo/pull/456",
   title: "PR #456: feat(scope): description"
@@ -202,7 +202,7 @@ mcp__plugin_linear_linear__create_comment(
 
 For **Jira**:
 ```
-mcp__plugin_jira_jira__add_comment(
+mcp_plugin_atlassian_jira__add_comment(
   issueIdOrKey: "PROJ-123",
   body: "🔗 *Pull Request Created*\n\n[#456 - feat(scope): description|https://github.com/owner/repo/pull/456]\n\nReady for review."
 )
@@ -521,7 +521,7 @@ If issue references were detected, validate they exist before proceeding.
 1. Read backend from `mobius.config.yaml` or `~/.config/mobius/config.yaml`
 2. Call appropriate validation tool:
    - **Linear**: `mcp__plugin_linear_linear__get_issue(id: "MOB-123")`
-   - **Jira**: `mcp__plugin_jira_jira__get_issue(issueIdOrKey: "PROJ-123")`
+   - **Jira**: `mcp_plugin_atlassian_jira__get_issue(issueIdOrKey: "PROJ-123")`
 3. On success: Store issue title for enhanced PR context
 4. On failure: Warn but continue - don't block PR creation
 
@@ -632,7 +632,7 @@ After successful PR creation, link the PR back to validated issues.
 
    For **Jira**:
    ```
-   mcp__plugin_jira_jira__add_link(
+   mcp_plugin_atlassian_jira__add_link(
      issueIdOrKey: "PROJ-123",
      url: "https://github.com/owner/repo/pull/123",
      title: "PR #123: feat(skills): add PR creation skill"
@@ -651,7 +651,7 @@ After successful PR creation, link the PR back to validated issues.
 
    For **Jira**:
    ```
-   mcp__plugin_jira_jira__add_comment(
+   mcp_plugin_atlassian_jira__add_comment(
      issueIdOrKey: "PROJ-123",
      body: "🔗 *Pull Request Created*\n\n[#123 - feat(skills): add PR creation skill|https://github.com/owner/repo/pull/123]"
    )
