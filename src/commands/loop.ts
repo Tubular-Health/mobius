@@ -52,6 +52,8 @@ import {
   failTask,
   removeActiveTask,
   updateActiveTaskPane,
+  clearAllActiveTasks,
+  deleteExecutionState,
 } from '../lib/execution-state.js';
 import type { SubTask } from '../lib/task-graph.js';
 import type { ExecutionState } from '../types.js';
@@ -63,6 +65,7 @@ export interface LoopOptions {
   model?: Model;
   parallel?: number; // Override max_parallel_agents
   sequential?: boolean; // Use sequential bash loop instead
+  fresh?: boolean; // Clear stale state before starting
 }
 
 /**
@@ -98,6 +101,22 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
   };
 
   const maxIterations = options.maxIterations ?? config.execution.max_iterations;
+
+  // Set up signal handlers to clean up active tasks on exit
+  const cleanupOnSignal = () => {
+    clearAllActiveTasks(taskId, executionConfig.tui?.state_dir);
+    process.exit(130); // 128 + SIGINT (2)
+  };
+  process.on('SIGINT', cleanupOnSignal);
+  process.on('SIGTERM', cleanupOnSignal);
+
+  // Clear stale state if --fresh flag is set
+  if (options.fresh) {
+    const deleted = deleteExecutionState(taskId, executionConfig.tui?.state_dir);
+    if (deleted) {
+      console.log(chalk.yellow('Cleared stale state from previous execution.'));
+    }
+  }
 
   console.log(chalk.blue(`Starting parallel loop for ${taskId}...`));
 
@@ -380,6 +399,9 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
     console.log(`  Tasks: ${finalStats.done}/${finalStats.total} completed`);
     console.log(`  Time: ${formatElapsed(Date.now() - startTime)}`);
 
+    // Clear active tasks from execution state since loop is done
+    clearAllActiveTasks(taskId, executionConfig.tui?.state_dir);
+
     // Cleanup on success
     if (allComplete && executionConfig.cleanup_on_success !== false) {
       console.log(chalk.gray('\nCleaning up worktree...'));
@@ -402,6 +424,9 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       console.log(chalk.gray(`  tmux attach -t ${sessionName}`));
     }
   } catch (error) {
+    // Clear active tasks from execution state on error
+    clearAllActiveTasks(taskId, executionConfig.tui?.state_dir);
+
     console.error(chalk.red('\nLoop error:'));
     console.error(chalk.gray(error instanceof Error ? error.message : String(error)));
     console.log(chalk.yellow('\nWorktree preserved for debugging at:'));

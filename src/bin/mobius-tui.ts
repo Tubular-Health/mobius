@@ -14,6 +14,7 @@ import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
 import { fetchLinearIssue, fetchLinearSubTasks } from '../lib/linear.js';
 import { buildTaskGraph } from '../lib/task-graph.js';
+import { clearAllActiveTasks } from '../lib/execution-state.js';
 import { Dashboard } from '../tui/components/Dashboard.js';
 
 export interface TuiOptions {
@@ -87,6 +88,10 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
 
   // Build the task graph
   const graph = buildTaskGraph(parentIssue.id, parentIssue.identifier, subTasks);
+
+  // Clear stale active tasks from any previous execution
+  // The loop will re-populate this when tasks actually start running
+  clearAllActiveTasks(taskId, tuiConfig.state_dir);
 
   console.log(chalk.gray(`Found ${graph.tasks.size} sub-tasks. Starting TUI...`));
   console.log(''); // Empty line before TUI

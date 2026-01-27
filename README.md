@@ -27,66 +27,42 @@ npm install -g mobius-loop && mobius setup
 
 </div>
 
+<p align="center">
+  <img src="assets/terminal/workflow-demo.gif" alt="Mobius TUI Dashboard Demo" width="800" />
+</p>
+
 ---
 
 ## Table of Contents
 
-- [The Problem](#the-problem)
-- [The Solution](#the-solution)
-- [How It Works](#how-it-works)
-- [Quick Start](#quick-start)
-- [The Execution Loop](#the-execution-loop)
-- [Parallel Execution](#parallel-execution)
 - [Why Mobius?](#why-mobius)
+- [Quick Start](#quick-start)
+- [Workflow](#workflow)
 - [The 4 Skills](#the-4-skills)
+- [Parallel Execution](#parallel-execution)
 - [Configuration](#configuration)
 - [Jira Setup](#jira-setup)
-- [Switching Backends](#switching-backends)
-- [Backend Architecture](#backend-architecture)
-- [Project Setup](#project-setup-agentsmd)
-- [Sandbox Mode](#sandbox-mode)
 - [Requirements](#requirements)
-- [Environment Variables](#environment-variables)
 - [CLI Reference](#cli-reference)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## The Problem
+## Why Mobius?
 
-AI-assisted coding has a coordination problem:
+Instead of feeding entire codebases into a single context window, Mobius breaks work into **focused sub-tasks** that each operate with minimal context.
 
-- **Context amnesia** — Every session starts from scratch, losing prior decisions
-- **Manual orchestration** — You become the glue between AI and your issue tracker
-- **Team blindness** — No visibility into what AI is doing or has done
-- **Scope creep** — Without guardrails, AI changes spiral beyond the original ask
-- **Risky autonomy** — Letting AI run unattended feels dangerous
-
----
-
-## The Solution
-
-Mobius uses **your existing issue tracker** as the source of truth. No new systems to learn. No state files to merge. Your team already knows how to use Linear or Jira.
-
-| What You Do | What Mobius Does |
-|-------------|------------------|
-| Create an issue (Linear or Jira) | Break it into focused sub-tasks |
-| Run `mobius ABC-123` | Execute each sub-task autonomously |
-| Review the PR | Validate against acceptance criteria |
-
----
-
-## How It Works
-
-<p align="center">
-  <img src="assets/diagrams/workflow.svg" alt="Mobius Workflow" width="700" />
-</p>
+| Benefit | How |
+|---------|-----|
+| **Lower API Costs** | Each sub-task uses only the context it needs—5-10x fewer tokens than monolithic prompts |
+| **Higher Accuracy** | Single-file scope keeps Claude focused, reducing unintended side effects |
+| **Parallel Execution** | Sub-tasks without dependencies run simultaneously (up to 10 agents) |
+| **Team Visibility** | State lives in Linear/Jira, not hidden files—stop and resume anytime |
+| **Safe Autonomy** | Docker sandbox, scoped permissions, verification gates, easy rollback |
 
 ---
 
 ## Quick Start
-
-Get from zero to executing your first issue:
 
 ```bash
 npm install -g mobius-loop
@@ -98,220 +74,95 @@ mobius ABC-123
   <img src="assets/terminal/setup.svg" alt="Mobius Setup" width="700" />
 </p>
 
-<details>
-<summary>Alternative installation methods</summary>
-
-### Manual Installation
-
-```bash
-git clone https://github.com/Tubular-Health/mobius.git
-cd mobius
-./install.sh
-```
-
-The installer places:
-- `mobius` command in `~/.local/bin/`
-- Config at `~/.config/mobius/config.yaml`
-- Claude skills in `~/.claude/skills/`
-
-Ensure `~/.local/bin` is in your PATH:
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-</details>
-
 ---
 
-## The Execution Loop
+## Workflow
 
-When you run `mobius ABC-123`, here's what happens:
+The complete workflow transforms an idea into a merged PR through 5 steps:
 
-<p align="center">
-  <img src="assets/diagrams/execution-loop.svg" alt="Execution Loop" width="600" />
-</p>
+### 1. `/define` — Create the Issue
 
-```
-do {
-    task = findNextReady(issue)      // Respects blockedBy dependencies
-
-    implement(task)                   // Single-file focus per sub-task
-
-    validate()                        // Tests, typecheck, lint
-
-    commit()                          // Descriptive message, push
-
-    markComplete(task)                // Update Linear status
-
-} while (hasReadyTasks(issue))
-```
-
-<p align="center">
-  <img src="assets/terminal/execution.svg" alt="Mobius Execution" width="800" />
-</p>
-
-**Stop anytime. Resume later.** State lives in Linear, not local files.
-
----
-
-## Parallel Execution
-
-Mobius supports parallel sub-task execution with git worktree isolation. When sub-tasks have no blocking dependencies, multiple Claude agents work simultaneously.
-
-### How It Works
-
-```
-mobius loop MOB-123
-    ↓
-1. Creates git worktree at ../mobius-worktrees/MOB-123/
-2. Creates feature branch off main
-3. Builds task dependency graph from Linear
-4. Spawns N parallel agents for unblocked tasks
-5. Agents share worktree, git operations serialized
-6. Loop continues until all tasks complete
-7. Worktree cleaned up on success
-```
-
-### Task Dependency Visualization
-
-Before execution, Mobius displays the task tree in your terminal:
-
-```
-Task Tree for MOB-123:
-├── [✓] MOB-124: Setup base types
-├── [✓] MOB-125: Create utility functions
-├── [→] MOB-126: Implement parser (blocked by: MOB-124, MOB-125)
-│   └── [·] MOB-127: Add tests (blocked by: MOB-126)
-├── [→] MOB-128: Build CLI interface (blocked by: MOB-125)
-└── [·] MOB-129: Integration tests (blocked by: MOB-126, MOB-128)
-
-Legend: [✓] Done  [→] Ready  [·] Blocked  [!] In Progress
-Ready for parallel execution: MOB-126, MOB-128 (2 agents)
-```
-
-A Mermaid diagram is also posted to the parent Linear issue for team visibility.
-
-### Commands
-
-```bash
-mobius loop MOB-123             # Parallel execution (default)
-mobius loop MOB-123 --parallel=5  # Override max parallel agents
-mobius MOB-123 --sequential     # Sequential execution (bash loop)
-```
-
-### Configuration
-
-| Option | Default | Environment Variable | Description |
-|--------|---------|---------------------|-------------|
-| `max_parallel_agents` | `3` | `MOBIUS_MAX_PARALLEL_AGENTS` | Maximum concurrent Claude agents (1-10) |
-| `worktree_path` | `../<repo>-worktrees/` | `MOBIUS_WORKTREE_PATH` | Base directory for worktrees |
-| `cleanup_on_success` | `true` | `MOBIUS_CLEANUP_ON_SUCCESS` | Auto-remove worktree on success |
-| `base_branch` | `main` | `MOBIUS_BASE_BRANCH` | Branch for feature branches |
-
-### Requirements
-
-- **tmux** - Required for parallel execution display
-  - macOS: `brew install tmux`
-  - Linux: `apt install tmux`
-
-If tmux is unavailable, use `--sequential` for bash-based execution.
-
----
-
-## Why Mobius?
-
-| Feature | Mobius | GSD | Beads |
-|---------|--------|-----|-------|
-| **State management** | Linear (existing tracker) | PROJECT.md, STATE.md files | .beads/ SQLite + daemon |
-| **Setup** | `npm install -g mobius-loop` | Clone + configure file structure | Clone + daemon + database |
-| **Team workflow** | Works with existing process | Requires learning new system | Requires syncing database |
-| **Merge conflicts** | None — state is external | Frequent on state files | Database sync issues |
-| **Resumability** | Stop/resume anytime | Manual state management | Daemon must be running |
-| **Sandbox mode** | Docker isolation built-in | None | None |
-
----
-
-## The 4 Skills
-
-Mobius provides four unified skills for the complete issue lifecycle, supporting both Linear and Jira backends. The skills automatically detect your configured backend and use the appropriate API.
-
-<details>
-<summary><code>/define</code> — Create well-defined issues</summary>
-
-Through Socratic questioning, Claude helps you create issues with:
-- Clear title and description
-- Measurable acceptance criteria
-- Appropriate labels and priority
+Use Socratic questioning to create a well-defined issue with clear acceptance criteria.
 
 ```bash
 claude "/define"
 ```
 
-Works with both Linear and Jira based on your `backend` config setting.
+### 2. `/refine` — Break into Sub-tasks
 
-</details>
-
-<details>
-<summary><code>/refine</code> — Break into sub-tasks</summary>
-
-Analyzes your codebase and creates sub-tasks that are:
-- Small enough for single-file focus
-- Ordered with blocking dependencies
-- Detailed with specific files and changes
+Analyze your codebase and decompose the issue into focused sub-tasks, each targeting a single file with explicit blocking dependencies.
 
 ```bash
-claude "/refine ABC-123"    # Linear
-claude "/refine PROJ-123"   # Jira
+claude "/refine ABC-123"
 ```
 
-</details>
+### 3. `mobius loop` — Execute with Parallel Agents
 
-<details>
-<summary><code>/execute</code> — Implement one sub-task</summary>
-
-Executes the next ready sub-task:
-1. Reads parent issue context
-2. Implements the change
-3. Runs validation commands
-4. Commits and pushes
-5. Marks sub-task complete
+Run the autonomous execution loop. Unblocked sub-tasks execute simultaneously in isolated git worktrees.
 
 ```bash
-claude "/execute ABC-123"
+mobius loop ABC-123              # Parallel execution (default)
+mobius loop ABC-123 --parallel=5 # Up to 5 concurrent agents
+mobius ABC-123 --sequential      # Sequential fallback
 ```
 
-Or use the CLI for continuous execution:
-```bash
-mobius ABC-123
-```
+### 4. `/verify` — Validate Against Criteria
 
-</details>
-
-<details>
-<summary><code>/verify</code> — Validate completion</summary>
-
-Reviews implementation against acceptance criteria:
-- Compares changes to requirements
-- Runs final validation
-- Adds review notes as issue comment
-- Marks issue complete if passing
+Review the implementation against acceptance criteria, run final validation, and add review notes.
 
 ```bash
 claude "/verify ABC-123"
 ```
 
-</details>
+### 5. `mobius submit` — Create the PR
 
-### Backend-Specific Aliases
+Create a pull request with proper formatting and linked issues.
 
-For explicit backend selection, you can also use:
+```bash
+mobius submit ABC-123
+```
 
-| Unified Command | Linear Alias | Jira Alias |
-|-----------------|--------------|------------|
-| `/define` | `/linear:define` | `/jira:define` |
-| `/refine` | `/linear:refine` | `/jira:refine` |
-| `/execute` | `/linear:execute` | `/jira:execute` |
-| `/verify` | `/linear:verify` | `/jira:verify` |
+<p align="center">
+  <img src="assets/terminal/completion.svg" alt="Mobius Workflow Completion" width="700" />
+</p>
+
+---
+
+## The 4 Skills
+
+| Skill | Purpose | Command |
+|-------|---------|---------|
+| `/define` | Create well-defined issues with acceptance criteria | `claude "/define"` |
+| `/refine` | Break issues into single-file focused sub-tasks | `claude "/refine ABC-123"` |
+| `/execute` | Implement one sub-task (or use `mobius loop` for all) | `claude "/execute ABC-123"` |
+| `/verify` | Validate implementation against acceptance criteria | `claude "/verify ABC-123"` |
+
+Skills auto-detect your configured backend (Linear or Jira). For explicit selection, use prefixed aliases: `/linear:define`, `/jira:refine`, etc.
+
+---
+
+## Parallel Execution
+
+When sub-tasks have no blocking dependencies, multiple Claude agents work simultaneously in isolated git worktrees.
+
+```bash
+mobius loop MOB-123               # Parallel execution (default)
+mobius loop MOB-123 --parallel=5  # Override max parallel agents
+mobius MOB-123 --sequential       # Sequential execution (bash loop)
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `max_parallel_agents` | `3` | Maximum concurrent Claude agents (1-10) |
+| `worktree_path` | `../<repo>-worktrees/` | Base directory for worktrees |
+| `cleanup_on_success` | `true` | Auto-remove worktree on success |
+| `base_branch` | `main` | Branch for feature branches |
+
+**Requires tmux** for parallel execution (`brew install tmux` or `apt install tmux`). Use `--sequential` without it.
+
+<p align="center">
+  <img src="assets/terminal/execution.svg" alt="Mobius Execution" width="800" />
+</p>
 
 ---
 
@@ -320,58 +171,31 @@ For explicit backend selection, you can also use:
 <details>
 <summary>View configuration options</summary>
 
-### Config File
-
 Edit `~/.config/mobius/config.yaml`:
 
 ```yaml
-# Issue tracker backend: linear | jira
-backend: linear
-
-# Linear configuration (default)
-linear:
-  # Uses Linear MCP tools (auto-configured via Claude Code)
-  # No additional configuration required
-
-# Jira configuration (uncomment when using Jira)
-# jira:
-#   base_url: https://your-org.atlassian.net
-#   project_key: PROJ
-#   auth_method: api_token
+backend: linear  # or jira
 
 execution:
   delay_seconds: 3
   max_iterations: 50
   model: opus
   sandbox: true
-  container_name: mobius-sandbox
-
-  # Parallel execution settings
   max_parallel_agents: 3
   worktree_path: "../<repo>-worktrees/"
   cleanup_on_success: true
   base_branch: "main"
 ```
 
-### Environment Variables
-
-Override any setting with environment variables:
+Override with environment variables:
 
 ```bash
 export MOBIUS_BACKEND=linear
-export MOBIUS_DELAY_SECONDS=5
-export MOBIUS_MAX_ITERATIONS=100
-export MOBIUS_MODEL=sonnet
-export MOBIUS_SANDBOX_ENABLED=false
-
-# Parallel execution settings
 export MOBIUS_MAX_PARALLEL_AGENTS=5
-export MOBIUS_WORKTREE_PATH="../custom-worktrees/"
-export MOBIUS_CLEANUP_ON_SUCCESS=false
-export MOBIUS_BASE_BRANCH=develop
+export MOBIUS_SANDBOX_ENABLED=false
 ```
 
-### Commands
+Commands:
 
 ```bash
 mobius config          # Show current configuration
@@ -389,8 +213,6 @@ mobius config --edit   # Open config in editor
 
 ### 1. Update Configuration
 
-Edit `~/.config/mobius/config.yaml`:
-
 ```yaml
 backend: jira
 
@@ -400,25 +222,16 @@ jira:
   auth_method: api_token
 ```
 
-### 2. Generate API Token
-
-1. Go to [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens)
-2. Click **Create API token**
-3. Give it a name (e.g., "Mobius")
-4. Copy the generated token
-
-### 3. Set Environment Variable
+### 2. Set Environment Variables
 
 ```bash
-export JIRA_API_TOKEN="your-api-token-here"
-
-# Add to your shell profile for persistence
-echo 'export JIRA_API_TOKEN="your-api-token-here"' >> ~/.bashrc
+export JIRA_API_TOKEN="your-api-token"  # From Atlassian Account Settings
+export JIRA_EMAIL="you@company.com"
 ```
 
-### 4. Configure Claude MCP Plugin
+### 3. Configure Claude MCP Plugin
 
-The Jira MCP plugin must be configured in your Claude Code settings. Add to your MCP configuration:
+Add to your MCP configuration:
 
 ```json
 {
@@ -436,162 +249,13 @@ The Jira MCP plugin must be configured in your Claude Code settings. Add to your
 }
 ```
 
-### 5. Verify Setup
+### 4. Verify
 
 ```bash
 mobius doctor
 ```
 
-This will confirm Jira connectivity and MCP plugin availability.
-
-### Example Jira Workflow
-
-```bash
-# Define a new Jira issue
-claude "/define"
-
-# Break down into sub-tasks
-claude "/refine PROJ-123"
-
-# Execute sub-tasks (parallel by default)
-mobius loop PROJ-123
-
-# Verify implementation
-claude "/verify PROJ-123"
-```
-
 </details>
-
----
-
-## Switching Backends
-
-<details>
-<summary>How to switch between Linear and Jira</summary>
-
-### Global Switch
-
-Change the `backend` setting in your config:
-
-```yaml
-# ~/.config/mobius/config.yaml
-backend: jira  # or 'linear'
-```
-
-### Per-Session Switch
-
-Use environment variable to override:
-
-```bash
-# Use Jira for this session
-MOBIUS_BACKEND=jira mobius PROJ-123
-
-# Use Linear for this session
-MOBIUS_BACKEND=linear mobius ABC-123
-```
-
-### Per-Project Configuration
-
-Create a `mobius.config.yaml` in your project root to override the global config:
-
-```yaml
-# /path/to/project/mobius.config.yaml
-backend: jira
-
-jira:
-  base_url: https://your-org.atlassian.net
-  project_key: MYPROJ
-```
-
-Project-level config takes precedence over global config.
-
-### Backend Detection Order
-
-Mobius determines the backend in this order:
-1. `MOBIUS_BACKEND` environment variable
-2. `mobius.config.yaml` in project root
-3. `~/.config/mobius/config.yaml`
-4. Default: `linear`
-
-</details>
-
----
-
-## Backend Architecture
-
-<p align="center">
-  <img src="assets/diagrams/architecture.svg" alt="Backend Architecture" width="600" />
-</p>
-
-Mobius uses a skill-based architecture that abstracts the issue tracker. **Both Linear and Jira are fully supported** through unified skills that detect your configured backend.
-
-The unified skills at `.claude/skills/` use progressive disclosure to provide backend-specific MCP tool documentation while keeping workflow logic backend-agnostic:
-
-| Backend | Status | MCP Plugin |
-|---------|--------|------------|
-| **Linear** | Supported | `@anthropic/mcp-server-linear` |
-| **Jira** | Supported | `@anthropic/mcp-server-jira` |
-| GitHub Issues | Planned | — |
-
----
-
-## Project Setup: AGENTS.md
-
-Copy the template to your project root to provide context each iteration:
-
-```bash
-cp /path/to/mobius/templates/AGENTS.md ./AGENTS.md
-```
-
-This file tells Claude about your project:
-- Build and validation commands
-- Codebase patterns and conventions
-- Common issues and solutions
-- Files that should not be modified
-
-<details>
-<summary>Example AGENTS.md</summary>
-
-```markdown
-## Build & Validation
-
-- **Tests:** `npm test`
-- **Typecheck:** `npm run typecheck`
-- **Lint:** `npm run lint`
-
-## Codebase Patterns
-
-- Components: `src/components/` - React, PascalCase
-- Services: `src/services/` - Business logic
-- Tests: `__tests__/` directories, `.spec.ts` suffix
-
-## Common Issues
-
-- Always reset mocks in `beforeEach`
-- Use absolute imports from `@/`
-```
-
-</details>
-
----
-
-## Sandbox Mode
-
-By default, Mobius runs Claude in a Docker container for safer autonomous execution. This isolates file system changes and prevents accidental damage to your system.
-
-```bash
-# Run in sandbox (default)
-mobius ABC-123
-
-# Run locally (bypass sandbox)
-mobius ABC-123 --local
-```
-
-To disable sandbox permanently:
-```yaml
-execution:
-  sandbox: false
-```
 
 ---
 
@@ -601,28 +265,18 @@ execution:
 |-------------|-------|
 | **Node.js 18+** | For npm installation |
 | **Claude Code CLI** | Install from [claude.ai/code](https://claude.ai/code) |
-| **Git** | Required for worktree operations; remote must be configured |
+| **Git** | Required for worktree operations |
 | **Linear or Jira account** | Both backends fully supported |
-| **tmux** (optional) | Required for parallel execution; use `--sequential` without it |
+| **tmux** (optional) | Required for parallel execution |
 | **Docker** (optional) | For sandbox mode |
 
----
+### Environment Variables
 
-## Environment Variables
-
-| Variable | Backend | Required | Description |
-|----------|---------|----------|-------------|
-| `LINEAR_API_KEY` | linear | Yes | API key from [Linear Settings > API](https://linear.app/settings/api) |
-| `JIRA_API_TOKEN` | jira | Yes | API token from [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens) |
-| `JIRA_EMAIL` | jira | Yes | Email address associated with your Atlassian account |
-
-Set environment variables in your shell profile:
-```bash
-export LINEAR_API_KEY="lin_api_xxxxx"
-# or for Jira:
-export JIRA_API_TOKEN="your-api-token"
-export JIRA_EMAIL="you@company.com"
-```
+| Variable | Backend | Description |
+|----------|---------|-------------|
+| `LINEAR_API_KEY` | Linear | API key from [Linear Settings](https://linear.app/settings/api) |
+| `JIRA_API_TOKEN` | Jira | API token from [Atlassian Settings](https://id.atlassian.com/manage-profile/security/api-tokens) |
+| `JIRA_EMAIL` | Jira | Your Atlassian account email |
 
 ---
 
@@ -636,16 +290,13 @@ mobius ABC-123                   # Alias for parallel loop
 
 # Sequential execution
 mobius ABC-123 --sequential      # Use bash sequential loop
-mobius ABC-123 10                # Limit to 10 iterations
 mobius ABC-123 --local           # Bypass sandbox
 mobius ABC-123 --model=sonnet    # Use specific model
 
-# Management commands
+# Management
 mobius setup                     # Interactive setup wizard
 mobius config                    # Show configuration
-mobius config --edit             # Edit configuration
 mobius doctor                    # Check system requirements
-mobius --help                    # Show help
 ```
 
 ---
@@ -659,123 +310,41 @@ mobius --help                    # Show help
 
 Install Claude Code CLI from [claude.ai/code](https://claude.ai/code).
 
-### "cclean not found"
-
-The `cclean` utility formats Claude's JSON output. Mobius works without it, but output will be less readable.
-
 ### "Git not configured"
 
-Ensure you're in a git repository with a remote configured:
+Ensure you're in a git repository with a remote:
 ```bash
-git remote -v  # Should show origin URL
+git remote -v
 ```
-
-If no remote, add one:
-```bash
-git remote add origin https://github.com/your/repo.git
-```
-
-### Mobius stops unexpectedly
-
-Check iteration limit:
-```bash
-mobius config
-```
-
-Increase `max_iterations` or set to `0` for unlimited.
-
-### Sub-tasks not executing in order
-
-Ensure sub-tasks have proper `blockedBy` relationships. Run `/refine` again if dependencies are missing.
-
-### Linear MCP not configured
-
-Ensure Linear MCP tools are configured in your Claude settings. Check with:
-```bash
-mobius doctor
-```
-
-### Jira MCP not configured
-
-Ensure the Jira MCP plugin is properly configured:
-
-1. Verify your API token:
-```bash
-echo $JIRA_API_TOKEN
-```
-
-2. Check MCP configuration in Claude Code settings
-3. Verify base URL is correct (should end with `.atlassian.net`)
-4. Run `mobius doctor` to validate connectivity
-
-### Jira authentication failed
-
-Common causes:
-- **Invalid API token**: Generate a new token from [Atlassian Account Settings](https://id.atlassian.com/manage-profile/security/api-tokens)
-- **Wrong email**: The `JIRA_EMAIL` must match your Atlassian account email
-- **Permissions**: Ensure your account has access to the specified project
-
-### Docker sandbox fails to start
-
-Verify Docker is running:
-```bash
-docker info
-```
-
-If issues persist, run without sandbox:
-```bash
-mobius ABC-123 --local
-```
-
-### Permission denied errors
-
-Ensure `~/.local/bin` is in your PATH and mobius is executable:
-```bash
-chmod +x ~/.local/bin/mobius
-```
-
-### Sub-task implementation fails validation
-
-The task will remain incomplete. Fix the issue manually or run:
-```bash
-claude "/execute ABC-123"
-```
-
-Claude will retry the failed task.
 
 ### tmux not found
 
-The parallel `loop` command requires tmux. Install it:
+Install tmux or use sequential mode:
 ```bash
-# macOS
-brew install tmux
-
-# Ubuntu/Debian
-apt install tmux
-```
-
-Or use sequential mode:
-```bash
-mobius ABC-123 --sequential
+brew install tmux        # macOS
+apt install tmux         # Linux
+mobius ABC-123 --sequential  # Without tmux
 ```
 
 ### Worktree already exists
 
-If a previous run was interrupted, the worktree may still exist:
 ```bash
-# List worktrees
 git worktree list
-
-# Remove the stuck worktree
 git worktree remove ../mobius-worktrees/ABC-123
 ```
 
-### Parallel agents failing
+### Jira authentication failed
 
-If agents are failing in parallel mode:
-1. Check the tmux session for error output: `tmux attach -t mobius-ABC-123`
-2. Worktree is preserved on failure for debugging
-3. Review individual agent logs in the tmux panes
+- Verify `JIRA_API_TOKEN` and `JIRA_EMAIL` are set correctly
+- Ensure your account has access to the project
+- Generate a new token from [Atlassian Settings](https://id.atlassian.com/manage-profile/security/api-tokens)
+
+### Docker sandbox fails
+
+```bash
+docker info              # Verify Docker is running
+mobius ABC-123 --local   # Bypass sandbox
+```
 
 </details>
 

@@ -5,6 +5,7 @@
  */
 
 import { Text, Box } from 'ink';
+import { memo } from 'react';
 import { STATUS_COLORS, STATUS_ICONS } from '../theme.js';
 
 export interface LegendProps {
@@ -17,8 +18,11 @@ export interface LegendProps {
  *
  * Uses static icons (not StatusIndicator) to avoid spinner animation
  * causing constant re-renders.
+ *
+ * Memoized to prevent unnecessary re-renders from parent state changes
+ * (e.g., spinner animations in sibling components).
  */
-export function Legend({ visible = true }: LegendProps): JSX.Element | null {
+function LegendImpl({ visible = true }: LegendProps): JSX.Element | null {
   if (!visible) {
     return null;
   }
@@ -39,3 +43,6 @@ export function Legend({ visible = true }: LegendProps): JSX.Element | null {
     </Box>
   );
 }
+
+// Memoize to prevent re-renders when parent state changes
+export const Legend = memo(LegendImpl);
