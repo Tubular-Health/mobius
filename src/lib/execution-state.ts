@@ -818,15 +818,28 @@ export function filterRunningTasks(activeTasks: ActiveTask[]): ActiveTask[] {
 }
 
 /**
- * Get execution progress summary
+ * Progress summary returned by getProgressSummary
  */
-export function getProgressSummary(state: ExecutionState | null): {
+export interface ProgressSummary {
   completed: number;
   failed: number;
   active: number;
   total: number;
   isComplete: boolean;
-} {
+}
+
+/**
+ * Execution summary for modal display
+ * Extends progress summary with elapsed time
+ */
+export interface ExecutionSummary extends ProgressSummary {
+  elapsedMs: number;
+}
+
+/**
+ * Get execution progress summary
+ */
+export function getProgressSummary(state: ExecutionState | null): ProgressSummary {
   if (!state) {
     return { completed: 0, failed: 0, active: 0, total: 0, isComplete: false };
   }
@@ -840,4 +853,24 @@ export function getProgressSummary(state: ExecutionState | null): {
   const isComplete = active === 0 && (completed > 0 || failed > 0);
 
   return { completed, failed, active, total, isComplete };
+}
+
+/**
+ * Get execution summary for modal display
+ *
+ * Combines progress data with elapsed time for the exit confirmation modal.
+ * Elapsed time should be calculated by the caller (e.g., from startedAt).
+ *
+ * @param state - Current execution state
+ * @param elapsedMs - Elapsed time in milliseconds (passed in, not calculated)
+ * @returns Execution summary with progress data and elapsed time
+ */
+export function getModalSummary(
+  state: ExecutionState | null,
+  elapsedMs: number
+): ExecutionSummary {
+  return {
+    ...getProgressSummary(state),
+    elapsedMs,
+  };
 }
