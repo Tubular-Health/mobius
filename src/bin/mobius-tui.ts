@@ -2,7 +2,7 @@
  * TUI entry point for Mobius
  *
  * Initializes the Ink app with the Dashboard component. Fetches initial
- * TaskGraph from Linear at startup, then starts state file watching.
+ * TaskGraph from the configured backend at startup, then starts state file watching.
  */
 
 import { render } from 'ink';
@@ -30,7 +30,7 @@ export interface TuiOptions {
 /**
  * Validate task ID format based on backend
  */
-function validateTaskId(taskId: string, backend: Backend): boolean {
+export function validateTaskId(taskId: string, backend: Backend): boolean {
   return BACKEND_ID_PATTERNS[backend].test(taskId);
 }
 
@@ -88,13 +88,17 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
     panel_lines: options?.panelLines ?? config.execution.tui?.panel_lines ?? 8,
   };
 
-  // 3. Fetch dependency graph from Linear
-  console.log(chalk.gray(`Fetching issue ${taskId} from Linear...`));
+  // 3. Fetch dependency graph from backend
+  console.log(chalk.gray(`Fetching issue ${taskId} from ${backend}...`));
 
   const parentIssue = await fetchParentIssue(taskId, backend);
   if (!parentIssue) {
-    console.error(chalk.red(`Failed to fetch issue ${taskId} from Linear`));
-    console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue exists.'));
+    console.error(chalk.red(`Failed to fetch issue ${taskId} from ${backend}`));
+    if (backend === 'jira') {
+      console.error(chalk.gray('Make sure JIRA_HOST, JIRA_EMAIL, and JIRA_API_TOKEN are set and the issue exists.'));
+    } else {
+      console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue exists.'));
+    }
     process.exitCode = 1;
     return;
   }
@@ -103,15 +107,19 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
 
   const subTasks = await fetchSubTasks(parentIssue.id, parentIssue.identifier, backend);
   if (!subTasks) {
-    console.error(chalk.red(`Failed to fetch sub-tasks for ${taskId}`));
-    console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue has sub-tasks.'));
+    console.error(chalk.red(`Failed to fetch sub-tasks for ${taskId} from ${backend}`));
+    if (backend === 'jira') {
+      console.error(chalk.gray('Make sure JIRA_HOST, JIRA_EMAIL, and JIRA_API_TOKEN are set and the issue has sub-tasks.'));
+    } else {
+      console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue has sub-tasks.'));
+    }
     process.exitCode = 1;
     return;
   }
 
   if (subTasks.length === 0) {
     console.error(chalk.yellow(`Issue ${taskId} has no sub-tasks.`));
-    console.error(chalk.gray('Consider running /refine-linear-issue first to create sub-tasks.'));
+    console.error(chalk.gray('Consider running /refine-issue first to create sub-tasks.'));
     process.exitCode = 1;
     return;
   }
