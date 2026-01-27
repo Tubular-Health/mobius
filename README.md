@@ -66,24 +66,55 @@ AI-assisted coding has a coordination problem:
 
 ## Why Mobius?
 
-<!-- TODO: Expand with context efficiency benefits (MOB-110) -->
+Mobius takes a fundamentally different approach to AI-assisted development. Instead of feeding entire codebases into a single context window, Mobius breaks work into **focused sub-tasks** that each operate with minimal context. This design unlocks several compounding benefits:
 
-Mobius uses **your existing issue tracker** as the source of truth. No new systems to learn. No state files to merge. Your team already knows how to use Linear or Jira.
+### 💰 Lower API Costs
 
-| What You Do | What Mobius Does |
-|-------------|------------------|
-| Create an issue (Linear or Jira) | Break it into focused sub-tasks |
-| Run `mobius ABC-123` | Execute each sub-task autonomously |
-| Review the PR | Validate against acceptance criteria |
+Focused sub-tasks mean lower API costs. Each sub-task runs with only the context it needs—typically a single file plus its dependencies. This means:
+- **Smaller prompts** = fewer tokens per request
+- **Targeted reads** = no wasted context on irrelevant code
+- **Efficient iterations** = rapid feedback without re-processing entire codebases
 
-| Feature | Mobius | GSD | Beads |
-|---------|--------|-----|-------|
-| **State management** | Linear (existing tracker) | PROJECT.md, STATE.md files | .beads/ SQLite + daemon |
-| **Setup** | `npm install -g mobius-loop` | Clone + configure file structure | Clone + daemon + database |
-| **Team workflow** | Works with existing process | Requires learning new system | Requires syncing database |
-| **Merge conflicts** | None — state is external | Frequent on state files | Database sync issues |
-| **Resumability** | Stop/resume anytime | Manual state management | Daemon must be running |
-| **Sandbox mode** | Docker isolation built-in | None | None |
+A typical sub-task uses 5-10x fewer tokens than a monolithic prompt that loads "everything just in case."
+
+### 🎯 Higher Accuracy
+
+Focused context leads to higher accuracy. Precise implementations result from:
+- **Less noise** = Claude concentrates on the task at hand
+- **Clearer boundaries** = acceptance criteria define exactly what "done" means
+- **Single-file scope** = changes stay contained, reducing unintended side effects
+
+When you tell Claude "modify this one file to add this one feature," it delivers exactly that—not a sprawling refactor.
+
+### ⚡ Parallel Execution
+
+Mobius enables parallel execution for faster development. Sub-tasks without dependencies run simultaneously:
+- **Multiple Claude agents** work in parallel (up to 10)
+- **Git worktree isolation** prevents conflicts between agents
+- **Dependency-aware scheduling** ensures tasks execute in correct order
+- **Real-time TUI dashboard** shows all agents working at once
+
+What would take hours sequentially completes in a fraction of the time.
+
+### 👥 Team Visibility
+
+State lives in your issue tracker, not hidden files:
+- **Linear/Jira integration** = your team sees exactly what's happening
+- **No context amnesia** = stop and resume anytime without losing progress
+- **Audit trail** = every sub-task has commits, comments, and status updates
+- **Works with existing workflow** = no new systems to learn
+
+Your team already knows Linear or Jira. Mobius just makes it smarter.
+
+### 🔒 Safe Autonomous Execution
+
+Let Claude work unattended with confidence:
+- **Docker sandbox** isolates file system changes by default
+- **Scoped permissions** = each sub-task can only modify its target files
+- **Verification gates** = tests, typecheck, and lint must pass before commit
+- **Easy rollback** = each sub-task is a separate commit
+
+Run `mobius loop ABC-123` overnight. Wake up to a PR ready for review.
 
 ---
 
