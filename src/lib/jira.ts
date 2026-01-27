@@ -151,9 +151,33 @@ export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[
 
     return subTasks;
   } catch (error) {
-    console.error(
-      chalk.gray(`Failed to fetch Jira sub-tasks: ${error instanceof Error ? error.message : String(error)}`)
-    );
+    // Provide detailed error info for debugging
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(chalk.gray(`Failed to fetch Jira sub-tasks: ${errorMessage}`));
+
+    // Try to extract HTTP status from jira.js error object
+    const httpError = error as { status?: number; response?: { status?: number; data?: unknown } };
+    const status = httpError.status ?? httpError.response?.status;
+    if (status) {
+      console.error(chalk.gray(`  → HTTP status: ${status}`));
+    }
+
+    // Check for common Jira API error patterns
+    if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+      console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
+    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+      console.error(chalk.gray('  → Permission denied. The API token may lack search permissions'));
+    } else if (status === 404 || errorMessage.includes('404') || errorMessage.includes('not found')) {
+      console.error(chalk.gray(`  → Issue ${parentKey} not found or not accessible`));
+    } else if (errorMessage.includes('JQL')) {
+      console.error(chalk.gray('  → JQL query error. The issue may not support sub-tasks'));
+    }
+
+    // Log response data if available for debugging
+    if (httpError.response?.data) {
+      console.error(chalk.gray(`  → Response: ${JSON.stringify(httpError.response.data)}`));
+    }
+
     return null;
   }
 }
