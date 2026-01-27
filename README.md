@@ -32,13 +32,13 @@ npm install -g mobius-loop && mobius setup
 ## Table of Contents
 
 - [The Problem](#the-problem)
-- [The Solution](#the-solution)
-- [How It Works](#how-it-works)
+- [Why Mobius?](#why-mobius)
+- [Workflow Lifecycle](#workflow-lifecycle)
+- [TUI Dashboard](#tui-dashboard)
 - [Quick Start](#quick-start)
+- [The 4 Skills](#the-4-skills)
 - [The Execution Loop](#the-execution-loop)
 - [Parallel Execution](#parallel-execution)
-- [Why Mobius?](#why-mobius)
-- [The 4 Skills](#the-4-skills)
 - [Configuration](#configuration)
 - [Jira Setup](#jira-setup)
 - [Switching Backends](#switching-backends)
@@ -64,7 +64,9 @@ AI-assisted coding has a coordination problem:
 
 ---
 
-## The Solution
+## Why Mobius?
+
+<!-- TODO: Expand with context efficiency benefits (MOB-110) -->
 
 Mobius uses **your existing issue tracker** as the source of truth. No new systems to learn. No state files to merge. Your team already knows how to use Linear or Jira.
 
@@ -74,12 +76,51 @@ Mobius uses **your existing issue tracker** as the source of truth. No new syste
 | Run `mobius ABC-123` | Execute each sub-task autonomously |
 | Review the PR | Validate against acceptance criteria |
 
+| Feature | Mobius | GSD | Beads |
+|---------|--------|-----|-------|
+| **State management** | Linear (existing tracker) | PROJECT.md, STATE.md files | .beads/ SQLite + daemon |
+| **Setup** | `npm install -g mobius-loop` | Clone + configure file structure | Clone + daemon + database |
+| **Team workflow** | Works with existing process | Requires learning new system | Requires syncing database |
+| **Merge conflicts** | None — state is external | Frequent on state files | Database sync issues |
+| **Resumability** | Stop/resume anytime | Manual state management | Daemon must be running |
+| **Sandbox mode** | Docker isolation built-in | None | None |
+
 ---
 
-## How It Works
+## Workflow Lifecycle
+
+<!-- TODO: Add workflow lifecycle content (MOB-109) -->
+<!-- TODO: Add workflow diagram (MOB-105) -->
+
+The complete Mobius workflow from issue creation to PR submission:
+
+```
+/define  →  Create story/task with clear acceptance criteria
+    ↓
+/refine  →  Explore codebase, create sub-tasks with dependencies
+    ↓
+mobius   →  Execute task DAG with parallel agents (TUI dashboard)
+    ↓
+/verify  →  Validate all work against acceptance criteria and tests
+    ↓
+mobius submit  →  Create PR with linked issues
+```
 
 <p align="center">
   <img src="assets/diagrams/workflow.svg" alt="Mobius Workflow" width="700" />
+</p>
+
+---
+
+## TUI Dashboard
+
+<!-- TODO: Add TUI Dashboard content (MOB-108) -->
+
+Real-time visualization of parallel agent execution status.
+
+<p align="center">
+  <!-- TODO: Add TUI diagram/screenshot (MOB-108) -->
+  <em>TUI Dashboard showing parallel agent status</em>
 </p>
 
 ---
@@ -120,6 +161,90 @@ export PATH="$HOME/.local/bin:$PATH"
 ```
 
 </details>
+
+---
+
+## The 4 Skills
+
+Mobius provides four unified skills for the complete issue lifecycle, supporting both Linear and Jira backends. The skills automatically detect your configured backend and use the appropriate API.
+
+<details>
+<summary><code>/define</code> — Create well-defined issues</summary>
+
+Through Socratic questioning, Claude helps you create issues with:
+- Clear title and description
+- Measurable acceptance criteria
+- Appropriate labels and priority
+
+```bash
+claude "/define"
+```
+
+Works with both Linear and Jira based on your `backend` config setting.
+
+</details>
+
+<details>
+<summary><code>/refine</code> — Break into sub-tasks</summary>
+
+Analyzes your codebase and creates sub-tasks that are:
+- Small enough for single-file focus
+- Ordered with blocking dependencies
+- Detailed with specific files and changes
+
+```bash
+claude "/refine ABC-123"    # Linear
+claude "/refine PROJ-123"   # Jira
+```
+
+</details>
+
+<details>
+<summary><code>/execute</code> — Implement one sub-task</summary>
+
+Executes the next ready sub-task:
+1. Reads parent issue context
+2. Implements the change
+3. Runs validation commands
+4. Commits and pushes
+5. Marks sub-task complete
+
+```bash
+claude "/execute ABC-123"
+```
+
+Or use the CLI for continuous execution:
+```bash
+mobius ABC-123
+```
+
+</details>
+
+<details>
+<summary><code>/verify</code> — Validate completion</summary>
+
+Reviews implementation against acceptance criteria:
+- Compares changes to requirements
+- Runs final validation
+- Adds review notes as issue comment
+- Marks issue complete if passing
+
+```bash
+claude "/verify ABC-123"
+```
+
+</details>
+
+### Backend-Specific Aliases
+
+For explicit backend selection, you can also use:
+
+| Unified Command | Linear Alias | Jira Alias |
+|-----------------|--------------|------------|
+| `/define` | `/linear:define` | `/jira:define` |
+| `/refine` | `/linear:refine` | `/jira:refine` |
+| `/execute` | `/linear:execute` | `/jira:execute` |
+| `/verify` | `/linear:verify` | `/jira:verify` |
 
 ---
 
@@ -215,103 +340,6 @@ mobius MOB-123 --sequential     # Sequential execution (bash loop)
   - Linux: `apt install tmux`
 
 If tmux is unavailable, use `--sequential` for bash-based execution.
-
----
-
-## Why Mobius?
-
-| Feature | Mobius | GSD | Beads |
-|---------|--------|-----|-------|
-| **State management** | Linear (existing tracker) | PROJECT.md, STATE.md files | .beads/ SQLite + daemon |
-| **Setup** | `npm install -g mobius-loop` | Clone + configure file structure | Clone + daemon + database |
-| **Team workflow** | Works with existing process | Requires learning new system | Requires syncing database |
-| **Merge conflicts** | None — state is external | Frequent on state files | Database sync issues |
-| **Resumability** | Stop/resume anytime | Manual state management | Daemon must be running |
-| **Sandbox mode** | Docker isolation built-in | None | None |
-
----
-
-## The 4 Skills
-
-Mobius provides four unified skills for the complete issue lifecycle, supporting both Linear and Jira backends. The skills automatically detect your configured backend and use the appropriate API.
-
-<details>
-<summary><code>/define</code> — Create well-defined issues</summary>
-
-Through Socratic questioning, Claude helps you create issues with:
-- Clear title and description
-- Measurable acceptance criteria
-- Appropriate labels and priority
-
-```bash
-claude "/define"
-```
-
-Works with both Linear and Jira based on your `backend` config setting.
-
-</details>
-
-<details>
-<summary><code>/refine</code> — Break into sub-tasks</summary>
-
-Analyzes your codebase and creates sub-tasks that are:
-- Small enough for single-file focus
-- Ordered with blocking dependencies
-- Detailed with specific files and changes
-
-```bash
-claude "/refine ABC-123"    # Linear
-claude "/refine PROJ-123"   # Jira
-```
-
-</details>
-
-<details>
-<summary><code>/execute</code> — Implement one sub-task</summary>
-
-Executes the next ready sub-task:
-1. Reads parent issue context
-2. Implements the change
-3. Runs validation commands
-4. Commits and pushes
-5. Marks sub-task complete
-
-```bash
-claude "/execute ABC-123"
-```
-
-Or use the CLI for continuous execution:
-```bash
-mobius ABC-123
-```
-
-</details>
-
-<details>
-<summary><code>/verify</code> — Validate completion</summary>
-
-Reviews implementation against acceptance criteria:
-- Compares changes to requirements
-- Runs final validation
-- Adds review notes as issue comment
-- Marks issue complete if passing
-
-```bash
-claude "/verify ABC-123"
-```
-
-</details>
-
-### Backend-Specific Aliases
-
-For explicit backend selection, you can also use:
-
-| Unified Command | Linear Alias | Jira Alias |
-|-----------------|--------------|------------|
-| `/define` | `/linear:define` | `/jira:define` |
-| `/refine` | `/linear:refine` | `/jira:refine` |
-| `/execute` | `/linear:execute` | `/jira:execute` |
-| `/verify` | `/linear:verify` | `/jira:verify` |
 
 ---
 
