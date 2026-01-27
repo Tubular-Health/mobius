@@ -89,26 +89,102 @@ Mobius uses **your existing issue tracker** as the source of truth. No new syste
 
 ## Workflow Lifecycle
 
-<!-- TODO: Add workflow lifecycle content (MOB-109) -->
+The complete Mobius workflow transforms an idea into a merged PR through 5 structured steps. Each step builds on the previous, maintaining traceability from requirements to implementation.
+
 <!-- TODO: Add workflow diagram (MOB-105) -->
-
-The complete Mobius workflow from issue creation to PR submission:
-
-```
-/define  →  Create story/task with clear acceptance criteria
-    ↓
-/refine  →  Explore codebase, create sub-tasks with dependencies
-    ↓
-mobius   →  Execute task DAG with parallel agents (TUI dashboard)
-    ↓
-/verify  →  Validate all work against acceptance criteria and tests
-    ↓
-mobius submit  →  Create PR with linked issues
-```
-
 <p align="center">
   <img src="assets/diagrams/workflow.svg" alt="Mobius Workflow" width="700" />
 </p>
+
+### Step 1: `/define` — Create the Issue
+
+Use Socratic questioning to create a well-defined issue with clear acceptance criteria. Claude asks clarifying questions to ensure the issue is specific, measurable, and implementable.
+
+```bash
+claude "/define"
+```
+
+**Expected output:**
+- New issue created in Linear/Jira with title, description, and acceptance criteria
+- Issue linked with appropriate labels and priority
+- Clear "done" conditions that can be verified
+
+📄 [Skill documentation](.claude/skills/define-issue/SKILL.md)
+
+---
+
+### Step 2: `/refine` — Break into Sub-tasks
+
+Analyzes your codebase and decomposes the issue into focused sub-tasks. Each sub-task targets a single file (or source + test pair) with explicit blocking dependencies.
+
+```bash
+claude "/refine ABC-123"
+```
+
+**Expected output:**
+- Sub-tasks created as child issues in Linear/Jira
+- Each sub-task specifies target file(s) and change type
+- Blocking relationships define execution order
+- Task dependency graph posted as a Mermaid diagram comment
+
+📄 [Skill documentation](.claude/skills/refine-issue/SKILL.md)
+
+---
+
+### Step 3: `mobius loop` — Execute with Parallel Agents
+
+Runs the autonomous execution loop with parallel Claude agents. Unblocked sub-tasks execute simultaneously in isolated git worktrees with real-time TUI dashboard monitoring.
+
+```bash
+mobius loop ABC-123              # Parallel execution (default)
+mobius loop ABC-123 --parallel=5 # Up to 5 concurrent agents
+mobius ABC-123 --sequential      # Sequential fallback
+```
+
+**Expected output:**
+- Git worktree created for isolated execution
+- Sub-tasks executed in dependency order
+- Each sub-task: implement → verify → commit → push
+- Progress visible in TUI dashboard
+- Worktree cleaned up on success
+
+📄 [Skill documentation](.claude/skills/execute-issue/SKILL.md)
+
+---
+
+### Step 4: `/verify` — Validate Against Criteria
+
+Reviews the complete implementation against the original acceptance criteria. Runs final validation, compares changes to requirements, and adds review notes.
+
+```bash
+claude "/verify ABC-123"
+```
+
+**Expected output:**
+- Each acceptance criterion checked and marked pass/fail
+- Test suite execution results
+- Review notes added as issue comment
+- Issue marked complete if all criteria pass
+
+📄 [Skill documentation](.claude/skills/verify-issue/SKILL.md)
+
+---
+
+### Step 5: `mobius submit` — Create the PR
+
+Creates a pull request with proper formatting, linked issues, and a summary of all changes. Merges all sub-task commits into a reviewable PR.
+
+```bash
+mobius submit ABC-123
+```
+
+**Expected output:**
+- Pull request created with structured description
+- Sub-task issues linked in PR body
+- Commit history preserved for traceability
+- Ready for human review and merge
+
+📄 [Skill documentation](.claude/skills/pr/SKILL.md)
 
 ---
 
