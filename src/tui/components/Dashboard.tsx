@@ -10,9 +10,9 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { TaskGraph } from '../../lib/task-graph.js';
 import { getGraphStats } from '../../lib/task-graph.js';
 import type { ExecutionState, TuiConfig } from '../../types.js';
-import { readExecutionState, watchExecutionState, isProcessRunning } from '../../lib/execution-state.js';
+import { readExecutionState, watchExecutionState } from '../../lib/execution-state.js';
 import { TaskTree } from './TaskTree.js';
-import { AgentPanelGrid } from './AgentPanelGrid.js';
+import { AgentSlots } from './AgentSlots.js';
 import { Legend } from './Legend.js';
 import { Header } from './Header.js';
 import { STRUCTURE_COLORS, AURORA } from '../theme.js';
@@ -73,14 +73,10 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
   // Single tick counter that drives all time-based updates
   // This consolidates Header and TaskNode timers into one batched update
   const [tick, setTick] = useState(0);
-  // Task elapsed times and process health - updated synchronously on each tick
-  const [taskElapsedMs, setTaskElapsedMs] = useState<Map<string, number>>(new Map());
-  const [taskProcessHealth, setTaskProcessHealth] = useState<Map<string, boolean>>(new Map());
 
   // Config defaults
   const showLegend = config?.show_legend ?? true;
   const stateDir = config?.state_dir;
-  const panelLines = config?.panel_lines ?? 8;
 
   // Memoize the state change handler to prevent recreating on each render
   // This callback is passed to watchExecutionState and called when state file changes
@@ -104,30 +100,14 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
     return cleanup;
   }, [parentId, stateDir, handleStateChange]);
 
-  // Single consolidated timer for all time-based updates
-  // Computes elapsed times and checks process health synchronously (no async tmux capture)
+  // Single consolidated timer for header elapsed time
   useEffect(() => {
     const interval = setInterval(() => {
-      // Update elapsed times and process health for active tasks
-      if (executionState?.activeTasks.length) {
-        const elapsedMap = new Map<string, number>();
-        const healthMap = new Map<string, boolean>();
-
-        for (const task of executionState.activeTasks) {
-          // Compute elapsed time from task's startedAt timestamp
-          elapsedMap.set(task.id, getElapsedMs(task.startedAt));
-          // Check if process is still running
-          healthMap.set(task.id, isProcessRunning(task.pid));
-        }
-
-        setTaskElapsedMs(elapsedMap);
-        setTaskProcessHealth(healthMap);
-      }
       setTick((t) => t + 1);
     }, TICK_INTERVAL_MS);
 
     return () => clearInterval(interval);
-  }, [executionState?.activeTasks]);
+  }, []);
 
   // Memoize the exit handler to prevent recreating on each render
   // Used by both auto-exit effect and keypress handler
@@ -248,14 +228,11 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
       {/* Task Tree */}
       <TaskTree graph={graph} executionState={executionState} tick={tick} />
 
-      {/* Agent Panel Grid */}
+      {/* Agent Slots */}
       <Box marginTop={1}>
-        <AgentPanelGrid
+        <AgentSlots
           activeTasks={executionState.activeTasks}
-          maxPanels={4}
-          panelLines={panelLines}
-          taskElapsedMs={taskElapsedMs}
-          taskProcessHealth={taskProcessHealth}
+          maxSlots={4}
         />
       </Box>
 
