@@ -124,8 +124,9 @@ export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[
   }
 
   try {
-    // Use JQL to find all sub-tasks of the parent
-    const searchResponse = await client.issueSearch.searchForIssuesUsingJql({
+    // Use the new JQL enhanced search API (the old /rest/api/3/search was deprecated Aug 2025)
+    // See: https://developer.atlassian.com/changelog/#CHANGE-2046
+    const searchResponse = await client.issueSearch.searchForIssuesUsingJqlEnhancedSearch({
       jql: `parent = ${parentKey}`,
       fields: ['summary', 'status', 'issuelinks', 'issuetype'],
     });
