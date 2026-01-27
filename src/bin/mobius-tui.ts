@@ -2,18 +2,21 @@
  * TUI entry point for Mobius
  *
  * Initializes the Ink app with the Dashboard component. Fetches initial
- * TaskGraph from Linear at startup, then starts state file watching.
+ * TaskGraph from the configured backend at startup, then starts state file watching.
  */
 
 import { render } from 'ink';
 import chalk from 'chalk';
 import React from 'react';
 import { BACKEND_ID_PATTERNS } from '../types.js';
-import type { TuiConfig } from '../types.js';
+import type { Backend, TuiConfig } from '../types.js';
 import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
 import { fetchLinearIssue, fetchLinearSubTasks } from '../lib/linear.js';
+import type { ParentIssue } from '../lib/linear.js';
+import { fetchJiraIssue, fetchJiraSubTasks } from '../lib/jira.js';
 import { buildTaskGraph } from '../lib/task-graph.js';
+import type { LinearIssue } from '../lib/task-graph.js';
 import { clearAllActiveTasks } from '../lib/execution-state.js';
 import { Dashboard } from '../tui/components/Dashboard.js';
 import { tuiEvents, EXIT_REQUEST_EVENT } from '../tui/events.js';
@@ -26,10 +29,36 @@ export interface TuiOptions {
 }
 
 /**
- * Validate task ID format
+ * Validate task ID format based on backend
  */
-function validateTaskId(taskId: string): boolean {
-  return BACKEND_ID_PATTERNS.linear.test(taskId);
+export function validateTaskId(taskId: string, backend: Backend): boolean {
+  return BACKEND_ID_PATTERNS[backend].test(taskId);
+}
+
+/**
+ * Fetch parent issue from the configured backend
+ */
+async function fetchParentIssue(taskId: string, backend: Backend): Promise<ParentIssue | null> {
+  if (backend === 'jira') {
+    return fetchJiraIssue(taskId);
+  }
+  return fetchLinearIssue(taskId);
+}
+
+/**
+ * Fetch sub-tasks from the configured backend
+ *
+ * Note: Linear uses parentId (UUID), Jira uses parentIdentifier (key like PROJ-123)
+ */
+async function fetchSubTasks(
+  parentId: string,
+  parentIdentifier: string,
+  backend: Backend
+): Promise<LinearIssue[] | null> {
+  if (backend === 'jira') {
+    return fetchJiraSubTasks(parentIdentifier);
+  }
+  return fetchLinearSubTasks(parentId);
 }
 
 /**
@@ -39,17 +68,18 @@ function validateTaskId(taskId: string): boolean {
  * @param options - Optional TUI configuration
  */
 export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
-  // 1. Validate task ID format
-  if (!validateTaskId(taskId)) {
+  // 1. Load configuration (needed for backend detection)
+  const paths = resolvePaths();
+  const config = readConfig(paths.configPath);
+  const backend = config.backend;
+
+  // 2. Validate task ID format
+  if (!validateTaskId(taskId, backend)) {
     console.error(chalk.red(`Invalid task ID format: ${taskId}`));
     console.error(chalk.gray('Expected format: PREFIX-NUMBER (e.g., MOB-11)'));
     process.exitCode = 1;
     return;
   }
-
-  // 2. Load configuration
-  const paths = resolvePaths();
-  const config = readConfig(paths.configPath);
 
   // Build TuiConfig from options and config file
   const tuiConfig: TuiConfig = {
@@ -59,30 +89,38 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
     panel_lines: options?.panelLines ?? config.execution.tui?.panel_lines ?? 8,
   };
 
-  // 3. Fetch dependency graph from Linear
-  console.log(chalk.gray(`Fetching issue ${taskId} from Linear...`));
+  // 3. Fetch dependency graph from backend
+  console.log(chalk.gray(`Fetching issue ${taskId} from ${backend}...`));
 
-  const parentIssue = await fetchLinearIssue(taskId);
+  const parentIssue = await fetchParentIssue(taskId, backend);
   if (!parentIssue) {
-    console.error(chalk.red(`Failed to fetch issue ${taskId} from Linear`));
-    console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue exists.'));
+    console.error(chalk.red(`Failed to fetch issue ${taskId} from ${backend}`));
+    if (backend === 'jira') {
+      console.error(chalk.gray('Make sure JIRA_HOST, JIRA_EMAIL, and JIRA_API_TOKEN are set and the issue exists.'));
+    } else {
+      console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue exists.'));
+    }
     process.exitCode = 1;
     return;
   }
 
   console.log(chalk.gray(`Fetching sub-tasks for ${parentIssue.identifier}...`));
 
-  const subTasks = await fetchLinearSubTasks(parentIssue.id);
+  const subTasks = await fetchSubTasks(parentIssue.id, parentIssue.identifier, backend);
   if (!subTasks) {
-    console.error(chalk.red(`Failed to fetch sub-tasks for ${taskId}`));
-    console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue has sub-tasks.'));
+    console.error(chalk.red(`Failed to fetch sub-tasks for ${taskId} from ${backend}`));
+    if (backend === 'jira') {
+      console.error(chalk.gray('Make sure JIRA_HOST, JIRA_EMAIL, and JIRA_API_TOKEN are set and the issue has sub-tasks.'));
+    } else {
+      console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue has sub-tasks.'));
+    }
     process.exitCode = 1;
     return;
   }
 
   if (subTasks.length === 0) {
     console.error(chalk.yellow(`Issue ${taskId} has no sub-tasks.`));
-    console.error(chalk.gray('Consider running /refine-linear-issue first to create sub-tasks.'));
+    console.error(chalk.gray('Consider running /refine-issue first to create sub-tasks.'));
     process.exitCode = 1;
     return;
   }

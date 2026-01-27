@@ -53,10 +53,12 @@ function checkLinearApiKey(): CheckResult {
 
 function checkJiraCredentials(): CheckResult {
   const name = 'Jira Credentials';
+  const host = process.env.JIRA_HOST;
   const apiToken = process.env.JIRA_API_TOKEN;
   const email = process.env.JIRA_EMAIL;
 
   const missing: string[] = [];
+  if (!host) missing.push('JIRA_HOST');
   if (!apiToken) missing.push('JIRA_API_TOKEN');
   if (!email) missing.push('JIRA_EMAIL');
 
@@ -66,7 +68,11 @@ function checkJiraCredentials(): CheckResult {
       status: 'warn',
       message: `Missing: ${missing.join(', ')}`,
       required: false,
-      details: `Set environment variables. Get API token from https://id.atlassian.com/manage-profile/security/api-tokens`,
+      details: `Set environment variables:
+  export JIRA_HOST="yourcompany.atlassian.net"
+  export JIRA_EMAIL="your-email@company.com"
+  export JIRA_API_TOKEN="your-api-token"
+Get API token from https://id.atlassian.com/manage-profile/security/api-tokens`,
     };
   }
 
