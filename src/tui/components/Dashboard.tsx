@@ -12,6 +12,7 @@ import { getGraphStats } from '../../lib/task-graph.js';
 import type { ExecutionState, TuiConfig } from '../../types.js';
 import { readExecutionState, watchExecutionState, getModalSummary } from '../../lib/execution-state.js';
 import { getSessionName } from '../../lib/tmux-display.js';
+import { tuiEvents, EXIT_REQUEST_EVENT } from '../events.js';
 import { TaskTree } from './TaskTree.js';
 import { AgentSlots } from './AgentSlots.js';
 import { Legend } from './Legend.js';
@@ -142,6 +143,9 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
     setShowExitModal(false);
   }, []);
 
+  // Count of active tasks - needed for exit confirmation logic
+  const activeTaskCount = executionState?.activeTasks.length ?? 0;
+
   // Auto-exit when execution completes
   useEffect(() => {
     if (!isComplete) return;
@@ -152,11 +156,33 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
     return () => clearTimeout(exitTimer);
   }, [isComplete, handleExit]);
 
+  // Listen for exit request events (from ctrl+c / SIGINT)
+  // This allows the signal handler to trigger the same exit flow as pressing 'q'
+  useEffect(() => {
+    const handleExitRequest = () => {
+      if (isComplete) {
+        // Execution complete - exit immediately
+        handleExit();
+      } else if (activeTaskCount > 0) {
+        // Active tasks running - show confirmation modal
+        setShowExitModal(true);
+      } else {
+        // No active tasks - exit immediately
+        handleExit();
+      }
+    };
+
+    tuiEvents.on(EXIT_REQUEST_EVENT, handleExitRequest);
+
+    return () => {
+      tuiEvents.off(EXIT_REQUEST_EVENT, handleExitRequest);
+    };
+  }, [isComplete, activeTaskCount, handleExit]);
+
   // Handle keypress for exit
   // - When complete: exit immediately on 'q', Enter, or Space
   // - When active tasks: show confirmation modal on 'q'
   // - When no active tasks (waiting): exit immediately on 'q'
-  const activeTaskCount = executionState?.activeTasks.length ?? 0;
   useInput(
     useCallback(
       (input, key) => {
