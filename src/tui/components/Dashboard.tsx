@@ -10,11 +10,14 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { TaskGraph } from '../../lib/task-graph.js';
 import { getGraphStats } from '../../lib/task-graph.js';
 import type { ExecutionState, TuiConfig } from '../../types.js';
-import { readExecutionState, watchExecutionState } from '../../lib/execution-state.js';
+import { readExecutionState, watchExecutionState, getModalSummary } from '../../lib/execution-state.js';
+import { getSessionName } from '../../lib/tmux-display.js';
+import { tuiEvents, EXIT_REQUEST_EVENT } from '../events.js';
 import { TaskTree } from './TaskTree.js';
 import { AgentSlots } from './AgentSlots.js';
 import { Legend } from './Legend.js';
 import { Header } from './Header.js';
+import { ExitConfirmationModal } from './ExitConfirmationModal.js';
 import { STRUCTURE_COLORS, AURORA } from '../theme.js';
 import { formatDuration, getElapsedMs } from '../utils/formatDuration.js';
 
@@ -73,6 +76,8 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
   // Single tick counter that drives all time-based updates
   // This consolidates Header and TaskNode timers into one batched update
   const [tick, setTick] = useState(0);
+  // Exit confirmation modal state
+  const [showExitModal, setShowExitModal] = useState(false);
 
   // Config defaults
   const showLegend = config?.show_legend ?? true;
@@ -127,6 +132,20 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
     process.exitCode = hasFailures ? 1 : 0;
   }, [executionState?.loopPid, executionState?.failedTasks.length, exit]);
 
+  // Handle exit confirmation from modal
+  const handleExitConfirm = useCallback(() => {
+    setShowExitModal(false);
+    handleExit();
+  }, [handleExit]);
+
+  // Handle exit cancellation from modal
+  const handleExitCancel = useCallback(() => {
+    setShowExitModal(false);
+  }, []);
+
+  // Count of active tasks - needed for exit confirmation logic
+  const activeTaskCount = executionState?.activeTasks.length ?? 0;
+
   // Auto-exit when execution completes
   useEffect(() => {
     if (!isComplete) return;
@@ -137,15 +156,56 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
     return () => clearTimeout(exitTimer);
   }, [isComplete, handleExit]);
 
-  // Handle keypress for immediate exit when complete
+  // Listen for exit request events (from ctrl+c / SIGINT)
+  // This allows the signal handler to trigger the same exit flow as pressing 'q'
+  useEffect(() => {
+    const handleExitRequest = () => {
+      if (isComplete) {
+        // Execution complete - exit immediately
+        handleExit();
+      } else if (activeTaskCount > 0) {
+        // Active tasks running - show confirmation modal
+        setShowExitModal(true);
+      } else {
+        // No active tasks - exit immediately
+        handleExit();
+      }
+    };
+
+    tuiEvents.on(EXIT_REQUEST_EVENT, handleExitRequest);
+
+    return () => {
+      tuiEvents.off(EXIT_REQUEST_EVENT, handleExitRequest);
+    };
+  }, [isComplete, activeTaskCount, handleExit]);
+
+  // Handle keypress for exit
+  // - When complete: exit immediately on 'q', Enter, or Space
+  // - When active tasks: show confirmation modal on 'q'
+  // - When no active tasks (waiting): exit immediately on 'q'
   useInput(
     useCallback(
       (input, key) => {
+        // Modal is showing - let it handle its own input
+        if (showExitModal) {
+          return;
+        }
+
         if (isComplete && (key.return || input === 'q' || input === ' ')) {
+          // Execution complete - exit immediately
           handleExit();
+        } else if (!isComplete && input === 'q') {
+          // Not complete - check if there are active tasks
+          if (activeTaskCount > 0) {
+            // Show confirmation modal
+            setShowExitModal(true);
+          } else {
+            // No active tasks - exit immediately (waiting state)
+            handleExit();
+          }
         }
       },
-      [isComplete, handleExit]
+      [isComplete, handleExit, showExitModal, activeTaskCount]
     )
   );
 
@@ -219,6 +279,10 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
     );
   }
 
+  // Compute modal summary (only needed when modal is shown, but always available)
+  const sessionName = getSessionName(parentId);
+  const modalSummary = getModalSummary(executionState, elapsedMs ?? 0);
+
   // Normal running state - show full dashboard
   return (
     <Box flexDirection="column" padding={1} >
@@ -240,6 +304,19 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
       {showLegend && (
         <Box marginTop={1}>
           <Legend visible={showLegend} />
+        </Box>
+      )}
+
+      {/* Exit Confirmation Modal */}
+      {showExitModal && (
+        <Box marginTop={1}>
+          <ExitConfirmationModal
+            sessionName={sessionName}
+            activeAgentCount={activeTaskCount}
+            summary={modalSummary}
+            onConfirm={handleExitConfirm}
+            onCancel={handleExitCancel}
+          />
         </Box>
       )}
     </Box>

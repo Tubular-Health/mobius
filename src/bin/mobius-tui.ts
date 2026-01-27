@@ -19,6 +19,7 @@ import { buildTaskGraph } from '../lib/task-graph.js';
 import type { LinearIssue } from '../lib/task-graph.js';
 import { clearAllActiveTasks } from '../lib/execution-state.js';
 import { Dashboard } from '../tui/components/Dashboard.js';
+import { tuiEvents, EXIT_REQUEST_EVENT } from '../tui/events.js';
 
 export interface TuiOptions {
   stateDir?: string;
@@ -147,20 +148,37 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
     }
   );
 
-  // 5. Handle cleanup on exit (SIGINT)
-  const cleanup = () => {
+  // 5. Handle SIGINT (ctrl+c) by emitting exit-request event
+  // This allows the Dashboard to show confirmation modal before exiting
+  // Track if we've already started handling an exit to prevent multiple triggers
+  let exitRequested = false;
+
+  const handleSigInt = () => {
+    if (exitRequested) {
+      // Second ctrl+c - force exit immediately
+      unmount();
+      return;
+    }
+    exitRequested = true;
+    // Emit event for Dashboard to handle (show confirmation modal)
+    tuiEvents.emit(EXIT_REQUEST_EVENT);
+  };
+
+  // SIGTERM should still exit immediately (used by system/process managers)
+  const handleSigTerm = () => {
     unmount();
   };
 
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
+  process.on('SIGINT', handleSigInt);
+  process.on('SIGTERM', handleSigTerm);
 
   // Wait for the TUI to exit
   await waitUntilExit();
 
   // Remove signal handlers after clean exit
-  process.off('SIGINT', cleanup);
-  process.off('SIGTERM', cleanup);
+  process.off('SIGINT', handleSigInt);
+  process.off('SIGTERM', handleSigTerm);
+  tuiEvents.removeAllListeners(EXIT_REQUEST_EVENT);
 }
 
 export default tui;
