@@ -16,6 +16,7 @@ import {
   getBlockers,
   getBlockedBy,
   getGraphStats,
+  getVerificationTask,
   type LinearIssue,
 } from './task-graph.js';
 
@@ -545,6 +546,49 @@ describe('getGraphStats', () => {
     expect(stats.inProgress).toBe(0);
     expect(stats.ready).toBe(0);
     expect(stats.blocked).toBe(0);
+  });
+});
+
+describe('getVerificationTask', () => {
+  it('identifies verification gate task by title pattern', () => {
+    const issues: LinearIssue[] = [
+      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Done'),
+      createMockIssue('id-2', 'MOB-2', 'Task 2', 'In Progress'),
+      createMockIssue('id-3', 'MOB-3', 'Verification Gate', 'Backlog'),
+    ];
+
+    const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
+    const verificationTask = getVerificationTask(graph);
+
+    expect(verificationTask).toBeDefined();
+    expect(verificationTask?.identifier).toBe('MOB-3');
+    expect(verificationTask?.title).toBe('Verification Gate');
+  });
+
+  it('returns undefined if no verification task exists', () => {
+    const issues: LinearIssue[] = [
+      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Done'),
+      createMockIssue('id-2', 'MOB-2', 'Task 2', 'In Progress'),
+      createMockIssue('id-3', 'MOB-3', 'Final Task', 'Backlog'),
+    ];
+
+    const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
+    const verificationTask = getVerificationTask(graph);
+
+    expect(verificationTask).toBeUndefined();
+  });
+
+  it('is case-insensitive when matching title', () => {
+    const issues: LinearIssue[] = [
+      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Done'),
+      createMockIssue('id-2', 'MOB-2', 'VERIFICATION GATE', 'Backlog'),
+    ];
+
+    const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
+    const verificationTask = getVerificationTask(graph);
+
+    expect(verificationTask).toBeDefined();
+    expect(verificationTask?.identifier).toBe('MOB-2');
   });
 });
 
