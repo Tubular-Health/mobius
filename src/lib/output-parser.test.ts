@@ -345,6 +345,155 @@ completedCount: 5`;
     });
   });
 
+  describe('structured block extraction from raw pane content', () => {
+    it('extracts YAML block with --- delimiters from conversation output', () => {
+      const rawPaneContent = `
+I have completed the implementation of MOB-184.
+
+## Summary
+- Added the helper function
+- Updated tests
+- All checks pass
+
+---
+status: SUBTASK_COMPLETE
+timestamp: "2024-01-15T14:30:00Z"
+subtaskId: MOB-184
+parentId: MOB-161
+commitHash: abc123
+filesModified:
+  - src/lib/helper.ts
+verificationResults:
+  typecheck: PASS
+  tests: PASS
+  lint: PASS
+---
+
+EXECUTION_COMPLETE: MOB-184
+`;
+
+      const result = parseSkillOutput(rawPaneContent);
+      expect(result.output.status).toBe('SUBTASK_COMPLETE');
+      if (result.output.status === 'SUBTASK_COMPLETE') {
+        expect(result.output.subtaskId).toBe('MOB-184');
+        expect(result.output.commitHash).toBe('abc123');
+      }
+    });
+
+    it('extracts status from YAML block in larger output', () => {
+      const rawPaneContent = `
+Some conversation text before...
+
+---
+status: ALL_BLOCKED
+timestamp: "2024-01-15T14:30:00Z"
+parentId: MOB-100
+blockedCount: 3
+waitingOn:
+  - MOB-101
+  - MOB-102
+---
+
+The remaining tasks are blocked.
+`;
+
+      expect(extractStatus(rawPaneContent)).toBe('ALL_BLOCKED');
+    });
+
+    it('extracts JSON from code-fenced block', () => {
+      const rawPaneContent = `
+Here is the structured output:
+
+\`\`\`json
+{"status": "PASS", "timestamp": "2024-01-15T14:30:00Z", "details": "All checks passed"}
+\`\`\`
+
+Done!
+`;
+
+      const result = parseSkillOutput(rawPaneContent);
+      expect(result.output.status).toBe('PASS');
+    });
+
+    it('extracts YAML from code-fenced block', () => {
+      const rawPaneContent = `
+Implementation complete. Output:
+
+\`\`\`yaml
+status: SUBTASK_COMPLETE
+timestamp: "2024-01-15T14:30:00Z"
+subtaskId: MOB-125
+commitHash: def456
+filesModified:
+  - src/feature.ts
+verificationResults:
+  typecheck: PASS
+  tests: PASS
+  lint: PASS
+\`\`\`
+
+EXECUTION_COMPLETE
+`;
+
+      const result = parseSkillOutput(rawPaneContent);
+      expect(result.output.status).toBe('SUBTASK_COMPLETE');
+      if (result.output.status === 'SUBTASK_COMPLETE') {
+        expect(result.output.subtaskId).toBe('MOB-125');
+      }
+    });
+
+    it('prefers last YAML block when multiple exist', () => {
+      const rawPaneContent = `
+First attempt output (failed):
+---
+status: VERIFICATION_FAILED
+timestamp: "2024-01-15T14:00:00Z"
+subtaskId: MOB-125
+errorType: tests
+errorOutput: "test failed"
+attemptedFixes: []
+uncommittedFiles: []
+---
+
+After fixing, final output:
+---
+status: SUBTASK_COMPLETE
+timestamp: "2024-01-15T14:30:00Z"
+subtaskId: MOB-125
+commitHash: final123
+filesModified:
+  - src/fixed.ts
+verificationResults:
+  typecheck: PASS
+  tests: PASS
+  lint: PASS
+---
+
+Done!
+`;
+
+      const result = parseSkillOutput(rawPaneContent);
+      expect(result.output.status).toBe('SUBTASK_COMPLETE');
+      if (result.output.status === 'SUBTASK_COMPLETE') {
+        expect(result.output.commitHash).toBe('final123');
+      }
+    });
+
+    it('extracts JSON object with status from mixed content', () => {
+      const rawPaneContent = `
+Some log output...
+Running tests...
+All tests passed!
+
+Result: {"status": "PASS", "timestamp": "2024-01-15T14:30:00Z"}
+
+Done.
+`;
+
+      expect(extractStatus(rawPaneContent)).toBe('PASS');
+    });
+  });
+
   describe('isTerminalStatus', () => {
     it('returns true for terminal statuses', () => {
       expect(isTerminalStatus('SUBTASK_COMPLETE')).toBe(true);
