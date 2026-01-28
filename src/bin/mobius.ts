@@ -31,8 +31,9 @@ program
 program
   .command('setup')
   .description('Interactive setup wizard')
-  .action(async () => {
-    await setup();
+  .option('-u, --update-skills', 'Update skills/commands only (skip config wizard)')
+  .action(async (options: { updateSkills?: boolean }) => {
+    await setup({ updateSkills: options.updateSkills });
   });
 
 program

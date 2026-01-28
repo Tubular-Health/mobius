@@ -17,7 +17,11 @@ import {
 import type { LoopConfig, Backend, Model } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
 
-export async function setup(): Promise<void> {
+export interface SetupOptions {
+  updateSkills?: boolean;
+}
+
+export async function setup(_options: SetupOptions = {}): Promise<void> {
   console.log(chalk.bold('\nMobius Setup Wizard\n'));
 
   // Check if bundled skills exist
