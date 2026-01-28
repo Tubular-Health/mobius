@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.3.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.2.3...mobius-ai-v1.3.0) (2026-01-28)
+
+
+### Features
+
+* **loop:** stop loop when verification sub-task completes successfully ([#34](https://github.com/Tubular-Health/mobius/issues/34)) ([c13c688](https://github.com/Tubular-Health/mobius/commit/c13c68853f4e6d8c1f0e4cf3dd69ad45f903051b))
+* **verify-issue:** add verification config and Jira documentation ([#32](https://github.com/Tubular-Health/mobius/issues/32)) ([c8d46bb](https://github.com/Tubular-Health/mobius/commit/c8d46bb5dfd198b1df25757a20acee06ac5c67ba))
+
+
+### Bug Fixes
+
+* **jira:** implement proper issue link creation for task dependencies ([#31](https://github.com/Tubular-Health/mobius/issues/31)) ([571866c](https://github.com/Tubular-Health/mobius/commit/571866ca1f4d3f4d850f902e799490f7708746c9))
+* **tui:** use completedTasks to override stale graph status in TaskTree ([#36](https://github.com/Tubular-Health/mobius/issues/36)) ([7848945](https://github.com/Tubular-Health/mobius/commit/78489457f209f7711af7be749ce717cecd1e3edf))
+
+
+### Tests
+
+* **parallel:** add comprehensive test suite for parallel mobius loop execution ([#35](https://github.com/Tubular-Health/mobius/issues/35)) ([273e1ff](https://github.com/Tubular-Health/mobius/commit/273e1ffc24b95481ae5851193579a83e619a284b))
+
 ## [1.2.3](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.2.2...mobius-ai-v1.2.3) (2026-01-27)
 
 
