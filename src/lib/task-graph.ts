@@ -355,3 +355,21 @@ export function getGraphStats(graph: TaskGraph): {
     inProgress,
   };
 }
+
+/**
+ * Get the verification gate task from the graph (if present)
+ *
+ * Finds a task by looking for "Verification Gate" in the title (case-insensitive).
+ * This matches the pattern used in parallel-executor.ts to identify verification tasks.
+ *
+ * @returns The verification gate task, or undefined if none exists
+ */
+export function getVerificationTask(graph: TaskGraph): SubTask | undefined {
+  for (const task of graph.tasks.values()) {
+    const titleLower = task.title.toLowerCase();
+    if (titleLower.includes('verification') && titleLower.includes('gate')) {
+      return task;
+    }
+  }
+  return undefined;
+}
