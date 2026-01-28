@@ -187,7 +187,7 @@ async function spawnAgents(
  * @param subtaskIdentifier - The specific subtask identifier (e.g., "MOB-124")
  *                            Each agent gets its own subtask ID to prevent race conditions
  */
-function buildClaudeCommand(
+export function buildClaudeCommand(
   subtaskIdentifier: string,
   skill: string,
   worktreePath: string,
@@ -265,7 +265,7 @@ async function waitForAgent(
  * @param startTime - When the task started
  * @param paneId - The tmux pane ID where the agent is running
  */
-function parseAgentOutput(
+export function parseAgentOutput(
   content: string,
   task: SubTask,
   startTime: number,
