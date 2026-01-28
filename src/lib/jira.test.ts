@@ -1,9 +1,23 @@
 /**
- * Unit tests for Jira issue link creation functions
+ * Unit tests for Jira API integration module
+ *
+ * Tests the SDK extensions for issue fetching, creation, status updates, and comments.
+ * These tests verify behavior when the client is unavailable (missing credentials)
+ * and the error handling patterns. Real API integration tests would require
+ * a test Jira instance.
  */
 
 import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
-import { createJiraIssueLink, createJiraIssueLinks, getJiraClient } from './jira.js';
+import {
+  createJiraIssueLink,
+  createJiraIssueLinks,
+  getJiraClient,
+  fetchJiraIssue,
+  fetchJiraSubTasks,
+  createJiraIssue,
+  updateJiraIssueStatus,
+  addJiraComment,
+} from './jira.js';
 
 // Store original env vars to restore after tests
 const originalEnv = {
@@ -204,5 +218,352 @@ describe('createJiraIssueLinks (batch processing)', () => {
 
     expect(result.success).toBe(0);
     expect(result.failed).toBe(1);
+  });
+});
+
+describe('fetchJiraIssue', () => {
+  it('returns null when client initialization fails (missing env vars)', async () => {
+    delete process.env.JIRA_HOST;
+    delete process.env.JIRA_EMAIL;
+    delete process.env.JIRA_API_TOKEN;
+
+    const result = await fetchJiraIssue('PROJ-123');
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when JIRA_HOST is missing', async () => {
+    delete process.env.JIRA_HOST;
+    process.env.JIRA_EMAIL = 'test@example.com';
+    process.env.JIRA_API_TOKEN = 'token123';
+
+    const result = await fetchJiraIssue('PROJ-123');
+
+    expect(result).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('returns null when JIRA_EMAIL is missing', async () => {
+    process.env.JIRA_HOST = 'test.atlassian.net';
+    delete process.env.JIRA_EMAIL;
+    process.env.JIRA_API_TOKEN = 'token123';
+
+    const result = await fetchJiraIssue('PROJ-123');
+
+    expect(result).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('returns null when JIRA_API_TOKEN is missing', async () => {
+    process.env.JIRA_HOST = 'test.atlassian.net';
+    process.env.JIRA_EMAIL = 'test@example.com';
+    delete process.env.JIRA_API_TOKEN;
+
+    const result = await fetchJiraIssue('PROJ-123');
+
+    expect(result).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+});
+
+describe('fetchJiraSubTasks', () => {
+  it('returns null when client initialization fails (missing env vars)', async () => {
+    delete process.env.JIRA_HOST;
+    delete process.env.JIRA_EMAIL;
+    delete process.env.JIRA_API_TOKEN;
+
+    const result = await fetchJiraSubTasks('PROJ-100');
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when JIRA_HOST is missing', async () => {
+    delete process.env.JIRA_HOST;
+    process.env.JIRA_EMAIL = 'test@example.com';
+    process.env.JIRA_API_TOKEN = 'token123';
+
+    const result = await fetchJiraSubTasks('PROJ-100');
+
+    expect(result).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('returns null when JIRA_EMAIL is missing', async () => {
+    process.env.JIRA_HOST = 'test.atlassian.net';
+    delete process.env.JIRA_EMAIL;
+    process.env.JIRA_API_TOKEN = 'token123';
+
+    const result = await fetchJiraSubTasks('PROJ-100');
+
+    expect(result).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+});
+
+describe('createJiraIssue', () => {
+  it('returns null when client initialization fails (missing env vars)', async () => {
+    delete process.env.JIRA_HOST;
+    delete process.env.JIRA_EMAIL;
+    delete process.env.JIRA_API_TOKEN;
+
+    const result = await createJiraIssue({
+      projectKey: 'PROJ',
+      issueTypeName: 'Task',
+      summary: 'Test Issue',
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when JIRA_HOST is missing', async () => {
+    delete process.env.JIRA_HOST;
+    process.env.JIRA_EMAIL = 'test@example.com';
+    process.env.JIRA_API_TOKEN = 'token123';
+
+    const result = await createJiraIssue({
+      projectKey: 'PROJ',
+      issueTypeName: 'Task',
+      summary: 'Test Issue',
+    });
+
+    expect(result).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('accepts minimal required fields', async () => {
+    delete process.env.JIRA_HOST;
+
+    // Only projectKey, issueTypeName, and summary are required
+    const result = await createJiraIssue({
+      projectKey: 'PROJ',
+      issueTypeName: 'Task',
+      summary: 'Minimal Issue',
+    });
+
+    expect(result).toBeNull(); // Due to missing env vars
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('accepts all optional fields', async () => {
+    delete process.env.JIRA_HOST;
+
+    const result = await createJiraIssue({
+      projectKey: 'PROJ',
+      issueTypeName: 'Sub-task',
+      summary: 'Full Issue',
+      description: 'A detailed description',
+      parentKey: 'PROJ-100',
+      labels: ['label-1', 'label-2'],
+      assigneeId: 'user-123',
+    });
+
+    expect(result).toBeNull(); // Due to missing env vars
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+});
+
+describe('updateJiraIssueStatus', () => {
+  it('returns false when client initialization fails (missing env vars)', async () => {
+    delete process.env.JIRA_HOST;
+    delete process.env.JIRA_EMAIL;
+    delete process.env.JIRA_API_TOKEN;
+
+    const result = await updateJiraIssueStatus('PROJ-123', 'In Progress');
+
+    expect(result).toBe(false);
+  });
+
+  it('returns false when JIRA_HOST is missing', async () => {
+    delete process.env.JIRA_HOST;
+    process.env.JIRA_EMAIL = 'test@example.com';
+    process.env.JIRA_API_TOKEN = 'token123';
+
+    const result = await updateJiraIssueStatus('PROJ-123', 'Done');
+
+    expect(result).toBe(false);
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('returns false when JIRA_EMAIL is missing', async () => {
+    process.env.JIRA_HOST = 'test.atlassian.net';
+    delete process.env.JIRA_EMAIL;
+    process.env.JIRA_API_TOKEN = 'token123';
+
+    const result = await updateJiraIssueStatus('PROJ-123', 'Done');
+
+    expect(result).toBe(false);
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+});
+
+describe('addJiraComment', () => {
+  it('returns null when client initialization fails (missing env vars)', async () => {
+    delete process.env.JIRA_HOST;
+    delete process.env.JIRA_EMAIL;
+    delete process.env.JIRA_API_TOKEN;
+
+    const result = await addJiraComment('PROJ-123', 'Test comment');
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when JIRA_HOST is missing', async () => {
+    delete process.env.JIRA_HOST;
+    process.env.JIRA_EMAIL = 'test@example.com';
+    process.env.JIRA_API_TOKEN = 'token123';
+
+    const result = await addJiraComment('PROJ-123', 'Test comment');
+
+    expect(result).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('returns null when JIRA_EMAIL is missing', async () => {
+    process.env.JIRA_HOST = 'test.atlassian.net';
+    delete process.env.JIRA_EMAIL;
+    process.env.JIRA_API_TOKEN = 'token123';
+
+    const result = await addJiraComment('PROJ-123', 'Test comment');
+
+    expect(result).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('returns null when JIRA_API_TOKEN is missing', async () => {
+    process.env.JIRA_HOST = 'test.atlassian.net';
+    process.env.JIRA_EMAIL = 'test@example.com';
+    delete process.env.JIRA_API_TOKEN;
+
+    const result = await addJiraComment('PROJ-123', 'Test comment');
+
+    expect(result).toBeNull();
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+
+  it('accepts markdown-formatted comment body', async () => {
+    delete process.env.JIRA_HOST;
+
+    const result = await addJiraComment('PROJ-123', '## Header\n\n**Bold text** and _italic_');
+
+    expect(result).toBeNull(); // Due to missing env vars
+    expect(consoleErrorSpy).toHaveBeenCalled();
+  });
+});
+
+describe('JiraCreatedIssue interface', () => {
+  it('createJiraIssue returns null on client initialization failure', async () => {
+    delete process.env.JIRA_HOST;
+
+    const result = await createJiraIssue({
+      projectKey: 'PROJ',
+      issueTypeName: 'Task',
+      summary: 'Test',
+    });
+
+    // When client fails to initialize, returns null (not a JiraCreatedIssue)
+    expect(result).toBeNull();
+  });
+});
+
+describe('JiraCommentResult interface', () => {
+  it('addJiraComment returns null on client initialization failure', async () => {
+    delete process.env.JIRA_HOST;
+
+    const result = await addJiraComment('PROJ-123', 'Test');
+
+    // When client fails to initialize, returns null (not a JiraCommentResult)
+    expect(result).toBeNull();
+  });
+});
+
+describe('CreateJiraIssueOptions interface', () => {
+  it('accepts all valid option combinations', async () => {
+    delete process.env.JIRA_HOST;
+
+    // Test with sub-task (has parentKey)
+    const subTaskResult = await createJiraIssue({
+      projectKey: 'PROJ',
+      issueTypeName: 'Sub-task',
+      summary: 'Sub-task Issue',
+      parentKey: 'PROJ-100',
+    });
+
+    expect(subTaskResult).toBeNull();
+
+    // Test with labels
+    const labeledResult = await createJiraIssue({
+      projectKey: 'PROJ',
+      issueTypeName: 'Task',
+      summary: 'Labeled Issue',
+      labels: ['frontend', 'urgent'],
+    });
+
+    expect(labeledResult).toBeNull();
+
+    // Test with assignee
+    const assignedResult = await createJiraIssue({
+      projectKey: 'PROJ',
+      issueTypeName: 'Bug',
+      summary: 'Assigned Issue',
+      assigneeId: 'user-account-id',
+    });
+
+    expect(assignedResult).toBeNull();
+  });
+});
+
+describe('error handling patterns', () => {
+  describe('fetchJiraIssue error handling', () => {
+    it('logs error when credentials are missing', async () => {
+      delete process.env.JIRA_HOST;
+
+      await fetchJiraIssue('PROJ-123');
+
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('fetchJiraSubTasks error handling', () => {
+    it('logs error when credentials are missing', async () => {
+      delete process.env.JIRA_HOST;
+
+      await fetchJiraSubTasks('PROJ-100');
+
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('createJiraIssue error handling', () => {
+    it('logs error when credentials are missing', async () => {
+      delete process.env.JIRA_HOST;
+
+      await createJiraIssue({
+        projectKey: 'PROJ',
+        issueTypeName: 'Task',
+        summary: 'Test',
+      });
+
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('updateJiraIssueStatus error handling', () => {
+    it('logs error when credentials are missing', async () => {
+      delete process.env.JIRA_HOST;
+
+      await updateJiraIssueStatus('PROJ-123', 'Done');
+
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('addJiraComment error handling', () => {
+    it('logs error when credentials are missing', async () => {
+      delete process.env.JIRA_HOST;
+
+      await addJiraComment('PROJ-123', 'Test');
+
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
   });
 });
