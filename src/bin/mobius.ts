@@ -12,6 +12,7 @@ import { loop } from '../commands/loop.js';
 import { tree } from '../commands/tree.js';
 import { showConfig } from '../commands/config.js';
 import { submit } from '../commands/submit.js';
+import { sync } from '../commands/sync.js';
 import { tui } from './mobius-tui.js';
 import type { Backend, Model } from '../types.js';
 
@@ -113,6 +114,20 @@ program
   });
 
 program
+  .command('sync [parent-id]')
+  .description('Sync pending local changes to Linear/Jira')
+  .option('-b, --backend <backend>', 'Backend: linear or jira')
+  .option('--dry-run', 'Show pending changes without syncing')
+  .option('-a, --all', 'Sync all issues with pending updates')
+  .action(async (parentId: string | undefined, options) => {
+    await sync(parentId, {
+      backend: options.backend as Backend | undefined,
+      dryRun: options.dryRun,
+      all: options.all,
+    });
+  });
+
+program
   .command('tui <task-id>')
   .description('Launch interactive TUI dashboard for monitoring task execution')
   .option('--no-legend', 'Hide the status legend')
@@ -149,7 +164,7 @@ program
     }
 
     // If task ID looks like a command, let commander handle it
-    if (['setup', 'doctor', 'config', 'tree', 'run', 'loop', 'submit', 'tui', 'help'].includes(taskId)) {
+    if (['setup', 'doctor', 'config', 'tree', 'run', 'loop', 'submit', 'sync', 'tui', 'help'].includes(taskId)) {
       return;
     }
 
