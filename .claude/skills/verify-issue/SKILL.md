@@ -15,17 +15,19 @@ This is the fourth and final step in the issue workflow:
 </objective>
 
 <backend_detection>
-**FIRST**: Detect the backend from mobius config before proceeding.
+**FIRST**: Detect the backend from context file metadata.
 
-Read `~/.config/mobius/config.yaml` or `mobius.config.yaml` in the project root:
+Read the `metadata.backend` field from the context file:
 
-```yaml
-backend: linear  # or 'jira'
+```bash
+cat "$MOBIUS_CONTEXT_FILE" | jq '.metadata.backend'
 ```
 
-**Default**: If no backend is specified, default to `linear`.
+**Values**: `linear` or `jira`
 
-The detected backend determines which MCP tools to use throughout this skill. All subsequent tool references use the backend-specific tools from the `<backend_context>` section below.
+**Default**: If no backend is specified in metadata, default to `linear`.
+
+The backend information is used for understanding status naming conventions but does not change the workflow - all context is read from local files and outputs are structured data.
 </backend_detection>
 
 <verification_config>
@@ -63,63 +65,265 @@ The verify-issue skill is designed to run end-to-end autonomously. User interact
 **Note**: The verification sub-task is created by refine-issue during issue breakdown. When mobius executes a "Verification Gate" sub-task, it routes to this skill instead of execute-issue.
 </autonomous_actions>
 
-<backend_context>
-<linear>
-**MCP Tools for Linear**:
+<context_input>
+**The mobius loop provides verification context via environment variable and local files.**
 
-- **Fetch issue**: `mcp__plugin_linear_linear__get_issue`
-  - Parameters: `id` (issue ID), `includeRelations` (boolean)
-  - Returns: Issue with status, description, acceptance criteria
+The skill receives context through:
+1. `MOBIUS_CONTEXT_FILE` environment variable - path to the context JSON file
+2. Local files at `~/.mobius/issues/{parentId}/`
 
-- **List comments**: `mcp__plugin_linear_linear__list_comments`
-  - Parameters: `issueId`
-  - Returns: Array of comments with implementation notes
+**Context file structure** (at `MOBIUS_CONTEXT_FILE` path):
 
-- **List sub-tasks**: `mcp__plugin_linear_linear__list_issues`
-  - Parameters: `parentId`, `includeArchived`
-  - Returns: Array of child issues with status
+```json
+{
+  "parent": {
+    "id": "uuid",
+    "identifier": "MOB-161",
+    "title": "Parent issue title",
+    "description": "Full description with acceptance criteria",
+    "gitBranchName": "branch-name",
+    "status": "In Progress",
+    "labels": ["Feature"],
+    "url": "https://linear.app/..."
+  },
+  "subTasks": [
+    {
+      "id": "uuid",
+      "identifier": "MOB-177",
+      "title": "Sub-task title",
+      "description": "Full description with acceptance criteria",
+      "status": "done",
+      "gitBranchName": "branch-name",
+      "blockedBy": [],
+      "blocks": []
+    }
+  ],
+  "verificationTask": {
+    "id": "uuid",
+    "identifier": "MOB-186",
+    "title": "[MOB-161] Verification Gate",
+    "status": "in_progress"
+  },
+  "metadata": {
+    "fetchedAt": "2026-01-28T12:00:00Z",
+    "updatedAt": "2026-01-28T12:00:00Z",
+    "backend": "linear"
+  }
+}
+```
 
-- **Add comment**: `mcp__plugin_linear_linear__create_comment`
-  - Parameters: `issueId`, `body` (markdown)
-  - Use for: Posting verification report
+**Reading context**:
+```bash
+# Context file path from environment
+CONTEXT_FILE="$MOBIUS_CONTEXT_FILE"
 
-- **Update status**: `mcp__plugin_linear_linear__update_issue`
-  - Parameters: `id`, `state` (e.g., "Done"), `labels` (optional)
-  - Use for: Marking issue as Done if verified, or adding "needs-revision" label
+# Or read directly from local storage
+cat ~/.mobius/issues/MOB-161/parent.json
+cat ~/.mobius/issues/MOB-161/tasks/MOB-177.json
+```
 
-- **Create follow-up issue**: `mcp__plugin_linear_linear__create_issue`
-  - Parameters: `team`, `title`, `description`, `labels`, `relatedTo`
-  - Use for: Creating follow-up issues for discovered problems
-</linear>
+**Sub-task status values**: `pending`, `in_progress`, `done`
 
-<jira>
-**MCP Tools for Jira**:
+**Implementation sub-tasks vs Verification sub-task**:
+- Implementation sub-tasks have titles like `[MOB-161] Create feature X`
+- Verification sub-task has title containing `Verification Gate`
+- The context file separates these: `subTasks` (implementation) and `verificationTask`
 
-- **Fetch issue**: `mcp_plugin_atlassian_jira__get_issue`
-  - Parameters: `issueIdOrKey` (e.g., "PROJ-123")
-  - Returns: Issue with status, description, acceptance criteria
+**Backend detection**: The `metadata.backend` field indicates whether the issue is from Linear or Jira. This affects status transition names in the structured output but the skill should treat the context data uniformly.
+</context_input>
 
-- **List comments**: `mcp_plugin_atlassian_jira__get_comments`
-  - Parameters: `issueIdOrKey`
-  - Returns: Array of comments with implementation notes
+<structured_output>
+**This skill MUST output structured data for the mobius loop to parse.**
 
-- **List sub-tasks**: `mcp_plugin_atlassian_jira__list_issues`
-  - Parameters: `jql` (e.g., "parent = PROJ-123")
-  - Returns: Array of child issues with status
+At the END of your response, output a YAML or JSON block with the verification result. The mobius loop parses this to execute status updates, add comments, and determine next actions.
 
-- **Add comment**: `mcp_plugin_atlassian_jira__add_comment`
-  - Parameters: `issueIdOrKey`, `body` (Jira wiki markup or markdown)
-  - Use for: Posting verification report
+**Output format** (YAML preferred for readability):
 
-- **Update status**: `mcp_plugin_atlassian_jira__transition_issue`
-  - Parameters: `issueIdOrKey`, `transitionId` or `transitionName`
-  - Use for: Transitioning to Done if verified
+```yaml
+---
+status: PASS  # Required: one of the valid status values
+timestamp: "2026-01-28T12:00:00Z"  # Required: ISO-8601 timestamp
+parentId: "MOB-161"  # Required: parent issue identifier
+verificationTaskId: "MOB-186"  # Required: verification sub-task identifier
 
-- **Create follow-up issue**: `mcp_plugin_atlassian_jira__create_issue`
-  - Parameters: `projectKey`, `summary`, `description`, `issueType`, `labels`
-  - Use for: Creating follow-up issues for discovered problems
-</jira>
-</backend_context>
+# For PASS or PASS_WITH_NOTES:
+criteriaResults:
+  met: 5
+  total: 5
+  details:
+    - criterion: "Feature X implemented"
+      status: PASS
+      evidence: "src/feature.ts:42"
+    - criterion: "Tests added"
+      status: PASS
+      evidence: "src/feature.test.ts"
+verificationChecks:
+  tests: PASS
+  typecheck: PASS
+  lint: PASS
+  cicd: PASS
+reviewComment: |
+  ## Verification Review
+
+  **Status**: PASS
+  ...full review content...
+
+# For PASS_WITH_NOTES additionally:
+notes:
+  - "Consider refactoring X for clarity"
+  - "Documentation could be improved"
+
+# For NEEDS_WORK or FAIL:
+failingSubtasks:
+  - id: "MOB-177"
+    identifier: "MOB-177"
+    issues:
+      - type: "critical"
+        description: "Missing error handling"
+        file: "src/feature.ts"
+        line: 42
+      - type: "important"
+        description: "Test coverage below threshold"
+reworkIteration: 1  # Current iteration count
+feedbackComments:
+  - subtaskId: "MOB-177"
+    comment: |
+      ## Verification Feedback: NEEDS_REWORK
+      ...feedback content...
+
+# For escalation (max iterations reached):
+escalation:
+  reason: "Max rework iterations (3) exceeded"
+  history:
+    - iteration: 1
+      issues: ["Missing tests"]
+    - iteration: 2
+      issues: ["Tests still incomplete"]
+    - iteration: 3
+      issues: ["Coverage threshold not met"]
+---
+```
+
+**Valid status values**:
+| Status | When to use |
+|--------|-------------|
+| `PASS` | All criteria met, all checks pass, no issues |
+| `PASS_WITH_NOTES` | All criteria met with minor suggestions |
+| `NEEDS_WORK` | Some criteria not met or important issues found |
+| `FAIL` | Critical issues or many criteria not met |
+| `ALL_BLOCKED` | Implementation sub-tasks not all complete |
+
+**Critical requirements**:
+1. Output MUST be valid YAML or JSON
+2. Output MUST appear at the END of your response
+3. Output MUST include `status`, `timestamp`, `parentId`, and `verificationTaskId` fields
+4. Include all required fields for the specific status type
+5. The `reviewComment` field should contain the full verification review to be posted to the parent issue
+
+**Example complete output for PASS**:
+
+```yaml
+---
+status: PASS
+timestamp: "2026-01-28T16:45:00Z"
+parentId: "MOB-161"
+verificationTaskId: "MOB-186"
+criteriaResults:
+  met: 5
+  total: 5
+  details:
+    - criterion: "SDK infrastructure replaces all MCP tool operations"
+      status: PASS
+      evidence: "No MCP tool references in skills"
+    - criterion: "Local file system stores issue context"
+      status: PASS
+      evidence: "~/.mobius/issues/ directory created"
+verificationChecks:
+  tests: PASS
+  typecheck: PASS
+  lint: PASS
+  cicd: PASS
+reviewComment: |
+  ## Verification Review
+
+  **Status**: PASS
+  **Recommendation**: APPROVE
+
+  ### Acceptance Criteria
+  All 5 criteria met.
+
+  ### Checks
+  - Tests: PASS
+  - Typecheck: PASS
+  - Lint: PASS
+  - CI/CD: PASS
+
+  All criteria met. Ready to close.
+---
+```
+
+**Example complete output for NEEDS_WORK**:
+
+```yaml
+---
+status: NEEDS_WORK
+timestamp: "2026-01-28T16:45:00Z"
+parentId: "MOB-161"
+verificationTaskId: "MOB-186"
+criteriaResults:
+  met: 3
+  total: 5
+  details:
+    - criterion: "SDK infrastructure replaces MCP"
+      status: PASS
+      evidence: "src/lib/linear.ts"
+    - criterion: "Tests pass"
+      status: FAIL
+      evidence: "2 tests failing"
+verificationChecks:
+  tests: FAIL
+  typecheck: PASS
+  lint: PASS
+  cicd: FAIL
+failingSubtasks:
+  - id: "uuid-here"
+    identifier: "MOB-177"
+    issues:
+      - type: "critical"
+        description: "Tests failing in context-generator"
+        file: "src/lib/context-generator.test.ts"
+        line: 45
+reworkIteration: 1
+feedbackComments:
+  - subtaskId: "MOB-177"
+    comment: |
+      ## Verification Feedback: NEEDS_REWORK
+
+      ### Issues Found
+
+      **Critical** (must fix):
+      - Tests failing at src/lib/context-generator.test.ts:45
+
+      ### Recommended Fixes
+      Fix the async/await handling in generateContext()
+reviewComment: |
+  ## Verification Review
+
+  **Status**: NEEDS_WORK
+  **Recommendation**: REQUEST_CHANGES
+
+  ### Acceptance Criteria
+  3 of 5 criteria met.
+
+  ### Issues
+  - Tests failing in context-generator module
+
+  ### Next Steps
+  1. Fix failing tests
+  2. Re-verify after changes
+---
+```
+</structured_output>
 
 <context>
 Verification is critical for catching:
@@ -228,38 +432,47 @@ When mobius loop encounters a "Verification Gate" sub-task (detected by title pa
 </verification_subtask_context>
 
 <issue_context_phase>
-<fetch_issue>
-First, retrieve full issue details using the backend-appropriate fetch tool.
+<load_context>
+Load issue context from the `MOBIUS_CONTEXT_FILE` environment variable:
 
-Extract:
+```bash
+# Read full context
+cat "$MOBIUS_CONTEXT_FILE"
+
+# Or extract specific parts
+cat "$MOBIUS_CONTEXT_FILE" | jq '.parent'
+cat "$MOBIUS_CONTEXT_FILE" | jq '.subTasks'
+cat "$MOBIUS_CONTEXT_FILE" | jq '.verificationTask'
+```
+
+Extract from parent:
 - **Title and description**: What was supposed to be built
 - **Acceptance criteria**: Checklist of requirements (look for checkbox patterns)
 - **Labels**: Bug/Feature/Improvement for context
 - **Priority**: Urgency level
-- **Related issues**: Context from connected work
-</fetch_issue>
+</load_context>
 
-<fetch_comments>
-Get implementation context from comments using the backend-appropriate list comments tool.
+<load_subtasks>
+Read sub-tasks from the context file:
 
-Look for:
-- Implementation notes from execute-issue
-- Design decisions or constraints
-- Questions or clarifications
-- Commit references
-</fetch_comments>
+```bash
+cat "$MOBIUS_CONTEXT_FILE" | jq '.subTasks[]'
+```
 
-<fetch_subtasks>
-If issue has sub-tasks, get their status using the backend-appropriate list sub-tasks tool.
+Or from local files:
+```bash
+ls ~/.mobius/issues/{parentId}/tasks/
+cat ~/.mobius/issues/{parentId}/tasks/{taskId}.json
+```
 
 Verify:
-- All sub-tasks are in "Done" or "In Progress" (ready for review) state
-- No sub-tasks are still blocked or in Backlog
-- Each sub-task has completion comments
-</fetch_subtasks>
+- All implementation sub-tasks have status "done"
+- If any sub-task is not "done", output `status: ALL_BLOCKED` and stop
+- Each sub-task has description with acceptance criteria
+</load_subtasks>
 
 <context_summary>
-Build verification context:
+Build verification context from local files:
 
 ```markdown
 # Verification Context
@@ -269,20 +482,20 @@ Build verification context:
 **Priority**: {level}
 
 ## Description
-{Full description}
+{Full description from parent.description}
 
 ## Acceptance Criteria
-- [ ] Criterion 1
+- [ ] Criterion 1 (from parent description)
 - [ ] Criterion 2
 - [ ] Criterion 3
 
-## Sub-tasks
-| ID | Title | Status | Files Modified |
-|----|-------|--------|----------------|
-| ... | ... | ... | ... |
+## Sub-tasks (from subTasks array)
+| ID | Title | Status | Target File |
+|----|-------|--------|-------------|
+| ... | ... | done | ... |
 
-## Implementation Notes (from comments)
-{Key decisions, constraints, commit references}
+## Implementation Notes (from sub-task descriptions)
+{Key decisions, constraints, from sub-task descriptions}
 ```
 </context_summary>
 </issue_context_phase>
@@ -643,9 +856,9 @@ For each finding with file:line reference:
   3. Group all findings by sub-task ID
 ```
 
-### 2. Add Feedback Comment to Each Failing Sub-Task
+### 2. Prepare Feedback in Structured Output
 
-Use backend-appropriate add comment tool:
+Include feedback comments in the `feedbackComments` field of the structured output. The mobius loop will create these comments via SDK:
 
 ```markdown
 ## Verification Feedback: NEEDS_REWORK
@@ -668,64 +881,41 @@ After addressing these issues, the verification gate will automatically re-run w
 *Feedback from verify-issue multi-agent review*
 ```
 
-### 3. Move Sub-Task Back to "To Do"
+### 3. Include Status Transitions in Structured Output
 
-**Linear**:
-```
-mcp__plugin_linear_linear__update_issue:
-  id: {sub_task_id}
-  state: "Backlog"  # or "To Do" depending on workflow
-  labels: ["needs-rework"]
-```
+The structured output `failingSubtasks` field tells the mobius loop which sub-tasks need to be moved back to "To Do" / "Backlog" status. The loop handles the actual status transitions via SDK.
 
-**Jira**:
-```
-mcp_plugin_atlassian_jira__transition_issue:
-  issueIdOrKey: {sub_task_key}
-  transitionName: "To Do"
-```
+### 4. Document Rework Iteration
 
-### 4. Update Verification Sub-Task
-
-The verification sub-task remains blocked (its blockers moved back to non-Done).
-Add a comment documenting this rework iteration:
-
-```markdown
-## Rework Iteration {N}
-
-**Date**: {timestamp}
-**Status**: Sub-tasks returned for rework
-
-### Sub-Tasks Reopened
-- {sub_task_1}: {reason summary}
-- {sub_task_2}: {reason summary}
-
-### Awaiting
-All implementation sub-tasks to reach "Done" status before re-verification.
-```
+Include the rework iteration count in the structured output's `reworkIteration` field. The mobius loop tracks this and handles escalation after `max_rework_iterations` (default 3) cycles.
 
 ### Loop Continuation
 
-The loop continues naturally:
-1. Loop polls for ready tasks
-2. Picks up reopened sub-tasks
-3. Executes them via execute-issue
-4. When all implementation sub-tasks Done, verification sub-task unblocks
-5. Verification runs again
+The loop continues naturally after processing the structured output:
+1. Mobius loop parses structured output
+2. Reopens failing sub-tasks via SDK
+3. Posts feedback comments via SDK
+4. Loop polls for ready tasks
+5. Picks up reopened sub-tasks
+6. Executes them via execute-issue
+7. When all implementation sub-tasks Done, verification sub-task unblocks
+8. Verification runs again
 
-**Max Iterations**: After `max_rework_iterations` (default 3) rework cycles, escalate:
-- Add "escalation-needed" label
-- Comment with full history
-- Do NOT block indefinitely
+**Max Iterations**: After `max_rework_iterations` (default 3) rework cycles, include `escalation` in structured output:
+- Escalation reason and history
+- The loop will add "escalation-needed" label
+- Loop stops with escalation notification
 
 ### On PASS or PASS_WITH_NOTES
 
-1. Mark verification sub-task Done:
-   - **Linear**: `update_issue(state: "Done")`
-   - **Jira**: `transition_issue(transitionName: "Done")`
+Include in structured output:
+1. `status: PASS` or `status: PASS_WITH_NOTES`
+2. `criteriaResults` with all criteria evaluations
+3. `reviewComment` with full verification report
 
+The mobius loop will:
+1. Mark verification sub-task Done via SDK
 2. Post verification report to parent issue as comment
-
 3. Parent can now be completed (no longer blocked by verification sub-task)
 </rework_loop>
 
@@ -804,7 +994,7 @@ Generate a structured review report:
 
 <ticket_update_phase>
 <post_review_comment>
-Add the review as a comment on the issue using the backend-appropriate add comment tool:
+Include the review as the `reviewComment` field in the structured output. The mobius loop will post it to the parent issue via SDK:
 
 ```markdown
 ## Verification Review
@@ -831,16 +1021,20 @@ Add the review as a comment on the issue using the backend-appropriate add comme
 </post_review_comment>
 
 <update_issue_status>
-Based on review outcome:
+The structured output `status` field determines what the mobius loop does:
 
 **If PASS or PASS_WITH_NOTES**:
-Use the backend-appropriate update status tool to move the issue to "Done".
+The mobius loop will:
+- Move verification sub-task to "Done" via SDK
+- Post reviewComment to parent issue via SDK
 
 **If NEEDS_WORK or FAIL**:
-Leave in current state. The comment documents what needs to be addressed.
+The mobius loop will:
+- Move failing sub-tasks back to "To Do" / "Backlog" via SDK
+- Post feedback comments to failing sub-tasks via SDK
+- Verification sub-task remains "In Progress"
 
-Optionally add labels (if supported by backend):
-- Add "needs-revision" label for issues that need more work
+The structured output drives all status transitions - no direct MCP/SDK calls from this skill.
 </update_issue_status>
 </ticket_update_phase>
 
@@ -876,31 +1070,32 @@ Output a summary for the user:
 </report_format>
 
 <follow_up_issues>
-If critical or important issues are found that won't be fixed immediately, use the backend-appropriate create issue tool to create follow-up issues.
+If critical or important issues are found that won't be fixed immediately, include them in the structured output's `followUpIssues` field. The mobius loop can create these via SDK:
 
-Include:
-- Clear title describing the issue
-- Reference to the original issue in the description
-- Appropriate labels (e.g., "follow-up")
-- Related issue link
+```yaml
+followUpIssues:
+  - title: "Technical debt: Refactor X for performance"
+    description: |
+      Discovered during verification of MOB-161.
+      The current implementation works but could be optimized.
+    labels: ["follow-up", "tech-debt"]
+    relatedTo: "MOB-161"
+```
 
 Link follow-up issues in the verification comment.
 </follow_up_issues>
 
 <status_markers>
-**IMPORTANT**: Output a STATUS marker at the end of execution for mobius loop detection.
+**IMPORTANT**: The structured output `status` field at the end of execution determines the outcome.
 
-**On PASS or PASS_WITH_NOTES**:
-```
-STATUS: SUBTASK_COMPLETE
-```
+**Valid status values**:
+- `PASS` - All criteria met, verification sub-task will be marked Done
+- `PASS_WITH_NOTES` - Criteria met with suggestions, verification sub-task will be marked Done
+- `NEEDS_WORK` - Issues found, failing sub-tasks will be reopened
+- `FAIL` - Critical issues, failing sub-tasks will be reopened
+- `ALL_BLOCKED` - Not all implementation sub-tasks are Done
 
-**On FAIL or NEEDS_WORK** (after reopening sub-tasks):
-```
-STATUS: VERIFICATION_FAILED
-```
-
-The mobius loop monitors agent output for these markers to determine execution results.
+The mobius loop parses the structured YAML/JSON output to determine execution results and take appropriate actions.
 </status_markers>
 </completion_report>
 
