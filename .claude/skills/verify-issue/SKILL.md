@@ -28,6 +28,22 @@ backend: linear  # or 'jira'
 The detected backend determines which MCP tools to use throughout this skill. All subsequent tool references use the backend-specific tools from the `<backend_context>` section below.
 </backend_detection>
 
+<verification_config>
+Read verification configuration from `mobius.config.yaml`:
+
+```yaml
+execution:
+  verification:
+    coverage_threshold: 80        # Default: 80%
+    require_all_tests_pass: true  # Default: true
+    performance_check: true       # Default: true
+    security_check: true          # Default: true
+    max_rework_iterations: 3      # Default: 3
+```
+
+If not specified, use defaults. These settings control the multi-agent verification behavior.
+</verification_config>
+
 <backend_context>
 <linear>
 **MCP Tools for Linear**:
@@ -124,6 +140,154 @@ Args: PROJ-123
 9. **Report status** - Summary with pass/fail and recommendations
 </workflow>
 </quick_start>
+
+<parent_story_mode>
+When verify-issue receives an issue with sub-tasks, operate in parent story mode:
+
+1. **Collect all sub-tasks** - Fetch using backend list tool with parentId filter
+2. **Verify all sub-tasks "Done"** - Block if any not complete
+3. **Aggregate context**:
+   - Acceptance criteria from parent + each sub-task
+   - Implementation notes from all sub-task comments
+   - Files modified across all sub-tasks
+   - Coverage data from all test runs
+
+**Detection logic**: If `sub_tasks.length > 0`, use parent story mode.
+
+**Context aggregation**:
+```markdown
+# Aggregated Verification Context
+
+## Parent Issue: {ID} - {Title}
+{Parent description and acceptance criteria}
+
+## Sub-Tasks Summary
+| ID | Title | Status | Files Modified | Key Changes |
+|----|-------|--------|----------------|-------------|
+| ... | ... | Done | file1.ts, file2.ts | {summary} |
+
+## Combined Acceptance Criteria
+From parent:
+- [ ] Parent criterion 1
+- [ ] Parent criterion 2
+
+From sub-tasks:
+- [ ] {Sub-task 1 ID}: Criterion from sub-task
+- [ ] {Sub-task 2 ID}: Criterion from sub-task
+
+## All Modified Files
+{Deduplicated list of all files changed across sub-tasks}
+
+## Implementation Notes (aggregated from comments)
+{Key decisions, constraints, and context from all sub-task comments}
+```
+</parent_story_mode>
+
+<create_verification_subtask>
+Create a verification sub-task as the quality gate:
+
+**Sub-task Title**: `[{parent-id}] Final Verification Gate`
+
+**Description**:
+```markdown
+## Final Verification Gate
+
+### Quality Gates
+- [ ] **Testing** - All tests pass, coverage >= {threshold}%
+- [ ] **Code Structure** - Best practices, no code smells
+- [ ] **Performance** - No regressions identified
+- [ ] **Security** - No vulnerabilities found
+- [ ] **Business Logic** - Matches requirements
+- [ ] **User Story** - Solves the user's problem
+- [ ] **Acceptance Criteria** - All AC verified
+
+### Verification Approach
+Uses multi-agent review: Bug Detection, Code Structure, Performance/Security, Test Quality
+
+### On Failure
+Failed sub-tasks receive feedback and move back to "To Do" for rework.
+```
+
+**Linear**: Create with `blockedBy: [all implementation sub-task ids]`
+```
+mcp__plugin_linear_linear__create_issue:
+  team: {team_id}
+  title: "[{parent-id}] Final Verification Gate"
+  description: {description above}
+  parentId: {parent_issue_id}
+  blockedBy: [{sub_task_1_id}, {sub_task_2_id}, ...]
+  labels: ["verification"]
+```
+
+**Jira**: Two-phase creation process - create sub-task first, then create blocking links via utility function
+
+```
+Phase 1: Create the verification sub-task
+  mcp_plugin_atlassian_jira__create_issue
+    projectKey: {project}
+    summary: "[{parent-id}] Final Verification Gate"
+    description: {description above}
+    issueType: "Sub-task"
+    parentKey: {parent_issue_key}
+
+  → Store the returned issue key (e.g., "PROJ-456")
+
+Phase 2: Create blocking links using jira.ts utility
+  Import: import { createJiraIssueLink, createJiraIssueLinks } from 'src/lib/jira'
+
+  For single link:
+    await createJiraIssueLink({
+      linkType: "Blocks",
+      inwardIssue: implementation_subtask_key,  // The blocker
+      outwardIssue: verification_subtask_key,   // The blocked issue
+    })
+
+  For multiple links (batch):
+    await createJiraIssueLinks(
+      verification_subtask_key,
+      implementation_subtask_keys,  // Array of blocker issue keys
+      "Blocks"
+    )
+```
+
+**Error Handling for Partial Link Failures**:
+
+When creating multiple blocking links, some may succeed while others fail. Handle partial failures:
+
+```typescript
+const results = await createJiraIssueLinks(
+  verificationSubtaskKey,
+  implementationSubtaskKeys,
+  "Blocks"
+);
+
+// Check for partial failures
+const failed = results.filter(r => !r.success);
+if (failed.length > 0) {
+  // Report which links failed
+  console.error(`Failed to create ${failed.length} blocking links:`);
+  for (const failure of failed) {
+    console.error(`  - ${failure.issueKey}: ${failure.error}`);
+  }
+
+  // Add comment to verification sub-task documenting missing links
+  await addJiraComment(verificationSubtaskKey, `
+    ⚠️ **Partial Link Creation**
+
+    The following blocking relationships could not be created:
+    ${failed.map(f => `- ${f.issueKey}: ${f.error}`).join('\n')}
+
+    These sub-tasks should be manually linked or re-run the linking process.
+  `);
+}
+
+// Continue with successfully linked sub-tasks
+const succeeded = results.filter(r => r.success);
+console.log(`Successfully created ${succeeded.length} blocking links`);
+```
+
+**Why Two-Phase?**: Jira's MCP plugin doesn't support creating issue links during issue creation. Links must be added after the sub-task exists. This matches the pattern used in refine-issue for creating sub-task dependencies.
+</create_verification_subtask>
 
 <issue_context_phase>
 <fetch_issue>
@@ -361,52 +525,159 @@ Build a criteria evaluation matrix:
 </criteria_matrix>
 </criteria_comparison_phase>
 
-<critique_phase>
-<thorough_critique>
-Perform a thorough critique covering:
+<multi_agent_review>
+Spawn four specialized review agents IN PARALLEL using Task tool:
 
-**Correctness**:
-- Does the code do what it's supposed to?
-- Are there logic errors or off-by-one bugs?
-- Are edge cases handled?
+### Agent 1: Bug & Logic Detection
+```
+Task tool:
+  subagent_type: feature-dev:code-reviewer
+  prompt: |
+    Analyze implementation for bugs and logic errors.
 
-**Completeness**:
-- Are all acceptance criteria addressed?
-- Is there missing functionality?
-- Are error states handled?
+    Context:
+    - Issue: {parent_id} - {title}
+    - Acceptance Criteria: {all_criteria}
+    - Files: {all_modified_files}
 
-**Code Quality**:
-- Does it follow codebase patterns?
-- Is it readable and maintainable?
-- Are there code smells or anti-patterns?
+    Focus:
+    - Logic errors, off-by-one bugs
+    - Business logic vs requirements
+    - Edge case handling
+    - Error handling completeness
 
-**Test Quality**:
-- Is there adequate test coverage?
-- Do tests verify behavior, not just run code?
-- Are edge cases tested?
+    Output (structured):
+    CRITICAL: [list with file:line]
+    IMPORTANT: [list]
+    EDGE_CASES_MISSING: [list]
+    PASS: true/false
+```
 
-**Performance**:
-- Any obvious performance issues?
-- N+1 queries, unnecessary loops, memory leaks?
+### Agent 2: Code Structure & Best Practices
+```
+Task tool:
+  subagent_type: feature-dev:code-reviewer
+  prompt: |
+    Review code structure and codebase patterns.
 
-**Security** (if applicable):
-- Input validation?
-- Authorization checks?
-- Sensitive data handling?
-</thorough_critique>
+    Files: {all_modified_files}
+
+    Focus:
+    - Codebase convention adherence
+    - Code smells and anti-patterns
+    - Readability and maintainability
+    - Appropriate abstractions
+
+    Output (structured):
+    CODE_SMELLS: [list with file:line]
+    PATTERN_VIOLATIONS: [list]
+    ARCHITECTURE_CONCERNS: [list]
+    PASS: true/false
+```
+
+### Agent 3: Performance & Security
+```
+Task tool:
+  subagent_type: feature-dev:code-reviewer
+  prompt: |
+    Analyze performance and security.
+
+    Files: {all_modified_files}
+
+    Focus:
+    - N+1 queries, unnecessary loops
+    - Memory leaks, resource cleanup
+    - Input validation
+    - Authorization checks
+    - Sensitive data handling
+
+    Output (structured):
+    PERFORMANCE_ISSUES: [list with severity]
+    SECURITY_VULNERABILITIES: [list with severity]
+    PASS: true/false
+```
+
+### Agent 4: Test Quality & Coverage
+```
+Task tool:
+  subagent_type: feature-dev:code-reviewer
+  prompt: |
+    Evaluate test quality and coverage.
+
+    Run: just test --coverage (or equivalent)
+    Threshold: {coverage_threshold}% (default 80%)
+
+    Test Files: {test_files}
+    Source Files: {source_files}
+
+    Focus:
+    - Coverage percentage vs threshold
+    - Test meaningfulness (not coverage padding)
+    - Edge case test presence
+    - Mock appropriateness
+
+    Output (structured):
+    COVERAGE_PERCENT: number
+    THRESHOLD_MET: true/false
+    MISSING_TESTS: [list]
+    TEST_QUALITY_ISSUES: [list]
+    PASS: true/false
+```
+
+### Multi-Grader Aggregation
+
+After all agents complete, aggregate using this logic:
+
+```
+if any(agent.CRITICAL or agent.SECURITY_VULNERABILITIES with severity=high):
+    overall = FAIL
+elif any(agent.IMPORTANT) or not test_agent.THRESHOLD_MET:
+    overall = NEEDS_WORK
+elif all(agent.PASS):
+    overall = PASS
+else:
+    overall = PASS_WITH_NOTES
+```
+
+**Aggregation Report Format**:
+```markdown
+## Multi-Agent Verification Results
+
+### Agent 1: Bug & Logic Detection
+Status: {PASS/FAIL}
+{findings summary}
+
+### Agent 2: Code Structure
+Status: {PASS/FAIL}
+{findings summary}
+
+### Agent 3: Performance & Security
+Status: {PASS/FAIL}
+{findings summary}
+
+### Agent 4: Test Quality
+Status: {PASS/FAIL}
+Coverage: {X}% (threshold: {Y}%)
+{findings summary}
+
+### Overall Status: {PASS/PASS_WITH_NOTES/NEEDS_WORK/FAIL}
+```
+</multi_agent_review>
 
 <identify_improvements>
-Categorize findings:
+Categorize findings from all agents:
 
 **Critical Issues** (must fix):
 - Bugs that break functionality
 - Missing critical acceptance criteria
-- Security vulnerabilities
+- Security vulnerabilities (high severity)
+- Logic errors identified by Agent 1
 
 **Important Issues** (should fix):
 - Missing edge case handling
-- Incomplete test coverage
-- Code quality concerns
+- Incomplete test coverage (below threshold)
+- Code quality concerns from Agent 2
+- Performance issues from Agent 3
 
 **Suggestions** (nice to have):
 - Refactoring opportunities
@@ -418,7 +689,105 @@ Categorize findings:
 - Design decisions to verify
 - Edge cases not specified
 </identify_improvements>
-</critique_phase>
+
+<rework_loop>
+On FAIL or NEEDS_WORK, implement the rework loop:
+
+### 1. Map Findings to Sub-Tasks
+
+Match each finding's file to the sub-task that modified it:
+```
+For each finding with file:line reference:
+  1. Check git blame or sub-task comments for file ownership
+  2. Map finding to the responsible sub-task
+  3. Group all findings by sub-task ID
+```
+
+### 2. Add Feedback Comment to Each Failing Sub-Task
+
+Use backend-appropriate add comment tool:
+
+```markdown
+## Verification Feedback: NEEDS_REWORK
+
+### Issues Found
+
+**Critical** (must fix):
+- {issue with file:line reference}
+
+**Important** (should fix):
+- {issue description}
+
+### Recommended Fixes
+{Specific guidance from review agents}
+
+### Re-verification
+After addressing these issues, the verification gate will automatically re-run when all implementation sub-tasks are complete again.
+
+---
+*Feedback from verify-issue multi-agent review*
+```
+
+### 3. Move Sub-Task Back to "To Do"
+
+**Linear**:
+```
+mcp__plugin_linear_linear__update_issue:
+  id: {sub_task_id}
+  state: "Backlog"  # or "To Do" depending on workflow
+  labels: ["needs-rework"]
+```
+
+**Jira**:
+```
+mcp_plugin_atlassian_jira__transition_issue:
+  issueIdOrKey: {sub_task_key}
+  transitionName: "To Do"
+```
+
+### 4. Update Verification Sub-Task
+
+The verification sub-task remains blocked (its blockers moved back to non-Done).
+Add a comment documenting this rework iteration:
+
+```markdown
+## Rework Iteration {N}
+
+**Date**: {timestamp}
+**Status**: Sub-tasks returned for rework
+
+### Sub-Tasks Reopened
+- {sub_task_1}: {reason summary}
+- {sub_task_2}: {reason summary}
+
+### Awaiting
+All implementation sub-tasks to reach "Done" status before re-verification.
+```
+
+### Loop Continuation
+
+The loop continues naturally:
+1. Loop polls for ready tasks
+2. Picks up reopened sub-tasks
+3. Executes them via execute-issue
+4. When all implementation sub-tasks Done, verification sub-task unblocks
+5. Verification runs again
+
+**Max Iterations**: After `max_rework_iterations` (default 3) rework cycles, escalate:
+- Add "escalation-needed" label
+- Comment with full history
+- Do NOT block indefinitely
+
+### On PASS or PASS_WITH_NOTES
+
+1. Mark verification sub-task Done:
+   - **Linear**: `update_issue(state: "Done")`
+   - **Jira**: `transition_issue(transitionName: "Done")`
+
+2. Post verification report to parent issue as comment
+
+3. Parent can now be completed (no longer blocked by verification sub-task)
+</rework_loop>
 
 <review_report_phase>
 <report_structure>
@@ -690,18 +1059,65 @@ All criteria met. Ready to close.
 <success_criteria>
 A successful verification achieves:
 
-- [ ] Backend detected from config
+**Configuration & Setup**:
+- [ ] Backend detected from config (linear or jira)
+- [ ] Verification config loaded (coverage_threshold, max_rework_iterations, etc.)
+- [ ] Coverage threshold configurable (default 80%)
+
+**Context Gathering** (AC 1, 2):
+- [ ] verify-issue accepts parent story/task ID as input
 - [ ] Full issue context loaded (description, criteria, comments, sub-tasks)
-- [ ] All sub-tasks verified as complete
-- [ ] Recent commits and changed files analyzed
-- [ ] Code reviewed against acceptance criteria
+- [ ] Parent story mode activated when sub-tasks exist
+- [ ] All sub-tasks of the parent issue collected and analyzed
+- [ ] Aggregated context from parent AND all sub-tasks
+- [ ] All modified files identified across sub-tasks
+
+**Verification Sub-Task Creation** (AC 3, 4, 5 - parent story mode):
+- [ ] Verification sub-task created as final quality gate
+- [ ] Quality gate includes all 6 dimensions:
+  - [ ] Testing (all tests pass, coverage >= threshold)
+  - [ ] Code structure (best practices, no code smells)
+  - [ ] Performance (no regressions identified)
+  - [ ] Security (no vulnerabilities found)
+  - [ ] Business logic correctness (matches requirements)
+  - [ ] User story satisfaction (solves user's problem)
+- [ ] Acceptance criteria from parent and sub-tasks included
+- [ ] Blocking relationships established (blocked by all implementation sub-tasks)
+- [ ] Verification sub-task blocks parent issue completion
+
+**Multi-Agent Review**:
+- [ ] All 4 specialized review agents spawned in parallel (multi-agent verification)
+- [ ] Agent 1: Bug & Logic Detection completed
+- [ ] Agent 2: Code Structure & Best Practices completed
+- [ ] Agent 3: Performance & Security completed
+- [ ] Agent 4: Test Quality & Coverage completed
+- [ ] Multi-grader aggregation computed overall status
+
+**Verification Checks**:
 - [ ] Tests executed and results captured
+- [ ] Coverage threshold evaluated against configurable value
 - [ ] Typecheck and lint run
+- [ ] CI/CD status checked
+
+**Criteria Evaluation**:
 - [ ] Each acceptance criterion evaluated with evidence
-- [ ] Thorough critique with categorized findings
+- [ ] Findings categorized (Critical, Important, Suggestions, Questions)
+
+**Rework Loop** (AC 6, 7, 9 - on FAIL/NEEDS_WORK):
+- [ ] Findings mapped to responsible sub-tasks
+- [ ] Failing sub-tasks receive detailed feedback comments with file:line references
+- [ ] Failing sub-tasks moved back to "To Do" status
+- [ ] Rework iteration count tracked (up to max_rework_iterations)
+- [ ] Rework iteration documented on verification sub-task
+- [ ] Loop continues naturally (reopened tasks picked up by normal polling)
+
+**Completion** (AC 8 - on PASS/PASS_WITH_NOTES):
+- [ ] Verification sub-task marked Done when quality checks pass
+- [ ] Verification report posted to parent issue
+- [ ] Parent issue unblocked for completion (no longer blocked by verification sub-task)
+
+**Reporting**:
 - [ ] Structured review report generated
 - [ ] Review comment posted to ticket
-- [ ] Issue status updated appropriately
-- [ ] Follow-up issues created if needed
 - [ ] Clear next steps communicated to user
 </success_criteria>
