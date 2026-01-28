@@ -20,6 +20,7 @@ import {
   getBlockedTasks,
   getGraphStats,
   updateTaskStatus,
+  getVerificationTask,
   type TaskGraph,
 } from '../lib/task-graph.js';
 import { renderFullTreeOutput } from '../lib/tree-renderer.js';
@@ -213,6 +214,18 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
     // Main execution loop
     while (iteration < maxIterations) {
       iteration++;
+
+      // Re-sync task graph from backend to pick up external status changes
+      graph = await syncGraphFromBackend(graph, parentIssue, backend);
+
+      // Check if verification task is complete - exit early with success
+      const verificationTask = getVerificationTask(graph);
+      if (verificationTask?.status === 'done') {
+        allComplete = true;
+        console.log(chalk.green('\n✓ Verification task completed successfully!'));
+        console.log(chalk.green(`  ${verificationTask.identifier}: ${verificationTask.title}`));
+        break;
+      }
 
       // Get ready tasks (combine fresh ready tasks with retry queue)
       let readyTasks = getReadyTasks(graph);
@@ -464,6 +477,31 @@ async function fetchParentIssue(
   }
   console.error(chalk.red(`Backend ${backend} not supported`));
   return null;
+}
+
+/**
+ * Re-sync the task graph from the backend with fresh status data
+ *
+ * This enables the loop to see external status changes (e.g., from verify-issue agents).
+ * On fetch failure, returns the existing graph (graceful degradation).
+ */
+async function syncGraphFromBackend(
+  graph: TaskGraph,
+  parentIssue: ParentIssue,
+  backend: Backend
+): Promise<TaskGraph> {
+  try {
+    const subTasks = await fetchSubTasks(parentIssue.id, parentIssue.identifier, backend);
+    if (!subTasks || subTasks.length === 0) {
+      // No sub-tasks returned, keep existing graph
+      return graph;
+    }
+    return buildTaskGraph(parentIssue.id, parentIssue.identifier, subTasks);
+  } catch (error) {
+    // Graceful degradation: return existing graph on fetch failure
+    console.log(chalk.gray(`Graph sync failed, using cached state: ${error instanceof Error ? error.message : String(error)}`));
+    return graph;
+  }
 }
 
 /**
