@@ -740,3 +740,203 @@ A successful refinement produces:
 - [ ] User approved breakdown before creation
 - [ ] Mermaid dependency diagram posted to parent issue
 </success_criteria>
+
+<testing>
+**Manual integration testing** for verifying the refine-issue skill works end-to-end.
+
+<verification_steps>
+After running `/refine {issue-id}` and creating sub-tasks, verify the blocking relationships were created correctly.
+
+<linear_verification>
+**Linear verification steps**:
+
+1. **Open parent issue** in Linear web UI
+2. **Check sub-tasks list**: All created sub-tasks should appear as children
+3. **Open each sub-task**: Verify the "Blocked by" section shows correct dependencies
+4. **Check issue relations**: The blocking relationships should appear in the issue detail view
+
+**Expected behavior**:
+- Sub-tasks appear nested under parent issue
+- "Blocked by" relationships visible on each sub-task
+- Dependency graph in parent comment matches actual relationships
+
+**Quick verification command**:
+```bash
+# Fetch issue and check blockedBy relations exist
+claude mcp linear__get_issue --id "{subtask-id}" --includeRelations true | grep -q "blockedBy"
+```
+</linear_verification>
+
+<jira_verification>
+**Jira verification steps**:
+
+1. **Open parent issue** in Jira web UI
+2. **Check sub-tasks section**: All created sub-tasks should appear linked to parent
+3. **Open each sub-task**: Click on the sub-task to view its detail page
+4. **Check "is blocked by" links**: In the issue links section, verify:
+   - "is blocked by" relationships point to correct blocker issues
+   - Link direction is correct (blocked task shows "is blocked by", blocker shows "blocks")
+5. **Verify link type**: Links should use the "Blocks" link type (inward: "is blocked by", outward: "blocks")
+
+**Expected behavior**:
+- Sub-tasks appear in parent's sub-task section
+- Each sub-task's "Issue Links" section shows "is blocked by: PROJ-XXX"
+- Blocker issues show "blocks: PROJ-YYY" in their links section
+- Dependency graph in parent comment matches actual link relationships
+
+**Jira UI navigation**:
+```
+Issue Detail → Scroll to "Issue Links" section → Look for:
+  - "is blocked by" (this issue is blocked)
+  - "blocks" (this issue blocks others)
+```
+
+**Quick verification via API**:
+```bash
+# Fetch issue and check issuelinks field contains blocking relationships
+curl -s -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
+  "https://$JIRA_HOST/rest/api/3/issue/{subtask-key}?fields=issuelinks" \
+  | jq '.fields.issuelinks[] | select(.type.name == "Blocks")'
+```
+</jira_verification>
+</verification_steps>
+
+<troubleshooting>
+**Common errors and solutions**:
+
+<error_401>
+**401 Unauthorized**
+```
+Error: Request failed with status 401
+```
+
+**Cause**: API token is invalid, expired, or not configured.
+
+**Solution**:
+1. Verify `JIRA_API_TOKEN` environment variable is set
+2. Generate a new API token at: https://id.atlassian.com/manage-profile/security/api-tokens
+3. Ensure `JIRA_EMAIL` matches the account that created the token
+4. Check token hasn't been revoked in Atlassian account settings
+</error_401>
+
+<error_403>
+**403 Forbidden**
+```
+Error: Request failed with status 403
+```
+
+**Cause**: User lacks permission to create issue links.
+
+**Solution**:
+1. Verify user has "Link Issues" permission in the Jira project
+2. Check project permission scheme: Project Settings → Permissions → "Link Issues"
+3. Contact Jira admin to grant the permission if missing
+4. Ensure the API token's user has the same permissions as the web UI user
+</error_403>
+
+<error_404>
+**404 Not Found**
+```
+Error: Issue PROJ-XXX not found
+```
+
+**Cause**: Issue key doesn't exist or user can't access it.
+
+**Solution**:
+1. Verify the issue key is correct (check for typos)
+2. Ensure the issue hasn't been deleted
+3. Verify user has "Browse Projects" permission for the project
+4. Check if the issue is in a restricted security level
+</error_404>
+
+<error_link_type>
+**Link type "Blocks" not found**
+```
+Error: Issue link type 'Blocks' not found
+```
+
+**Cause**: The "Blocks" link type isn't configured in the Jira instance.
+
+**Solution**:
+1. Check available link types: Jira Settings → Issues → Issue Linking
+2. The "Blocks" type should have:
+   - Outward: "blocks"
+   - Inward: "is blocked by"
+3. If missing, ask Jira admin to create it:
+   - Name: "Blocks"
+   - Outward Description: "blocks"
+   - Inward Description: "is blocked by"
+4. Alternative: Use a different link type name by modifying `createJiraIssueLink()` in `src/lib/jira.ts`
+</error_link_type>
+
+<partial_link_failure>
+**Partial link creation failure**
+```
+Warning: 2 of 5 links failed to create
+```
+
+**Cause**: Some issue links couldn't be created while others succeeded.
+
+**Diagnosis**:
+1. Check the console output for specific error codes (401, 403, 404)
+2. Verify all referenced issue keys exist
+3. Check if any issues are in different projects with different permissions
+
+**Recovery**:
+1. Note which links failed from the output
+2. Create missing links manually in Jira UI:
+   - Open the blocked issue
+   - Click "Link" button
+   - Select "is blocked by"
+   - Enter the blocker issue key
+3. Or re-run just the failed links programmatically
+</partial_link_failure>
+</troubleshooting>
+
+<acceptance_criteria_reference>
+**From MOB-132 (parent issue)**:
+
+The refine-issue skill correctly implements Jira link creation when these criteria are met:
+
+- [ ] When `/refine-issue` creates sub-tasks for Jira, blocking relationships are created as proper Jira issue links (not just description text)
+  * **Verification**: After refining an issue, check Jira UI shows "is blocked by" links on sub-tasks
+
+- [ ] `extractBlockedByRelations()` correctly parses blockers from `issuelinks` field
+  * **Verification**: `bun test -- --grep 'extractBlockedByRelations'` passes with Jira link data
+
+- [ ] Task executor correctly marks tasks as blocked when Jira links exist
+  * **Verification**: Run `mobius loop` on a Jira issue with linked sub-tasks; blocked tasks show "blocked" status
+
+- [ ] Tasks execute in correct dependency order during parallel execution
+  * **Verification**: `mobius loop` does not start blocked tasks before their blockers complete
+</acceptance_criteria_reference>
+
+<end_to_end_test>
+**Complete end-to-end verification checklist**:
+
+1. **Setup**:
+   - [ ] Jira credentials configured (`JIRA_HOST`, `JIRA_EMAIL`, `JIRA_API_TOKEN`)
+   - [ ] Backend set to `jira` in `mobius.config.yaml`
+   - [ ] Test project has "Blocks" link type available
+
+2. **Run refine**:
+   - [ ] Execute `/refine {test-issue-id}` on a test issue
+   - [ ] Approve the breakdown when prompted
+   - [ ] Note the created sub-task IDs
+
+3. **Verify in Jira UI**:
+   - [ ] All sub-tasks appear under parent issue
+   - [ ] Each sub-task shows correct "is blocked by" links
+   - [ ] Blocker issues show corresponding "blocks" links
+   - [ ] Mermaid diagram in parent comment matches actual links
+
+4. **Verify via API**:
+   - [ ] `extractBlockedByRelations()` returns correct blocker IDs
+   - [ ] Task graph builds correctly with proper blocking order
+
+5. **Verify execution**:
+   - [ ] `mobius loop {parent-id}` respects dependency order
+   - [ ] Blocked tasks wait for blockers to complete
+   - [ ] Parallel execution works for unblocked tasks
+</end_to_end_test>
+</testing>
