@@ -44,6 +44,25 @@ execution:
 If not specified, use defaults. These settings control the multi-agent verification behavior.
 </verification_config>
 
+<autonomous_actions>
+**CRITICAL**: The following actions MUST be performed AUTONOMOUSLY without asking the user:
+
+1. **Reopen failing sub-tasks** - When verification finds issues (FAIL or NEEDS_WORK), IMMEDIATELY:
+   - Add feedback comments to failing sub-tasks with specific file:line references
+   - Transition failing sub-tasks back to "To Do" status
+   - Do not ask "Should I reopen these sub-tasks?" - just do it
+
+2. **Post verification report** - Always post the review comment to the ticket without asking.
+
+3. **Mark verification sub-task Done** - On PASS or PASS_WITH_NOTES, automatically mark the current verification sub-task as Done.
+
+The verify-issue skill is designed to run end-to-end autonomously. User interaction is only needed for:
+- Escalation after max_rework_iterations exceeded
+- Ambiguous requirements that need clarification (DISCUSS status)
+
+**Note**: The verification sub-task is created by refine-issue during issue breakdown. When mobius executes a "Verification Gate" sub-task, it routes to this skill instead of execute-issue.
+</autonomous_actions>
+
 <backend_context>
 <linear>
 **MCP Tools for Linear**:
@@ -130,29 +149,34 @@ Args: PROJ-123
 
 <workflow>
 1. **Detect backend** - Read backend from config (linear or jira)
-2. **Fetch issue context** - Get title, description, acceptance criteria, comments, sub-tasks
-3. **Analyze implementation** - Review recent commits, changed files, code
-4. **Run verification checks** - Tests, typecheck, lint
-5. **Compare against criteria** - Check each acceptance criterion
-6. **Critique implementation** - Identify issues, improvements, concerns
-7. **Generate review report** - Structured analysis with findings
-8. **Post to ticket** - Add review as comment on the issue
-9. **Report status** - Summary with pass/fail and recommendations
+2. **Identify parent issue** - Determine the parent issue from the verification sub-task
+3. **Fetch issue context** - Get title, description, acceptance criteria, comments, sub-tasks from parent
+4. **Aggregate implementation context** - Collect files modified, comments, and status from all implementation sub-tasks
+5. **Analyze implementation** - Review recent commits, changed files, code
+6. **Run verification checks** - Tests, typecheck, lint
+7. **Compare against criteria** - Check each acceptance criterion
+8. **Multi-agent critique** - Spawn 4 parallel review agents for comprehensive analysis
+9. **Generate review report** - Structured analysis with findings
+10. **Handle outcome** - On FAIL/NEEDS_WORK: reopen failing sub-tasks with feedback. On PASS: mark verification sub-task Done
+11. **Post to ticket** - Add review as comment on the parent issue
+12. **Report status** - Output STATUS marker for mobius loop
 </workflow>
 </quick_start>
 
 <parent_story_mode>
-When verify-issue receives an issue with sub-tasks, operate in parent story mode:
+When verify-issue is called on a verification sub-task (via mobius loop), operate in parent story mode:
 
-1. **Collect all sub-tasks** - Fetch using backend list tool with parentId filter
-2. **Verify all sub-tasks "Done"** - Block if any not complete
-3. **Aggregate context**:
-   - Acceptance criteria from parent + each sub-task
+1. **Identify parent issue** - Get the parent issue ID from the verification sub-task
+2. **Collect all sibling sub-tasks** - Fetch using backend list tool with parentId filter
+3. **Separate implementation vs verification sub-tasks** - Filter out the current verification sub-task from the list
+4. **Verify all implementation sub-tasks "Done"** - If any implementation sub-task is not complete, output STATUS: ALL_BLOCKED and exit
+5. **Aggregate context**:
+   - Acceptance criteria from parent + each implementation sub-task
    - Implementation notes from all sub-task comments
    - Files modified across all sub-tasks
    - Coverage data from all test runs
 
-**Detection logic**: If `sub_tasks.length > 0`, use parent story mode.
+**Note**: The verification sub-task is created by refine-issue during issue breakdown. This skill focuses on EXECUTING verification, not creating the sub-task.
 
 **Context aggregation**:
 ```markdown
@@ -183,111 +207,25 @@ From sub-tasks:
 ```
 </parent_story_mode>
 
-<create_verification_subtask>
-Create a verification sub-task as the quality gate:
+<verification_subtask_context>
+**Note**: The verification sub-task is created by the **refine-issue** skill during issue breakdown, NOT by verify-issue.
 
-**Sub-task Title**: `[{parent-id}] Final Verification Gate`
+When mobius loop encounters a "Verification Gate" sub-task (detected by title pattern), it routes execution to `/verify-issue` instead of `/execute-issue`.
 
-**Description**:
-```markdown
-## Final Verification Gate
+**Expected sub-task format** (created by refine-issue):
+- **Title**: `[{parent-id}] Verification Gate` (MUST contain "Verification Gate")
+- **Blocked by**: All implementation sub-tasks
+- **Labels**: `["verification"]` (optional)
 
-### Quality Gates
-- [ ] **Testing** - All tests pass, coverage >= {threshold}%
-- [ ] **Code Structure** - Best practices, no code smells
-- [ ] **Performance** - No regressions identified
-- [ ] **Security** - No vulnerabilities found
-- [ ] **Business Logic** - Matches requirements
-- [ ] **User Story** - Solves the user's problem
-- [ ] **Acceptance Criteria** - All AC verified
-
-### Verification Approach
-Uses multi-agent review: Bug Detection, Code Structure, Performance/Security, Test Quality
-
-### On Failure
-Failed sub-tasks receive feedback and move back to "To Do" for rework.
-```
-
-**Linear**: Create with `blockedBy: [all implementation sub-task ids]`
-```
-mcp__plugin_linear_linear__create_issue:
-  team: {team_id}
-  title: "[{parent-id}] Final Verification Gate"
-  description: {description above}
-  parentId: {parent_issue_id}
-  blockedBy: [{sub_task_1_id}, {sub_task_2_id}, ...]
-  labels: ["verification"]
-```
-
-**Jira**: Two-phase creation process - create sub-task first, then create blocking links via utility function
-
-```
-Phase 1: Create the verification sub-task
-  mcp_plugin_atlassian_jira__create_issue
-    projectKey: {project}
-    summary: "[{parent-id}] Final Verification Gate"
-    description: {description above}
-    issueType: "Sub-task"
-    parentKey: {parent_issue_key}
-
-  → Store the returned issue key (e.g., "PROJ-456")
-
-Phase 2: Create blocking links using jira.ts utility
-  Import: import { createJiraIssueLink, createJiraIssueLinks } from 'src/lib/jira'
-
-  For single link:
-    await createJiraIssueLink({
-      linkType: "Blocks",
-      inwardIssue: implementation_subtask_key,  // The blocker
-      outwardIssue: verification_subtask_key,   // The blocked issue
-    })
-
-  For multiple links (batch):
-    await createJiraIssueLinks(
-      verification_subtask_key,
-      implementation_subtask_keys,  // Array of blocker issue keys
-      "Blocks"
-    )
-```
-
-**Error Handling for Partial Link Failures**:
-
-When creating multiple blocking links, some may succeed while others fail. Handle partial failures:
-
-```typescript
-const results = await createJiraIssueLinks(
-  verificationSubtaskKey,
-  implementationSubtaskKeys,
-  "Blocks"
-);
-
-// Check for partial failures
-const failed = results.filter(r => !r.success);
-if (failed.length > 0) {
-  // Report which links failed
-  console.error(`Failed to create ${failed.length} blocking links:`);
-  for (const failure of failed) {
-    console.error(`  - ${failure.issueKey}: ${failure.error}`);
-  }
-
-  // Add comment to verification sub-task documenting missing links
-  await addJiraComment(verificationSubtaskKey, `
-    ⚠️ **Partial Link Creation**
-
-    The following blocking relationships could not be created:
-    ${failed.map(f => `- ${f.issueKey}: ${f.error}`).join('\n')}
-
-    These sub-tasks should be manually linked or re-run the linking process.
-  `);
-}
-
-// Continue with successfully linked sub-tasks
-const succeeded = results.filter(r => r.success);
-console.log(`Successfully created ${succeeded.length} blocking links`);
-```
-
-**Why Two-Phase?**: Jira's MCP plugin doesn't support creating issue links during issue creation. Links must be added after the sub-task exists. This matches the pattern used in refine-issue for creating sub-task dependencies.
-</create_verification_subtask>
+**Execution flow**:
+1. refine-issue creates: implementation sub-tasks + Verification Gate sub-task
+2. mobius loop executes implementation sub-tasks via `/execute-issue`
+3. When all implementation sub-tasks are Done, Verification Gate becomes unblocked
+4. mobius detects "Verification Gate" in title → routes to `/verify-issue`
+5. verify-issue runs multi-agent review on the parent issue
+6. On FAIL: reopens failing implementation sub-tasks → mobius loop continues
+7. On PASS: marks Verification Gate Done → parent issue can be completed
+</verification_subtask_context>
 
 <issue_context_phase>
 <fetch_issue>
@@ -691,6 +629,8 @@ Categorize findings from all agents:
 </identify_improvements>
 
 <rework_loop>
+**AUTONOMOUS ACTION**: On FAIL or NEEDS_WORK, IMMEDIATELY implement the rework loop without asking the user. Reopening failing sub-tasks with feedback is a required part of the verification workflow.
+
 On FAIL or NEEDS_WORK, implement the rework loop:
 
 ### 1. Map Findings to Sub-Tasks
@@ -946,6 +886,22 @@ Include:
 
 Link follow-up issues in the verification comment.
 </follow_up_issues>
+
+<status_markers>
+**IMPORTANT**: Output a STATUS marker at the end of execution for mobius loop detection.
+
+**On PASS or PASS_WITH_NOTES**:
+```
+STATUS: SUBTASK_COMPLETE
+```
+
+**On FAIL or NEEDS_WORK** (after reopening sub-tasks):
+```
+STATUS: VERIFICATION_FAILED
+```
+
+The mobius loop monitors agent output for these markers to determine execution results.
+</status_markers>
 </completion_report>
 
 <examples>
@@ -1065,25 +1021,20 @@ A successful verification achieves:
 - [ ] Coverage threshold configurable (default 80%)
 
 **Context Gathering** (AC 1, 2):
-- [ ] verify-issue accepts parent story/task ID as input
-- [ ] Full issue context loaded (description, criteria, comments, sub-tasks)
-- [ ] Parent story mode activated when sub-tasks exist
-- [ ] All sub-tasks of the parent issue collected and analyzed
-- [ ] Aggregated context from parent AND all sub-tasks
-- [ ] All modified files identified across sub-tasks
+- [ ] verify-issue receives verification sub-task ID as input (from mobius loop)
+- [ ] Parent issue identified from the verification sub-task
+- [ ] Full parent issue context loaded (description, criteria, comments)
+- [ ] All sibling implementation sub-tasks collected and analyzed
+- [ ] Aggregated context from parent AND all implementation sub-tasks
+- [ ] All modified files identified across implementation sub-tasks
 
-**Verification Sub-Task Creation** (AC 3, 4, 5 - parent story mode):
-- [ ] Verification sub-task created as final quality gate
-- [ ] Quality gate includes all 6 dimensions:
-  - [ ] Testing (all tests pass, coverage >= threshold)
-  - [ ] Code structure (best practices, no code smells)
-  - [ ] Performance (no regressions identified)
-  - [ ] Security (no vulnerabilities found)
-  - [ ] Business logic correctness (matches requirements)
-  - [ ] User story satisfaction (solves user's problem)
-- [ ] Acceptance criteria from parent and sub-tasks included
-- [ ] Blocking relationships established (blocked by all implementation sub-tasks)
-- [ ] Verification sub-task blocks parent issue completion
+**Quality Gate Dimensions** (evaluated during review):
+- [ ] Testing (all tests pass, coverage >= threshold)
+- [ ] Code structure (best practices, no code smells)
+- [ ] Performance (no regressions identified)
+- [ ] Security (no vulnerabilities found)
+- [ ] Business logic correctness (matches requirements)
+- [ ] User story satisfaction (solves user's problem)
 
 **Multi-Agent Review**:
 - [ ] All 4 specialized review agents spawned in parallel (multi-agent verification)
