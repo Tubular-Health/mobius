@@ -14,6 +14,7 @@ import {
   getBlockedTasks,
   getGraphStats,
   updateTaskStatus,
+  getVerificationTask,
 } from '../lib/task-graph.js';
 import { renderFullTreeOutput } from '../lib/tree-renderer.js';
 import { renderMermaidWithTitle } from '../lib/mermaid-renderer.js';
@@ -610,5 +611,196 @@ describe('loop integration: operation sequence', () => {
     // 6. Update graph after completion
     const updatedGraph = updateTaskStatus(graph, readyTasks[0].id, 'done');
     expect(getGraphStats(updatedGraph).done).toBeGreaterThan(getGraphStats(graph).done);
+  });
+});
+
+// ============================================================================
+// Verification Exit Integration Tests
+// ============================================================================
+
+describe('loop integration: verification exit', () => {
+  /**
+   * Mock sub-tasks with a verification gate task at the end
+   *
+   * Structure:
+   * MOB-701 (Done) → MOB-702 (blocked by 701)
+   * MOB-702 (Done) → MOB-703 Verification Gate (blocked by 701, 702)
+   */
+  const tasksWithVerificationGate: LinearIssue[] = [
+    createMockLinearIssue('id-701', 'MOB-701', 'Implement feature', 'Done'),
+    createMockLinearIssue(
+      'id-702',
+      'MOB-702',
+      'Add tests',
+      'Done',
+      [{ id: 'id-701', identifier: 'MOB-701' }],
+      [{ id: 'id-703', identifier: 'MOB-703' }]
+    ),
+    createMockLinearIssue(
+      'id-703',
+      'MOB-703',
+      'Verification Gate',
+      'Backlog',
+      [
+        { id: 'id-701', identifier: 'MOB-701' },
+        { id: 'id-702', identifier: 'MOB-702' },
+      ]
+    ),
+  ];
+
+  it('exits loop when verification task completes', () => {
+    // Build graph with verification gate initially ready (blockers done)
+    let graph = buildTaskGraph('parent-id', 'MOB-700', tasksWithVerificationGate);
+
+    // Initially: verification task is ready (blockers MOB-701, MOB-702 are done)
+    const verificationTask = getVerificationTask(graph);
+    expect(verificationTask).toBeDefined();
+    expect(verificationTask?.identifier).toBe('MOB-703');
+    expect(verificationTask?.status).toBe('ready');
+
+    // Simulate verification task completion (mark as done)
+    graph = updateTaskStatus(graph, 'id-703', 'done');
+
+    // After completion: verification task status is done
+    const updatedVerificationTask = getVerificationTask(graph);
+    expect(updatedVerificationTask?.status).toBe('done');
+
+    // Loop exit condition: verification task status === 'done'
+    // This simulates what the loop does at line 223:
+    // if (verificationTask?.status === 'done') { allComplete = true; break; }
+    const shouldExitLoop = updatedVerificationTask?.status === 'done';
+    expect(shouldExitLoop).toBe(true);
+
+    // Verify the loop would print the success message format
+    // This validates the early exit behavior
+    const stats = getGraphStats(graph);
+    expect(stats.done).toBe(3); // All tasks done
+  });
+
+  it('continues when verification not done', () => {
+    // Build graph with verification gate initially blocked
+    const tasksWithBlockedVerification: LinearIssue[] = [
+      createMockLinearIssue('id-801', 'MOB-801', 'Implement feature', 'Done'),
+      createMockLinearIssue(
+        'id-802',
+        'MOB-802',
+        'Add tests',
+        'In Progress', // Still in progress
+        [{ id: 'id-801', identifier: 'MOB-801' }],
+        [{ id: 'id-803', identifier: 'MOB-803' }]
+      ),
+      createMockLinearIssue(
+        'id-803',
+        'MOB-803',
+        'Verification Gate',
+        'Backlog',
+        [
+          { id: 'id-801', identifier: 'MOB-801' },
+          { id: 'id-802', identifier: 'MOB-802' },
+        ]
+      ),
+    ];
+
+    const graph = buildTaskGraph('parent-id', 'MOB-800', tasksWithBlockedVerification);
+
+    // Verification task exists but is blocked (MOB-802 is in progress)
+    const verificationTask = getVerificationTask(graph);
+    expect(verificationTask).toBeDefined();
+    expect(verificationTask?.identifier).toBe('MOB-803');
+    expect(verificationTask?.status).toBe('blocked');
+
+    // Loop should NOT exit when verification task is blocked
+    // This simulates the check at line 223:
+    // if (verificationTask?.status === 'done') - this would be false
+    const shouldExitLoop = verificationTask?.status === 'done';
+    expect(shouldExitLoop).toBe(false);
+
+    // Loop should continue to process ready tasks
+    const readyTasks = getReadyTasks(graph);
+    // MOB-802 is in_progress and returned as ready for resume capability
+    expect(readyTasks.length).toBe(1);
+    expect(readyTasks[0].identifier).toBe('MOB-802');
+  });
+
+  it('continues when verification task is in progress', () => {
+    const tasksWithInProgressVerification: LinearIssue[] = [
+      createMockLinearIssue('id-901', 'MOB-901', 'Implement feature', 'Done'),
+      createMockLinearIssue('id-902', 'MOB-902', 'Add tests', 'Done', [
+        { id: 'id-901', identifier: 'MOB-901' },
+      ]),
+      createMockLinearIssue(
+        'id-903',
+        'MOB-903',
+        'Verification Gate',
+        'In Progress', // Currently running
+        [
+          { id: 'id-901', identifier: 'MOB-901' },
+          { id: 'id-902', identifier: 'MOB-902' },
+        ]
+      ),
+    ];
+
+    const graph = buildTaskGraph('parent-id', 'MOB-900', tasksWithInProgressVerification);
+
+    // Verification task is in progress
+    const verificationTask = getVerificationTask(graph);
+    expect(verificationTask).toBeDefined();
+    expect(verificationTask?.status).toBe('in_progress');
+
+    // Loop should NOT exit - verification not complete
+    const shouldExitLoop = verificationTask?.status === 'done';
+    expect(shouldExitLoop).toBe(false);
+
+    // Ready tasks should include the in_progress verification task (for resume)
+    const readyTasks = getReadyTasks(graph);
+    expect(readyTasks.some(t => t.identifier === 'MOB-903')).toBe(true);
+  });
+
+  it('handles no verification task gracefully', () => {
+    // Tasks without a verification gate
+    const tasksWithoutVerification: LinearIssue[] = [
+      createMockLinearIssue('id-1001', 'MOB-1001', 'Task 1', 'Done'),
+      createMockLinearIssue('id-1002', 'MOB-1002', 'Task 2', 'Done'),
+      createMockLinearIssue('id-1003', 'MOB-1003', 'Task 3', 'Done'),
+    ];
+
+    const graph = buildTaskGraph('parent-id', 'MOB-1000', tasksWithoutVerification);
+
+    // No verification task exists
+    const verificationTask = getVerificationTask(graph);
+    expect(verificationTask).toBeUndefined();
+
+    // Loop should fall back to standard completion check (stats.done === stats.total)
+    // This is the fallback at line 244: if (stats.done === stats.total) { allComplete = true; }
+    const stats = getGraphStats(graph);
+    const shouldExitViaFallback = stats.done === stats.total;
+    expect(shouldExitViaFallback).toBe(true);
+  });
+
+  it('stops on verification done even with incomplete non-verification tasks', () => {
+    // Edge case: What if verification completes but other tasks remain?
+    // This tests the early exit behavior - verification done takes precedence
+    const tasksWithPartialCompletion: LinearIssue[] = [
+      createMockLinearIssue('id-1101', 'MOB-1101', 'Core feature', 'Done'),
+      createMockLinearIssue('id-1102', 'MOB-1102', 'Verification Gate', 'Done'), // Verification done
+      createMockLinearIssue('id-1103', 'MOB-1103', 'Nice-to-have feature', 'Backlog'), // Still pending
+    ];
+
+    const graph = buildTaskGraph('parent-id', 'MOB-1100', tasksWithPartialCompletion);
+
+    // Verification task is done
+    const verificationTask = getVerificationTask(graph);
+    expect(verificationTask?.status).toBe('done');
+
+    // Loop should exit early due to verification done
+    // This takes precedence over the stats.done === stats.total check
+    const shouldExitLoop = verificationTask?.status === 'done';
+    expect(shouldExitLoop).toBe(true);
+
+    // Stats show not all tasks are done, but loop would still exit
+    const stats = getGraphStats(graph);
+    expect(stats.done).toBe(2);
+    expect(stats.total).toBe(3);
+    expect(stats.done < stats.total).toBe(true); // Not all complete
   });
 });
