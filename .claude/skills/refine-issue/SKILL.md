@@ -145,9 +145,10 @@ Args: MOB-123
 3. **Deep exploration** - Use Explore agent to thoroughly analyze related code, patterns, and dependencies
 4. **Identify work units** - Break down into single-file-focused tasks
 5. **Determine blocking order** - Analyze functional dependencies between tasks
-6. **Present breakdown** - Show complete plan with all sub-tasks and their relationships
-7. **Gather feedback** - Use AskUserQuestion for refinement
-8. **Batch create** - Create all approved sub-tasks with blocking relationships
+6. **Include verification gate** - Add a final "Verification Gate" sub-task blocked by ALL implementation sub-tasks
+7. **Present breakdown** - Show complete plan with all sub-tasks including verification gate
+8. **Gather feedback** - Use AskUserQuestion for refinement
+9. **Batch create** - Create all approved sub-tasks with blocking relationships (including verification gate)
 </workflow>
 </quick_start>
 
@@ -281,12 +282,68 @@ Determine blocking order based on functional requirements:
 2. **Dependencies flow down**: If A imports from B, B must be done first
 3. **Tests with implementation**: Pair test files with their source files in same task
 4. **UI last**: Components after their dependencies (services, hooks, types)
+5. **Verification last**: The verification gate is ALWAYS the final sub-task
 
 **Parallelization opportunities**:
 - Independent services can run in parallel
 - Unrelated UI components can run in parallel
 - Tests for different features can run in parallel
 </ordering_principles>
+
+<verification_gate>
+**ALWAYS include a Verification Gate as the final sub-task.** This is required for every refined issue.
+
+The verification gate:
+- Has title: `[{parent-id}] Verification Gate` (MUST contain "Verification Gate" for mobius routing)
+- Is blocked by ALL implementation sub-tasks
+- When executed by mobius, routes to `/verify-issue` instead of `/execute-issue`
+- Validates all acceptance criteria are met before the parent can be completed
+
+**Template**:
+```markdown
+## Sub-task: [Final] - Verification Gate
+
+**Target**: Validate implementation against acceptance criteria
+**Change type**: Verification (no code changes)
+
+### Action
+This task triggers the verify-issue skill to validate all implementation sub-tasks meet the parent issue's acceptance criteria.
+
+### Done
+- [ ] All tests pass
+- [ ] All acceptance criteria verified
+- [ ] No critical issues found by code review agents
+
+**Blocked by**: [ALL implementation sub-task IDs]
+**Enables**: Parent issue completion
+```
+
+**Linear creation**:
+```
+mcp__plugin_linear_linear__create_issue
+  team: {team_id}
+  title: "[{parent-id}] Verification Gate"
+  description: "Runs verify-issue to validate implementation meets acceptance criteria."
+  parentId: {parent_issue_id}
+  blockedBy: [{all implementation sub-task IDs}]
+  labels: ["verification"]
+  state: "Backlog"
+```
+
+**Jira creation** (two-phase):
+```
+Phase 1: Create sub-task
+mcp_plugin_atlassian_jira__create_issue
+  project: {project_key}
+  summary: "[{parent-id}] Verification Gate"
+  description: "Runs verify-issue to validate implementation meets acceptance criteria."
+  parent: {parent_issue_key}
+  issuetype: "Sub-task"
+  labels: ["verification"]
+
+Phase 2: Create blocking links (same pattern as implementation sub-tasks)
+```
+</verification_gate>
 
 <sizing_guidelines>
 A well-sized sub-task:
@@ -692,11 +749,44 @@ echo "PASS"
 
 Files: Header.tsx, Sidebar.tsx, Card.tsx (modify)
 **Blocked by**: 3
+
+---
+
+## Sub-task: 8 - Verification Gate
+
+**Target**: Validate implementation against acceptance criteria
+**Change type**: Verification (no code changes)
+
+### Action
+This task triggers the verify-issue skill to validate all implementation sub-tasks meet the parent issue's acceptance criteria.
+
+### Done
+- [ ] All tests pass
+- [ ] All acceptance criteria verified
+- [ ] No critical issues found by code review agents
+
+**Blocked by**: 1, 2, 3, 4, 5, 6, 7
+**Enables**: Parent issue completion
+```
+
+**Dependency graph**:
+```
+[1] Types ─► [2] ThemeProvider ─► [3] useTheme hook
+                                      │
+                   ┌──────────────────┼──────────────────┐
+                   ▼                  ▼                  ▼
+                 [4]                [5]                [6]
+             ThemeToggle         Header.tsx        Sidebar.tsx
+                   │                  │                  │
+                   └──────────────────┼──────────────────┘
+                                      ▼
+                              [8] Verification Gate
 ```
 
 **Parallel groups**:
 - [1] → [2] → [3] (sequential foundation)
 - [4], [5], [6], [7] can all run in parallel after [3]
+- [8] runs after ALL other tasks complete
 </example_breakdown>
 </examples>
 
@@ -737,6 +827,8 @@ A successful refinement produces:
 - [ ] Parallel opportunities are maximized
 - [ ] Sub-tasks created as children of parent issue
 - [ ] Ready tasks (no blockers) are clearly identified
+- [ ] **Verification Gate sub-task created as final task** (title contains "Verification Gate")
+- [ ] Verification Gate blocked by ALL implementation sub-tasks
 - [ ] User approved breakdown before creation
 - [ ] Mermaid dependency diagram posted to parent issue
 </success_criteria>

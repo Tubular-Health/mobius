@@ -28,6 +28,41 @@ backend: linear  # or 'jira'
 The detected backend determines which MCP tools to use throughout this skill. All subsequent tool references use the backend-specific tools from the `<backend_context>` section below.
 </backend_detection>
 
+<verification_config>
+Read verification configuration from `mobius.config.yaml`:
+
+```yaml
+execution:
+  verification:
+    coverage_threshold: 80        # Default: 80%
+    require_all_tests_pass: true  # Default: true
+    performance_check: true       # Default: true
+    security_check: true          # Default: true
+    max_rework_iterations: 3      # Default: 3
+```
+
+If not specified, use defaults. These settings control the multi-agent verification behavior.
+</verification_config>
+
+<autonomous_actions>
+**CRITICAL**: The following actions MUST be performed AUTONOMOUSLY without asking the user:
+
+1. **Reopen failing sub-tasks** - When verification finds issues (FAIL or NEEDS_WORK), IMMEDIATELY:
+   - Add feedback comments to failing sub-tasks with specific file:line references
+   - Transition failing sub-tasks back to "To Do" status
+   - Do not ask "Should I reopen these sub-tasks?" - just do it
+
+2. **Post verification report** - Always post the review comment to the ticket without asking.
+
+3. **Mark verification sub-task Done** - On PASS or PASS_WITH_NOTES, automatically mark the current verification sub-task as Done.
+
+The verify-issue skill is designed to run end-to-end autonomously. User interaction is only needed for:
+- Escalation after max_rework_iterations exceeded
+- Ambiguous requirements that need clarification (DISCUSS status)
+
+**Note**: The verification sub-task is created by refine-issue during issue breakdown. When mobius executes a "Verification Gate" sub-task, it routes to this skill instead of execute-issue.
+</autonomous_actions>
+
 <backend_context>
 <linear>
 **MCP Tools for Linear**:
@@ -114,16 +149,83 @@ Args: PROJ-123
 
 <workflow>
 1. **Detect backend** - Read backend from config (linear or jira)
-2. **Fetch issue context** - Get title, description, acceptance criteria, comments, sub-tasks
-3. **Analyze implementation** - Review recent commits, changed files, code
-4. **Run verification checks** - Tests, typecheck, lint
-5. **Compare against criteria** - Check each acceptance criterion
-6. **Critique implementation** - Identify issues, improvements, concerns
-7. **Generate review report** - Structured analysis with findings
-8. **Post to ticket** - Add review as comment on the issue
-9. **Report status** - Summary with pass/fail and recommendations
+2. **Identify parent issue** - Determine the parent issue from the verification sub-task
+3. **Fetch issue context** - Get title, description, acceptance criteria, comments, sub-tasks from parent
+4. **Aggregate implementation context** - Collect files modified, comments, and status from all implementation sub-tasks
+5. **Analyze implementation** - Review recent commits, changed files, code
+6. **Run verification checks** - Tests, typecheck, lint
+7. **Compare against criteria** - Check each acceptance criterion
+8. **Multi-agent critique** - Spawn 4 parallel review agents for comprehensive analysis
+9. **Generate review report** - Structured analysis with findings
+10. **Handle outcome** - On FAIL/NEEDS_WORK: reopen failing sub-tasks with feedback. On PASS: mark verification sub-task Done
+11. **Post to ticket** - Add review as comment on the parent issue
+12. **Report status** - Output STATUS marker for mobius loop
 </workflow>
 </quick_start>
+
+<parent_story_mode>
+When verify-issue is called on a verification sub-task (via mobius loop), operate in parent story mode:
+
+1. **Identify parent issue** - Get the parent issue ID from the verification sub-task
+2. **Collect all sibling sub-tasks** - Fetch using backend list tool with parentId filter
+3. **Separate implementation vs verification sub-tasks** - Filter out the current verification sub-task from the list
+4. **Verify all implementation sub-tasks "Done"** - If any implementation sub-task is not complete, output STATUS: ALL_BLOCKED and exit
+5. **Aggregate context**:
+   - Acceptance criteria from parent + each implementation sub-task
+   - Implementation notes from all sub-task comments
+   - Files modified across all sub-tasks
+   - Coverage data from all test runs
+
+**Note**: The verification sub-task is created by refine-issue during issue breakdown. This skill focuses on EXECUTING verification, not creating the sub-task.
+
+**Context aggregation**:
+```markdown
+# Aggregated Verification Context
+
+## Parent Issue: {ID} - {Title}
+{Parent description and acceptance criteria}
+
+## Sub-Tasks Summary
+| ID | Title | Status | Files Modified | Key Changes |
+|----|-------|--------|----------------|-------------|
+| ... | ... | Done | file1.ts, file2.ts | {summary} |
+
+## Combined Acceptance Criteria
+From parent:
+- [ ] Parent criterion 1
+- [ ] Parent criterion 2
+
+From sub-tasks:
+- [ ] {Sub-task 1 ID}: Criterion from sub-task
+- [ ] {Sub-task 2 ID}: Criterion from sub-task
+
+## All Modified Files
+{Deduplicated list of all files changed across sub-tasks}
+
+## Implementation Notes (aggregated from comments)
+{Key decisions, constraints, and context from all sub-task comments}
+```
+</parent_story_mode>
+
+<verification_subtask_context>
+**Note**: The verification sub-task is created by the **refine-issue** skill during issue breakdown, NOT by verify-issue.
+
+When mobius loop encounters a "Verification Gate" sub-task (detected by title pattern), it routes execution to `/verify-issue` instead of `/execute-issue`.
+
+**Expected sub-task format** (created by refine-issue):
+- **Title**: `[{parent-id}] Verification Gate` (MUST contain "Verification Gate")
+- **Blocked by**: All implementation sub-tasks
+- **Labels**: `["verification"]` (optional)
+
+**Execution flow**:
+1. refine-issue creates: implementation sub-tasks + Verification Gate sub-task
+2. mobius loop executes implementation sub-tasks via `/execute-issue`
+3. When all implementation sub-tasks are Done, Verification Gate becomes unblocked
+4. mobius detects "Verification Gate" in title → routes to `/verify-issue`
+5. verify-issue runs multi-agent review on the parent issue
+6. On FAIL: reopens failing implementation sub-tasks → mobius loop continues
+7. On PASS: marks Verification Gate Done → parent issue can be completed
+</verification_subtask_context>
 
 <issue_context_phase>
 <fetch_issue>
@@ -361,52 +463,159 @@ Build a criteria evaluation matrix:
 </criteria_matrix>
 </criteria_comparison_phase>
 
-<critique_phase>
-<thorough_critique>
-Perform a thorough critique covering:
+<multi_agent_review>
+Spawn four specialized review agents IN PARALLEL using Task tool:
 
-**Correctness**:
-- Does the code do what it's supposed to?
-- Are there logic errors or off-by-one bugs?
-- Are edge cases handled?
+### Agent 1: Bug & Logic Detection
+```
+Task tool:
+  subagent_type: feature-dev:code-reviewer
+  prompt: |
+    Analyze implementation for bugs and logic errors.
 
-**Completeness**:
-- Are all acceptance criteria addressed?
-- Is there missing functionality?
-- Are error states handled?
+    Context:
+    - Issue: {parent_id} - {title}
+    - Acceptance Criteria: {all_criteria}
+    - Files: {all_modified_files}
 
-**Code Quality**:
-- Does it follow codebase patterns?
-- Is it readable and maintainable?
-- Are there code smells or anti-patterns?
+    Focus:
+    - Logic errors, off-by-one bugs
+    - Business logic vs requirements
+    - Edge case handling
+    - Error handling completeness
 
-**Test Quality**:
-- Is there adequate test coverage?
-- Do tests verify behavior, not just run code?
-- Are edge cases tested?
+    Output (structured):
+    CRITICAL: [list with file:line]
+    IMPORTANT: [list]
+    EDGE_CASES_MISSING: [list]
+    PASS: true/false
+```
 
-**Performance**:
-- Any obvious performance issues?
-- N+1 queries, unnecessary loops, memory leaks?
+### Agent 2: Code Structure & Best Practices
+```
+Task tool:
+  subagent_type: feature-dev:code-reviewer
+  prompt: |
+    Review code structure and codebase patterns.
 
-**Security** (if applicable):
-- Input validation?
-- Authorization checks?
-- Sensitive data handling?
-</thorough_critique>
+    Files: {all_modified_files}
+
+    Focus:
+    - Codebase convention adherence
+    - Code smells and anti-patterns
+    - Readability and maintainability
+    - Appropriate abstractions
+
+    Output (structured):
+    CODE_SMELLS: [list with file:line]
+    PATTERN_VIOLATIONS: [list]
+    ARCHITECTURE_CONCERNS: [list]
+    PASS: true/false
+```
+
+### Agent 3: Performance & Security
+```
+Task tool:
+  subagent_type: feature-dev:code-reviewer
+  prompt: |
+    Analyze performance and security.
+
+    Files: {all_modified_files}
+
+    Focus:
+    - N+1 queries, unnecessary loops
+    - Memory leaks, resource cleanup
+    - Input validation
+    - Authorization checks
+    - Sensitive data handling
+
+    Output (structured):
+    PERFORMANCE_ISSUES: [list with severity]
+    SECURITY_VULNERABILITIES: [list with severity]
+    PASS: true/false
+```
+
+### Agent 4: Test Quality & Coverage
+```
+Task tool:
+  subagent_type: feature-dev:code-reviewer
+  prompt: |
+    Evaluate test quality and coverage.
+
+    Run: just test --coverage (or equivalent)
+    Threshold: {coverage_threshold}% (default 80%)
+
+    Test Files: {test_files}
+    Source Files: {source_files}
+
+    Focus:
+    - Coverage percentage vs threshold
+    - Test meaningfulness (not coverage padding)
+    - Edge case test presence
+    - Mock appropriateness
+
+    Output (structured):
+    COVERAGE_PERCENT: number
+    THRESHOLD_MET: true/false
+    MISSING_TESTS: [list]
+    TEST_QUALITY_ISSUES: [list]
+    PASS: true/false
+```
+
+### Multi-Grader Aggregation
+
+After all agents complete, aggregate using this logic:
+
+```
+if any(agent.CRITICAL or agent.SECURITY_VULNERABILITIES with severity=high):
+    overall = FAIL
+elif any(agent.IMPORTANT) or not test_agent.THRESHOLD_MET:
+    overall = NEEDS_WORK
+elif all(agent.PASS):
+    overall = PASS
+else:
+    overall = PASS_WITH_NOTES
+```
+
+**Aggregation Report Format**:
+```markdown
+## Multi-Agent Verification Results
+
+### Agent 1: Bug & Logic Detection
+Status: {PASS/FAIL}
+{findings summary}
+
+### Agent 2: Code Structure
+Status: {PASS/FAIL}
+{findings summary}
+
+### Agent 3: Performance & Security
+Status: {PASS/FAIL}
+{findings summary}
+
+### Agent 4: Test Quality
+Status: {PASS/FAIL}
+Coverage: {X}% (threshold: {Y}%)
+{findings summary}
+
+### Overall Status: {PASS/PASS_WITH_NOTES/NEEDS_WORK/FAIL}
+```
+</multi_agent_review>
 
 <identify_improvements>
-Categorize findings:
+Categorize findings from all agents:
 
 **Critical Issues** (must fix):
 - Bugs that break functionality
 - Missing critical acceptance criteria
-- Security vulnerabilities
+- Security vulnerabilities (high severity)
+- Logic errors identified by Agent 1
 
 **Important Issues** (should fix):
 - Missing edge case handling
-- Incomplete test coverage
-- Code quality concerns
+- Incomplete test coverage (below threshold)
+- Code quality concerns from Agent 2
+- Performance issues from Agent 3
 
 **Suggestions** (nice to have):
 - Refactoring opportunities
@@ -418,7 +627,107 @@ Categorize findings:
 - Design decisions to verify
 - Edge cases not specified
 </identify_improvements>
-</critique_phase>
+
+<rework_loop>
+**AUTONOMOUS ACTION**: On FAIL or NEEDS_WORK, IMMEDIATELY implement the rework loop without asking the user. Reopening failing sub-tasks with feedback is a required part of the verification workflow.
+
+On FAIL or NEEDS_WORK, implement the rework loop:
+
+### 1. Map Findings to Sub-Tasks
+
+Match each finding's file to the sub-task that modified it:
+```
+For each finding with file:line reference:
+  1. Check git blame or sub-task comments for file ownership
+  2. Map finding to the responsible sub-task
+  3. Group all findings by sub-task ID
+```
+
+### 2. Add Feedback Comment to Each Failing Sub-Task
+
+Use backend-appropriate add comment tool:
+
+```markdown
+## Verification Feedback: NEEDS_REWORK
+
+### Issues Found
+
+**Critical** (must fix):
+- {issue with file:line reference}
+
+**Important** (should fix):
+- {issue description}
+
+### Recommended Fixes
+{Specific guidance from review agents}
+
+### Re-verification
+After addressing these issues, the verification gate will automatically re-run when all implementation sub-tasks are complete again.
+
+---
+*Feedback from verify-issue multi-agent review*
+```
+
+### 3. Move Sub-Task Back to "To Do"
+
+**Linear**:
+```
+mcp__plugin_linear_linear__update_issue:
+  id: {sub_task_id}
+  state: "Backlog"  # or "To Do" depending on workflow
+  labels: ["needs-rework"]
+```
+
+**Jira**:
+```
+mcp_plugin_atlassian_jira__transition_issue:
+  issueIdOrKey: {sub_task_key}
+  transitionName: "To Do"
+```
+
+### 4. Update Verification Sub-Task
+
+The verification sub-task remains blocked (its blockers moved back to non-Done).
+Add a comment documenting this rework iteration:
+
+```markdown
+## Rework Iteration {N}
+
+**Date**: {timestamp}
+**Status**: Sub-tasks returned for rework
+
+### Sub-Tasks Reopened
+- {sub_task_1}: {reason summary}
+- {sub_task_2}: {reason summary}
+
+### Awaiting
+All implementation sub-tasks to reach "Done" status before re-verification.
+```
+
+### Loop Continuation
+
+The loop continues naturally:
+1. Loop polls for ready tasks
+2. Picks up reopened sub-tasks
+3. Executes them via execute-issue
+4. When all implementation sub-tasks Done, verification sub-task unblocks
+5. Verification runs again
+
+**Max Iterations**: After `max_rework_iterations` (default 3) rework cycles, escalate:
+- Add "escalation-needed" label
+- Comment with full history
+- Do NOT block indefinitely
+
+### On PASS or PASS_WITH_NOTES
+
+1. Mark verification sub-task Done:
+   - **Linear**: `update_issue(state: "Done")`
+   - **Jira**: `transition_issue(transitionName: "Done")`
+
+2. Post verification report to parent issue as comment
+
+3. Parent can now be completed (no longer blocked by verification sub-task)
+</rework_loop>
 
 <review_report_phase>
 <report_structure>
@@ -577,6 +886,22 @@ Include:
 
 Link follow-up issues in the verification comment.
 </follow_up_issues>
+
+<status_markers>
+**IMPORTANT**: Output a STATUS marker at the end of execution for mobius loop detection.
+
+**On PASS or PASS_WITH_NOTES**:
+```
+STATUS: SUBTASK_COMPLETE
+```
+
+**On FAIL or NEEDS_WORK** (after reopening sub-tasks):
+```
+STATUS: VERIFICATION_FAILED
+```
+
+The mobius loop monitors agent output for these markers to determine execution results.
+</status_markers>
 </completion_report>
 
 <examples>
@@ -690,18 +1015,60 @@ All criteria met. Ready to close.
 <success_criteria>
 A successful verification achieves:
 
-- [ ] Backend detected from config
-- [ ] Full issue context loaded (description, criteria, comments, sub-tasks)
-- [ ] All sub-tasks verified as complete
-- [ ] Recent commits and changed files analyzed
-- [ ] Code reviewed against acceptance criteria
+**Configuration & Setup**:
+- [ ] Backend detected from config (linear or jira)
+- [ ] Verification config loaded (coverage_threshold, max_rework_iterations, etc.)
+- [ ] Coverage threshold configurable (default 80%)
+
+**Context Gathering** (AC 1, 2):
+- [ ] verify-issue receives verification sub-task ID as input (from mobius loop)
+- [ ] Parent issue identified from the verification sub-task
+- [ ] Full parent issue context loaded (description, criteria, comments)
+- [ ] All sibling implementation sub-tasks collected and analyzed
+- [ ] Aggregated context from parent AND all implementation sub-tasks
+- [ ] All modified files identified across implementation sub-tasks
+
+**Quality Gate Dimensions** (evaluated during review):
+- [ ] Testing (all tests pass, coverage >= threshold)
+- [ ] Code structure (best practices, no code smells)
+- [ ] Performance (no regressions identified)
+- [ ] Security (no vulnerabilities found)
+- [ ] Business logic correctness (matches requirements)
+- [ ] User story satisfaction (solves user's problem)
+
+**Multi-Agent Review**:
+- [ ] All 4 specialized review agents spawned in parallel (multi-agent verification)
+- [ ] Agent 1: Bug & Logic Detection completed
+- [ ] Agent 2: Code Structure & Best Practices completed
+- [ ] Agent 3: Performance & Security completed
+- [ ] Agent 4: Test Quality & Coverage completed
+- [ ] Multi-grader aggregation computed overall status
+
+**Verification Checks**:
 - [ ] Tests executed and results captured
+- [ ] Coverage threshold evaluated against configurable value
 - [ ] Typecheck and lint run
+- [ ] CI/CD status checked
+
+**Criteria Evaluation**:
 - [ ] Each acceptance criterion evaluated with evidence
-- [ ] Thorough critique with categorized findings
+- [ ] Findings categorized (Critical, Important, Suggestions, Questions)
+
+**Rework Loop** (AC 6, 7, 9 - on FAIL/NEEDS_WORK):
+- [ ] Findings mapped to responsible sub-tasks
+- [ ] Failing sub-tasks receive detailed feedback comments with file:line references
+- [ ] Failing sub-tasks moved back to "To Do" status
+- [ ] Rework iteration count tracked (up to max_rework_iterations)
+- [ ] Rework iteration documented on verification sub-task
+- [ ] Loop continues naturally (reopened tasks picked up by normal polling)
+
+**Completion** (AC 8 - on PASS/PASS_WITH_NOTES):
+- [ ] Verification sub-task marked Done when quality checks pass
+- [ ] Verification report posted to parent issue
+- [ ] Parent issue unblocked for completion (no longer blocked by verification sub-task)
+
+**Reporting**:
 - [ ] Structured review report generated
 - [ ] Review comment posted to ticket
-- [ ] Issue status updated appropriately
-- [ ] Follow-up issues created if needed
 - [ ] Clear next steps communicated to user
 </success_criteria>
