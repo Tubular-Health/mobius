@@ -9,7 +9,7 @@
  */
 
 import chalk from 'chalk';
-import { Version3Client } from 'jira.js';
+import { Version3Client, type Version3Parameters } from 'jira.js';
 import type { ParentIssue } from './linear.js';
 import type { LinearIssue } from './task-graph.js';
 
@@ -292,4 +292,234 @@ export async function createJiraIssueLinks(
   }
 
   return results;
+}
+
+/**
+ * Result of a Jira issue creation
+ */
+export interface JiraCreatedIssue {
+  id: string;
+  key: string;
+  self: string;
+}
+
+/**
+ * Options for creating a Jira issue
+ */
+export interface CreateJiraIssueOptions {
+  projectKey: string;
+  issueTypeName: string;
+  summary: string;
+  description?: string;
+  parentKey?: string;
+  labels?: string[];
+  assigneeId?: string;
+}
+
+/**
+ * Create a new Jira issue
+ *
+ * Creates an issue with the specified fields. For sub-tasks, provide a parentKey.
+ * The SDK automatically converts string descriptions to Atlassian Document Format.
+ *
+ * @param options - Issue creation options
+ * @returns Created issue details or null on failure
+ */
+export async function createJiraIssue(options: CreateJiraIssueOptions): Promise<JiraCreatedIssue | null> {
+  const client = getJiraClient();
+  if (!client) {
+    return null;
+  }
+
+  try {
+    const fields: Record<string, unknown> = {
+      project: { key: options.projectKey },
+      issuetype: { name: options.issueTypeName },
+      summary: options.summary,
+    };
+
+    if (options.description) {
+      fields.description = options.description;
+    }
+
+    if (options.parentKey) {
+      fields.parent = { key: options.parentKey };
+    }
+
+    if (options.labels && options.labels.length > 0) {
+      fields.labels = options.labels;
+    }
+
+    if (options.assigneeId) {
+      fields.assignee = { id: options.assigneeId };
+    }
+
+    const result = await client.issues.createIssue({
+      fields: fields as Version3Parameters.CreateIssue['fields'],
+    });
+
+    return {
+      id: result.id,
+      key: result.key,
+      self: result.self,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(chalk.gray(`Failed to create Jira issue: ${errorMessage}`));
+
+    const httpError = error as { status?: number; response?: { status?: number; data?: unknown } };
+    const status = httpError.status ?? httpError.response?.status;
+    if (status) {
+      console.error(chalk.gray(`  → HTTP status: ${status}`));
+    }
+
+    if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+      console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
+    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+      console.error(chalk.gray('  → Permission denied. The API token may lack issue creation permissions'));
+    } else if (status === 400 || errorMessage.includes('400')) {
+      console.error(chalk.gray('  → Invalid request. Check project key, issue type, and required fields'));
+    }
+
+    if (httpError.response?.data) {
+      console.error(chalk.gray(`  → Response: ${JSON.stringify(httpError.response.data)}`));
+    }
+
+    return null;
+  }
+}
+
+/**
+ * Update a Jira issue's status using the transitions API
+ *
+ * Jira status changes require using transitions. This function:
+ * 1. Fetches available transitions for the issue
+ * 2. Finds a transition matching the target status name
+ * 3. Performs the transition
+ *
+ * @param issueKeyOrId - The issue key (e.g., "PROJ-123") or ID
+ * @param targetStatusName - The target status name (e.g., "In Progress", "Done")
+ * @returns true if transition succeeded, false otherwise
+ */
+export async function updateJiraIssueStatus(issueKeyOrId: string, targetStatusName: string): Promise<boolean> {
+  const client = getJiraClient();
+  if (!client) {
+    return false;
+  }
+
+  try {
+    // Get available transitions for this issue
+    const transitionsResponse = await client.issues.getTransitions({
+      issueIdOrKey: issueKeyOrId,
+    });
+
+    const transitions = transitionsResponse.transitions ?? [];
+
+    // Find the transition that leads to the target status
+    // Match by transition name or target status name (case-insensitive)
+    const targetLower = targetStatusName.toLowerCase();
+    const matchingTransition = transitions.find(
+      (t) =>
+        t.name?.toLowerCase() === targetLower ||
+        t.to?.name?.toLowerCase() === targetLower
+    );
+
+    if (!matchingTransition || !matchingTransition.id) {
+      const availableTransitions = transitions.map((t) => `${t.name} → ${t.to?.name}`).join(', ');
+      console.error(
+        chalk.gray(`No transition found to status "${targetStatusName}". Available: ${availableTransitions || 'none'}`)
+      );
+      return false;
+    }
+
+    // Perform the transition
+    await client.issues.doTransition({
+      issueIdOrKey: issueKeyOrId,
+      transition: { id: matchingTransition.id },
+    });
+
+    return true;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(chalk.gray(`Failed to update Jira issue status: ${errorMessage}`));
+
+    const httpError = error as { status?: number; response?: { status?: number; data?: unknown } };
+    const status = httpError.status ?? httpError.response?.status;
+    if (status) {
+      console.error(chalk.gray(`  → HTTP status: ${status}`));
+    }
+
+    if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+      console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
+    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+      console.error(chalk.gray('  → Permission denied. The API token may lack transition permissions'));
+    } else if (status === 404 || errorMessage.includes('404') || errorMessage.includes('not found')) {
+      console.error(chalk.gray(`  → Issue ${issueKeyOrId} not found or not accessible`));
+    }
+
+    if (httpError.response?.data) {
+      console.error(chalk.gray(`  → Response: ${JSON.stringify(httpError.response.data)}`));
+    }
+
+    return false;
+  }
+}
+
+/**
+ * Result of adding a comment to a Jira issue
+ */
+export interface JiraCommentResult {
+  id: string;
+  self: string;
+}
+
+/**
+ * Add a comment to a Jira issue
+ *
+ * The SDK automatically converts string comments to Atlassian Document Format.
+ *
+ * @param issueKeyOrId - The issue key (e.g., "PROJ-123") or ID
+ * @param body - The comment body (plain text or markdown)
+ * @returns Comment details or null on failure
+ */
+export async function addJiraComment(issueKeyOrId: string, body: string): Promise<JiraCommentResult | null> {
+  const client = getJiraClient();
+  if (!client) {
+    return null;
+  }
+
+  try {
+    const result = await client.issueComments.addComment({
+      issueIdOrKey: issueKeyOrId,
+      comment: body,
+    });
+
+    return {
+      id: result.id ?? '',
+      self: result.self ?? '',
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(chalk.gray(`Failed to add Jira comment: ${errorMessage}`));
+
+    const httpError = error as { status?: number; response?: { status?: number; data?: unknown } };
+    const status = httpError.status ?? httpError.response?.status;
+    if (status) {
+      console.error(chalk.gray(`  → HTTP status: ${status}`));
+    }
+
+    if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+      console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
+    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+      console.error(chalk.gray('  → Permission denied. The API token may lack comment permissions'));
+    } else if (status === 404 || errorMessage.includes('404') || errorMessage.includes('not found')) {
+      console.error(chalk.gray(`  → Issue ${issueKeyOrId} not found or not accessible`));
+    }
+
+    if (httpError.response?.data) {
+      console.error(chalk.gray(`  → Response: ${JSON.stringify(httpError.response.data)}`));
+    }
+
+    return null;
+  }
 }
