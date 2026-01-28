@@ -81,24 +81,33 @@ function getStatusOverrides(
     return overrides;
   }
 
-  // Mark active tasks as in_progress, unless already done in Linear
+  // Mark completed tasks as done
+  // The graph is a snapshot from when the TUI started - it doesn't refresh from Linear.
+  // When the loop completes a task, it verifies via Linear before adding to completedTasks,
+  // so we can trust completedTasks to override the stale graph status.
+  for (const entry of executionState.completedTasks) {
+    const taskIdentifier = getCompletedTaskId(entry);
+    for (const task of graph.tasks.values()) {
+      if (task.identifier === taskIdentifier) {
+        overrides.set(task.id, 'done');
+        break;
+      }
+    }
+  }
+
+  // Mark active tasks as in_progress, unless already done
   for (const activeTask of executionState.activeTasks) {
     // Find task by identifier
     for (const task of graph.tasks.values()) {
       if (task.identifier === activeTask.id) {
-        // Don't override if Linear says it's already done - Linear is source of truth
-        // This handles stale state files when the loop process died
-        if (task.status !== 'done') {
+        // Don't override if already marked done (from completedTasks or graph)
+        if (task.status !== 'done' && !overrides.has(task.id)) {
           overrides.set(task.id, 'in_progress');
         }
         break;
       }
     }
   }
-
-  // Note: completedTasks from state file are NOT used for status overrides.
-  // Linear is the source of truth - the graph is built from fresh Linear data at startup.
-  // completedTasks are only used for timing info (duration display).
 
   // Mark failed tasks as failed (only for currently active execution)
   for (const entry of executionState.failedTasks) {
