@@ -75,12 +75,19 @@ mcp__plugin_linear_linear__create_issue
 
 - `mcp_plugin_atlassian_jira__get_issue` - Fetch issue details with relations
 - `mcp_plugin_atlassian_jira__create_issue` - Create sub-tasks with parent link
-- `mcp_plugin_atlassian_jira__update_issue` - Set blocking relationships via issue links
 - `mcp_plugin_atlassian_jira__add_comment` - Post Mermaid dependency diagram
 
 **Issue ID format**: `PROJ-123` (project key + number)
 
-**Creating sub-tasks**:
+**Two-phase creation process**:
+
+Unlike Linear (which supports `blockedBy` at creation time), Jira requires a two-phase process:
+1. **Phase 1**: Create all sub-tasks (without blocking relationships)
+2. **Phase 2**: Create issue links to establish blocking relationships
+
+This is because Jira's MCP `update_issue` with `issuelinks` field silently fails. Use the `createJiraIssueLink()` function from `src/lib/jira.ts` instead.
+
+**Phase 1 - Creating sub-tasks**:
 ```
 mcp_plugin_atlassian_jira__create_issue
   project: "{same project as parent}"
@@ -92,7 +99,27 @@ mcp_plugin_atlassian_jira__create_issue
   priority: {inherited from parent}
 ```
 
-Note: Jira uses issue links for blocking relationships. After creating sub-tasks, use `update_issue` to add "Blocks"/"Is blocked by" links.
+**Phase 2 - Creating blocking relationships**:
+
+After all sub-tasks are created, use the `createJiraIssueLink()` function:
+
+```typescript
+import { createJiraIssueLink, createJiraIssueLinks } from 'src/lib/jira';
+
+// Single link: blockerKey blocks blockedKey
+await createJiraIssueLink('PROJ-124', 'PROJ-125');
+
+// Batch creation for multiple links
+const links = [
+  { blocker: 'PROJ-124', blocked: 'PROJ-125' },
+  { blocker: 'PROJ-124', blocked: 'PROJ-126' },
+  { blocker: 'PROJ-125', blocked: 'PROJ-127' },
+];
+const result = await createJiraIssueLinks(links);
+// result: { success: 3, failed: 0 }
+```
+
+**Important**: The Atlassian MCP server does NOT support creating issue links via `update_issue`. You must use the `createJiraIssueLink()` utility function which calls the Jira REST API directly via the jira.js SDK.
 </jira>
 </backend_context>
 
@@ -387,17 +414,68 @@ Loop back to presentation after each refinement until user approves.
 <batch_creation>
 After approval, create all sub-tasks using the appropriate backend tools.
 
-**Important**: Create in reverse dependency order so blocking references exist.
+**Backend-specific creation flows**:
 
-For Linear, use `blockedBy` parameter during creation.
-For Jira, create sub-tasks first, then add issue links for blocking relationships.
+<linear_creation_flow>
+**Linear**: Single-phase creation with `blockedBy` parameter
+
+1. Create in reverse dependency order (leaf tasks first)
+2. Store created issue IDs
+3. Use `blockedBy` parameter to reference already-created tasks
+
+```
+mcp__plugin_linear_linear__create_issue
+  ...
+  blockedBy: ["{ids of blocking sub-tasks}"]
+```
+
+Linear handles blocking relationships atomically at creation time.
+</linear_creation_flow>
+
+<jira_creation_flow>
+**Jira**: Two-phase creation (sub-tasks first, then links)
+
+**Phase 1**: Create all sub-tasks (order doesn't matter)
+- Create all sub-tasks without blocking relationships
+- Store the created issue keys (e.g., PROJ-124, PROJ-125)
+
+**Phase 2**: Create blocking relationships via `createJiraIssueLink()`
+- After ALL sub-tasks exist, create the links
+- Use `createJiraIssueLinks()` for batch processing
+- Handle partial failures gracefully (see `<link_creation_failure>`)
+
+```typescript
+// After all sub-tasks created, establish blocking relationships
+import { createJiraIssueLinks } from 'src/lib/jira';
+
+const links = [
+  { blocker: 'PROJ-124', blocked: 'PROJ-125' },
+  { blocker: 'PROJ-124', blocked: 'PROJ-126' },
+  { blocker: 'PROJ-125', blocked: 'PROJ-127' },
+  { blocker: 'PROJ-126', blocked: 'PROJ-127' },
+];
+
+const result = await createJiraIssueLinks(links);
+console.log(`Links created: ${result.success}, failed: ${result.failed}`);
+```
+
+**Why two phases?** The Atlassian MCP server's `update_issue` silently ignores `issuelinks` field. The `createJiraIssueLink()` function uses the jira.js SDK to call the Jira REST API directly, which is the only reliable way to create issue links.
+</jira_creation_flow>
 </batch_creation>
 
 <creation_order>
+**For Linear**:
 1. Identify leaf tasks (blocked by nothing or only by already-created tasks)
 2. Create leaf tasks first
 3. Work up the dependency tree
 4. Store created issue IDs to reference in blockedBy for later tasks
+
+**For Jira**:
+1. Create ALL sub-tasks in any order (Phase 1)
+2. Collect all created issue keys
+3. Build link array from dependency graph
+4. Call `createJiraIssueLinks()` with all relationships (Phase 2)
+5. Report success/failure counts
 </creation_order>
 
 <post_creation>
@@ -475,6 +553,44 @@ If sub-task creation fails:
    - Failed tasks: Re-run with just the failed sub-tasks
    - Blocking relationships: May need manual update if partial success
 </creation_failure>
+
+<link_creation_failure>
+**Jira-specific**: If issue link creation fails (Phase 2):
+
+The `createJiraIssueLinks()` function continues processing even when individual links fail, returning `{ success: number; failed: number }`.
+
+**Handling partial failures**:
+
+1. **Check the result** after calling `createJiraIssueLinks()`:
+   ```typescript
+   const result = await createJiraIssueLinks(links);
+   if (result.failed > 0) {
+     console.log(`Warning: ${result.failed} of ${links.length} links failed to create`);
+   }
+   ```
+
+2. **Report in completion summary**:
+   ```markdown
+   **Link creation**: {success} succeeded, {failed} failed
+
+   Failed links may indicate:
+   - Issue keys don't exist
+   - Permission issues (403)
+   - "Blocks" link type not available in project
+   ```
+
+3. **Manual recovery for failed links**:
+   - Links can be manually created in Jira UI: Issue → Link → "is blocked by"
+   - Or retry the specific failed links after investigating the cause
+
+4. **Common link creation errors**:
+   - `401 Unauthorized`: API token expired or invalid
+   - `403 Forbidden`: User lacks permission to create links
+   - `404 Not Found`: Issue key doesn't exist
+   - `400 Bad Request`: "Blocks" link type not configured in project
+
+**Important**: Partial link failure does NOT roll back created sub-tasks. The sub-tasks remain valid; only the blocking relationships are incomplete. The execute-issue skill can still work with sub-tasks that have missing links (they just won't be properly blocked).
+</link_creation_failure>
 </error_handling>
 
 <examples>
