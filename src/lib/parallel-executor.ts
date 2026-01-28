@@ -50,6 +50,8 @@ export interface ExecutionResult {
   error?: string;
   /** The tmux pane ID (e.g., "%0", "%1") where this agent executed */
   pane?: string;
+  /** Raw pane content for skill output parsing */
+  rawOutput?: string;
 }
 
 interface AgentHandle {
@@ -84,6 +86,7 @@ const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes per task
  * @param config - Execution configuration
  * @param worktreePath - Path to the shared worktree
  * @param session - The tmux session to use
+ * @param contextFilePath - Optional path to the context file for skills to read via MOBIUS_CONTEXT_FILE
  * @param timeout - Maximum time to wait for each agent (default: 30 minutes)
  * @returns Array of execution results
  */
@@ -92,6 +95,7 @@ export async function executeParallel(
   config: ExecutionConfig,
   worktreePath: string,
   session: TmuxSession,
+  contextFilePath?: string,
   timeout: number = DEFAULT_TIMEOUT_MS
 ): Promise<ExecutionResult[]> {
   // Calculate actual parallelism
@@ -106,7 +110,7 @@ export async function executeParallel(
   const tasksToRun = tasks.slice(0, actualParallel);
 
   // Spawn agents in parallel - each agent gets its specific subtask identifier
-  const handles = await spawnAgents(tasksToRun, session, worktreePath, config);
+  const handles = await spawnAgents(tasksToRun, session, worktreePath, config, contextFilePath);
 
   // Layout panes for visibility
   await layoutPanes(session, handles.length);
@@ -158,7 +162,8 @@ async function spawnAgents(
   tasks: SubTask[],
   session: TmuxSession,
   worktreePath: string,
-  config: ExecutionConfig
+  config: ExecutionConfig,
+  contextFilePath?: string
 ): Promise<AgentHandle[]> {
   const handles: AgentHandle[] = [];
 
@@ -187,7 +192,7 @@ async function spawnAgents(
 
     // Build the Claude command with the specific subtask identifier
     // This ensures each agent works on its assigned task, not racing for the same one
-    const claudeCommand = buildClaudeCommand(task.identifier, skill, worktreePath, config);
+    const claudeCommand = buildClaudeCommand(task.identifier, skill, worktreePath, config, contextFilePath);
 
     const handle: AgentHandle = {
       task,
@@ -210,25 +215,33 @@ async function spawnAgents(
  *
  * @param subtaskIdentifier - The specific subtask identifier (e.g., "MOB-124")
  *                            Each agent gets its own subtask ID to prevent race conditions
+ * @param contextFilePath - Optional path to context file for MOBIUS_CONTEXT_FILE env var
  */
 export function buildClaudeCommand(
   subtaskIdentifier: string,
   skill: string,
   worktreePath: string,
-  config: ExecutionConfig
+  config: ExecutionConfig,
+  contextFilePath?: string
 ): string {
   // Build the model flag if specified
   const modelFlag = config.model ? `--model ${config.model}` : '';
 
+  // Build the environment variable prefix if context file is provided
+  const envPrefix = contextFilePath
+    ? `MOBIUS_CONTEXT_FILE="${contextFilePath}" `
+    : '';
+
   // The command:
   // 1. cd to worktree
-  // 2. echo the skill invocation to claude with the specific subtask ID
-  // 3. pipe through cclean for clean output (requires stream-json format)
+  // 2. Set MOBIUS_CONTEXT_FILE environment variable if provided
+  // 3. echo the skill invocation to claude with the specific subtask ID
+  // 4. pipe through cclean for clean output (requires stream-json format)
   // Note: We use a subshell to change directory without affecting the parent shell
   const command = [
     `cd "${worktreePath}"`,
     '&&',
-    `echo '${skill} ${subtaskIdentifier}'`,
+    `${envPrefix}echo '${skill} ${subtaskIdentifier}'`,
     '|',
     `claude -p --dangerously-skip-permissions --verbose --output-format stream-json ${modelFlag}`.trim(),
     '|',
@@ -306,6 +319,7 @@ export function parseAgentOutput(
       status: 'SUBTASK_COMPLETE',
       duration,
       pane: paneId,
+      rawOutput: content,
     };
   }
 
@@ -323,6 +337,7 @@ export function parseAgentOutput(
       duration,
       error,
       pane: paneId,
+      rawOutput: content,
     };
   }
 
@@ -335,6 +350,7 @@ export function parseAgentOutput(
       status: 'SUBTASK_COMPLETE',
       duration,
       pane: paneId,
+      rawOutput: content,
     };
   }
 
@@ -347,6 +363,7 @@ export function parseAgentOutput(
       duration,
       error: 'No actionable sub-tasks available',
       pane: paneId,
+      rawOutput: content,
     };
   }
 
@@ -361,13 +378,15 @@ export function parseAgentOutput(
  * @param pane - The tmux pane to run in
  * @param worktreePath - Path to the shared worktree
  * @param config - Execution configuration
+ * @param contextFilePath - Optional path to context file for MOBIUS_CONTEXT_FILE env var
  * @returns ExecutionResult when the agent completes
  */
 export async function spawnAgentInPane(
   task: SubTask,
   pane: TmuxPane,
   worktreePath: string,
-  config: ExecutionConfig
+  config: ExecutionConfig,
+  contextFilePath?: string
 ): Promise<ExecutionResult> {
   const startTime = Date.now();
 
@@ -376,7 +395,7 @@ export async function spawnAgentInPane(
   const skill = selectSkillForTask(task);
 
   // Build and run the command with the task's specific identifier
-  const command = buildClaudeCommand(task.identifier, skill, worktreePath, config);
+  const command = buildClaudeCommand(task.identifier, skill, worktreePath, config, contextFilePath);
   await runInPane(pane, command);
 
   // Create handle for monitoring

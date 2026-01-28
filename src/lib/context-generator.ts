@@ -75,6 +75,33 @@ export function getSyncLogPath(parentId: string): string {
 }
 
 /**
+ * Get the path to the full context.json file (used by skills via MOBIUS_CONTEXT_FILE)
+ */
+export function getFullContextPath(parentId: string): string {
+  return join(getContextPath(parentId), 'context.json');
+}
+
+/**
+ * Write the full context to a single JSON file for skills to read
+ *
+ * Skills read this file via the MOBIUS_CONTEXT_FILE environment variable.
+ * This consolidates parent, sub-tasks, and metadata into one file.
+ *
+ * @param parentIdentifier - The parent issue identifier
+ * @param context - The IssueContext to write
+ * @returns The path to the written context file
+ */
+export function writeFullContextFile(
+  parentIdentifier: string,
+  context: IssueContext
+): string {
+  ensureContextDirectories(parentIdentifier);
+  const contextFilePath = getFullContextPath(parentIdentifier);
+  writeFileSync(contextFilePath, JSON.stringify(context, null, 2), 'utf-8');
+  return contextFilePath;
+}
+
+/**
  * Detect the backend from configuration
  *
  * Checks in order:

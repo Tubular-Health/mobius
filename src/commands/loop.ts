@@ -56,8 +56,23 @@ import {
   clearAllActiveTasks,
   deleteExecutionState,
 } from '../lib/execution-state.js';
+import {
+  generateContext,
+  writeFullContextFile,
+} from '../lib/context-generator.js';
+import {
+  parseSkillOutput,
+  extractStatus,
+  isTerminalStatus,
+  SkillOutputParseError,
+} from '../lib/output-parser.js';
+import {
+  updateLinearIssueStatus,
+  addLinearComment,
+} from '../lib/linear.js';
 import type { SubTask } from '../lib/task-graph.js';
 import type { ExecutionState } from '../types.js';
+import type { IssueContext } from '../types/context.js';
 
 export interface LoopOptions {
   maxIterations?: number;
@@ -166,6 +181,21 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
     await destroySession(session);
     process.exit(1);
   }
+
+  // Generate local context for skills to read
+  console.log(chalk.gray('Generating local context for skills...'));
+  let issueContext: IssueContext | null = await generateContext(taskId, {
+    projectPath: worktreeInfo.path,
+  });
+  if (!issueContext) {
+    console.error(chalk.red('Error: Failed to generate issue context'));
+    await destroySession(session);
+    process.exit(1);
+  }
+
+  // Write full context file for skills to read via MOBIUS_CONTEXT_FILE
+  const contextFilePath = writeFullContextFile(taskId, issueContext);
+  console.log(chalk.gray(`Context file: ${contextFilePath}`));
 
   // Display ASCII tree
   console.log('');
@@ -306,11 +336,13 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       await updateStatusPane(statusPane, loopStatus, sessionName);
 
       // Execute tasks in parallel - each task carries its own identifier
+      // Pass context file path so skills can read issue context via MOBIUS_CONTEXT_FILE
       const results = await executeParallel(
         tasksToExecute,
         executionConfig,
         worktreeInfo.path,
-        session
+        session,
+        contextFilePath
       );
 
       // Update execution state with real pane IDs from execution results
@@ -322,6 +354,17 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
             result.pane,
             executionConfig.tui?.state_dir
           );
+        }
+      }
+
+      // Parse skill outputs and execute SDK updates based on structured output
+      console.log(chalk.gray('Processing skill outputs...'));
+      for (const result of results) {
+        if (result.rawOutput) {
+          const skillResult = await processSkillOutput(result.rawOutput, backend);
+          if (skillResult.processed) {
+            console.log(chalk.gray(`  Processed ${result.identifier}: ${skillResult.status}`));
+          }
         }
       }
 
@@ -561,4 +604,192 @@ function formatElapsed(ms: number): string {
   } else {
     return `${seconds}s`;
   }
+}
+
+/**
+ * Process skill output and execute SDK status updates
+ *
+ * Parses the structured output from a skill and performs appropriate
+ * actions based on the status (update issue status, add comments, etc.)
+ *
+ * @param rawOutput - The raw output string from the skill (pane content)
+ * @param backend - The backend to use for SDK calls (linear or jira)
+ * @returns Whether the skill output was successfully processed
+ */
+async function processSkillOutput(
+  rawOutput: string,
+  backend: Backend
+): Promise<{ processed: boolean; status?: string; error?: string }> {
+  // Try to extract just the status for quick check
+  const status = extractStatus(rawOutput);
+  if (!status) {
+    // No structured output found - this is normal for in-progress agents
+    return { processed: false };
+  }
+
+  // Only process terminal statuses that require SDK updates
+  if (!isTerminalStatus(status)) {
+    return { processed: true, status };
+  }
+
+  // For full processing, parse the complete output
+  try {
+    const parsed = parseSkillOutput(rawOutput);
+    const output = parsed.output;
+
+    // Execute SDK updates based on the status
+    if (backend === 'linear') {
+      await executeLinearUpdates(output);
+    }
+    // TODO: Add Jira support when needed
+
+    return { processed: true, status };
+  } catch (error) {
+    if (error instanceof SkillOutputParseError) {
+      // Partial or malformed output - log but don't fail
+      return {
+        processed: false,
+        error: `Failed to parse skill output: ${error.message}`,
+      };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Execute Linear SDK updates based on parsed skill output
+ */
+async function executeLinearUpdates(
+  output: ReturnType<typeof parseSkillOutput>['output']
+): Promise<void> {
+  switch (output.status) {
+    case 'SUBTASK_COMPLETE': {
+      // Move subtask to Done
+      if (output.subtaskId) {
+        const result = await updateLinearIssueStatus(output.subtaskId, 'Done');
+        if (result.success) {
+          console.log(chalk.gray(`  SDK: Updated ${output.subtaskId} to Done`));
+        } else {
+          console.log(chalk.gray(`  SDK: Failed to update ${output.subtaskId}: ${result.error}`));
+        }
+
+        // Add completion comment with details
+        const commentBody = buildCompletionComment(output);
+        const commentResult = await addLinearComment(output.subtaskId, commentBody);
+        if (commentResult.success) {
+          console.log(chalk.gray(`  SDK: Added completion comment to ${output.subtaskId}`));
+        }
+      }
+      break;
+    }
+
+    case 'VERIFICATION_FAILED': {
+      // Keep subtask in progress but add failure comment
+      if (output.subtaskId) {
+        const commentBody = buildFailureComment(output);
+        const commentResult = await addLinearComment(output.subtaskId, commentBody);
+        if (commentResult.success) {
+          console.log(chalk.gray(`  SDK: Added failure comment to ${output.subtaskId}`));
+        }
+      }
+      break;
+    }
+
+    case 'NEEDS_WORK': {
+      // Add rework comment with issues found
+      if (output.subtaskId) {
+        const commentBody = buildNeedsWorkComment(output);
+        const commentResult = await addLinearComment(output.subtaskId, commentBody);
+        if (commentResult.success) {
+          console.log(chalk.gray(`  SDK: Added rework comment to ${output.subtaskId}`));
+        }
+      }
+      break;
+    }
+
+    // Other statuses (ALL_COMPLETE, ALL_BLOCKED, NO_SUBTASKS, PASS, FAIL)
+    // don't require SDK updates at the subtask level
+    default:
+      break;
+  }
+}
+
+/**
+ * Build a completion comment for a successful subtask
+ */
+function buildCompletionComment(
+  output: Extract<ReturnType<typeof parseSkillOutput>['output'], { status: 'SUBTASK_COMPLETE' }>
+): string {
+  const lines = [
+    '## ✅ Subtask Completed',
+    '',
+    `**Commit**: \`${output.commitHash}\``,
+    '',
+    '### Files Modified',
+    ...output.filesModified.map(f => `- \`${f}\``),
+    '',
+    '### Verification Results',
+    `- Typecheck: ${output.verificationResults.typecheck}`,
+    `- Tests: ${output.verificationResults.tests}`,
+    `- Lint: ${output.verificationResults.lint}`,
+  ];
+
+  if (output.verificationResults.subtaskVerify) {
+    lines.push(`- Subtask Verify: ${output.verificationResults.subtaskVerify}`);
+  }
+
+  lines.push('', '---', '*Generated by mobius loop*');
+
+  return lines.join('\n');
+}
+
+/**
+ * Build a failure comment for a verification failure
+ */
+function buildFailureComment(
+  output: Extract<ReturnType<typeof parseSkillOutput>['output'], { status: 'VERIFICATION_FAILED' }>
+): string {
+  const lines = [
+    '## ❌ Verification Failed',
+    '',
+    `**Error Type**: ${output.errorType}`,
+    '',
+    '### Error Output',
+    '```',
+    output.errorOutput.slice(0, 500), // Truncate for readability
+    '```',
+    '',
+    '### Attempted Fixes',
+    ...output.attemptedFixes.map(f => `- ${f}`),
+    '',
+    '### Uncommitted Files',
+    ...output.uncommittedFiles.map(f => `- \`${f}\``),
+    '',
+    '---',
+    '*Generated by mobius loop*',
+  ];
+
+  return lines.join('\n');
+}
+
+/**
+ * Build a rework comment when verification finds issues
+ */
+function buildNeedsWorkComment(
+  output: Extract<ReturnType<typeof parseSkillOutput>['output'], { status: 'NEEDS_WORK' }>
+): string {
+  const lines = [
+    '## 🔧 Needs Rework',
+    '',
+    '### Issues Found',
+    ...output.issues.map(i => `- ${i}`),
+    '',
+    '### Suggested Fixes',
+    ...output.suggestedFixes.map(f => `- ${f}`),
+    '',
+    '---',
+    '*Generated by mobius loop*',
+  ];
+
+  return lines.join('\n');
 }
