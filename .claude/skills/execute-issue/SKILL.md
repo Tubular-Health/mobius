@@ -384,8 +384,9 @@ When running in parallel mode, each agent receives a specific subtask ID to prev
 9. **Fix if needed** - Attempt automatic fixes on verification failures
 10. **Verify sub-task** - Execute `### Verify` command from sub-task if present (with safety checks)
 11. **Commit and push** - Create commit with conventional message, push
-12. **Update status** - Move sub-task to "Done" if all criteria met
-13. **Report completion** - Show what was done and what's next
+12. **Update local context** - Update `~/.mobius/issues/{parentId}/` files with new status
+13. **Update status** - Move sub-task to "Done" if all criteria met
+14. **Report completion** - Show what was done and what's next
 </workflow>
 </quick_start>
 
@@ -1017,6 +1018,50 @@ Confirm:
 </commit_phase>
 
 <status_update_phase>
+<update_local_context>
+**CRITICAL: After successful commit, update the local context files.**
+
+The local context files must be updated so that `mobius sync` can push changes to Linear/Jira.
+
+**Files to update**:
+
+1. **Task-specific file**: `~/.mobius/issues/{parentId}/tasks/{subtaskId}.json`
+   - Change `"status": "pending"` or `"status": "in_progress"` to `"status": "done"`
+
+2. **Main context file**: `~/.mobius/issues/{parentId}/context.json`
+   - Find the subtask in the `subTasks` array by identifier
+   - Change its `"status"` to `"done"`
+   - Update `metadata.updatedAt` to current ISO-8601 timestamp
+
+**Example using Edit tool**:
+
+```
+# Update task file
+Edit ~/.mobius/issues/MOB-161/tasks/MOB-184.json
+  old_string: "status": "pending"
+  new_string: "status": "done"
+
+# Update context.json - find the subtask entry and update status
+Edit ~/.mobius/issues/MOB-161/context.json
+  old_string: [find the subtask block with matching identifier and "status": "pending"]
+  new_string: [same block with "status": "done"]
+
+# Update the updatedAt timestamp
+Edit ~/.mobius/issues/MOB-161/context.json
+  old_string: "updatedAt": "2026-01-28T19:05:00.000Z"
+  new_string: "updatedAt": "{current ISO-8601 timestamp}"
+```
+
+**Why this matters**:
+- The `mobius sync` command reads local context files and pushes changes to Linear/Jira
+- Without updating these files, the status change won't propagate to the issue tracker
+- The structured YAML output alone is not sufficient - local files MUST be updated
+
+**For partial completion** (SUBTASK_PARTIAL):
+- Update status to `"in_progress"` instead of `"done"`
+- Still update the `updatedAt` timestamp
+</update_local_context>
+
 <update_subtask_status_done>
 After successful commit with all acceptance criteria met, include status update in your structured output.
 
@@ -1026,6 +1071,7 @@ The mobius loop will execute the actual status transition via SDK based on your 
 - All acceptance criteria from the sub-task are implemented
 - All verification checks pass (typecheck, tests, lint)
 - Changes are committed and pushed
+- Local context files updated (see update_local_context above)
 - No outstanding work remains for this sub-task
 </update_subtask_status_done>
 
@@ -1279,6 +1325,12 @@ Consider creating separate issues for these.
 - BAD: Complete work but leave sub-task in Backlog
 - GOOD: Update status and add completion comment
 
+**Don't skip local context updates**:
+- BAD: Only output structured YAML without updating `~/.mobius/issues/` files
+- BAD: Commit and push but forget to update task JSON files
+- GOOD: Update both task-specific JSON and main context.json after commit
+- GOOD: Update `metadata.updatedAt` timestamp when modifying context
+
 **Don't misuse status transitions**:
 - BAD: Leave task in Backlog while working on it
 - BAD: Move to Done before all acceptance criteria are met
@@ -1308,9 +1360,9 @@ A successful execution achieves:
 - [ ] Sub-task verify command passes (if present in description)
 - [ ] Commit created with conventional message
 - [ ] Changes pushed to remote
+- [ ] **Local context files updated** (`~/.mobius/issues/{parentId}/` task and context.json)
 - [ ] Sub-task moved to "Done" (if fully complete)
 - [ ] Or: Sub-task kept "In Progress" with progress comment (if partial)
-- [ ] Completion comment added to sub-task
 - [ ] Completion report output with STATUS marker
 - [ ] **STOPPED after one sub-task** (no continuation)
 </success_criteria>
