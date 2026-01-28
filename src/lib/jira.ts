@@ -215,3 +215,81 @@ function extractBlockedByRelations(issuelinks: JiraIssueLink[] | undefined): Arr
 
   return blockedBy;
 }
+
+/**
+ * Create a single Jira issue link (blocking relationship)
+ *
+ * Creates a "Blocks" link where the blocker issue blocks the blocked issue.
+ * In Jira terminology:
+ * - outwardIssue = the blocker (this issue "blocks" the other)
+ * - inwardIssue = the blocked issue (this issue "is blocked by" the blocker)
+ *
+ * @param blockerKey - The issue key that is blocking (e.g., "PROJ-123")
+ * @param blockedKey - The issue key that is blocked (e.g., "PROJ-124")
+ * @returns true if link was created successfully, false otherwise
+ */
+export async function createJiraIssueLink(blockerKey: string, blockedKey: string): Promise<boolean> {
+  const client = getJiraClient();
+  if (!client) {
+    return false;
+  }
+
+  try {
+    await client.issueLinks.linkIssues({
+      type: { name: 'Blocks' },
+      outwardIssue: { key: blockerKey },
+      inwardIssue: { key: blockedKey },
+    });
+
+    return true;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error(chalk.gray(`Failed to create Jira issue link: ${errorMessage}`));
+
+    const httpError = error as { status?: number; response?: { status?: number; data?: unknown } };
+    const status = httpError.status ?? httpError.response?.status;
+    if (status) {
+      console.error(chalk.gray(`  → HTTP status: ${status}`));
+    }
+
+    if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+      console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
+    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+      console.error(chalk.gray('  → Permission denied. The API token may lack link creation permissions'));
+    } else if (status === 404 || errorMessage.includes('404') || errorMessage.includes('not found')) {
+      console.error(chalk.gray(`  → Issue ${blockerKey} or ${blockedKey} not found or not accessible`));
+    }
+
+    if (httpError.response?.data) {
+      console.error(chalk.gray(`  → Response: ${JSON.stringify(httpError.response.data)}`));
+    }
+
+    return false;
+  }
+}
+
+/**
+ * Create multiple Jira issue links (batch operation)
+ *
+ * Creates "Blocks" links for an array of blocker/blocked pairs.
+ * Continues processing even if individual links fail, returning aggregate results.
+ *
+ * @param links - Array of link objects with blocker and blocked issue keys
+ * @returns Object with success and failed counts
+ */
+export async function createJiraIssueLinks(
+  links: Array<{ blocker: string; blocked: string }>
+): Promise<{ success: number; failed: number }> {
+  const results = { success: 0, failed: 0 };
+
+  for (const link of links) {
+    const created = await createJiraIssueLink(link.blocker, link.blocked);
+    if (created) {
+      results.success++;
+    } else {
+      results.failed++;
+    }
+  }
+
+  return results;
+}
