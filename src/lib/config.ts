@@ -146,6 +146,69 @@ export function configExists(configPath: string): boolean {
 }
 
 /**
+ * Validate verification quality gate configuration
+ */
+function validateVerificationConfig(config: LoopConfig): string[] {
+  const errors: string[] = [];
+  const verification = config.execution?.verification;
+
+  // Only validate if verification config is defined
+  if (verification === undefined) {
+    return errors;
+  }
+
+  // Validate coverage_threshold: must be a number between 0 and 100
+  if (verification.coverage_threshold !== undefined) {
+    if (
+      typeof verification.coverage_threshold !== 'number' ||
+      verification.coverage_threshold < 0 ||
+      verification.coverage_threshold > 100
+    ) {
+      errors.push(
+        'execution.verification.coverage_threshold must be a number between 0 and 100'
+      );
+    }
+  }
+
+  // Validate require_all_tests_pass: must be a boolean
+  if (verification.require_all_tests_pass !== undefined) {
+    if (typeof verification.require_all_tests_pass !== 'boolean') {
+      errors.push('execution.verification.require_all_tests_pass must be a boolean');
+    }
+  }
+
+  // Validate performance_check: must be a boolean
+  if (verification.performance_check !== undefined) {
+    if (typeof verification.performance_check !== 'boolean') {
+      errors.push('execution.verification.performance_check must be a boolean');
+    }
+  }
+
+  // Validate security_check: must be a boolean
+  if (verification.security_check !== undefined) {
+    if (typeof verification.security_check !== 'boolean') {
+      errors.push('execution.verification.security_check must be a boolean');
+    }
+  }
+
+  // Validate max_rework_iterations: must be an integer between 1 and 10
+  if (verification.max_rework_iterations !== undefined) {
+    if (
+      typeof verification.max_rework_iterations !== 'number' ||
+      !Number.isInteger(verification.max_rework_iterations) ||
+      verification.max_rework_iterations < 1 ||
+      verification.max_rework_iterations > 10
+    ) {
+      errors.push(
+        'execution.verification.max_rework_iterations must be an integer between 1 and 10'
+      );
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Validate Jira-specific configuration
  */
 function validateJiraConfig(config: LoopConfig): string[] {
@@ -241,6 +304,9 @@ export function validateConfig(config: LoopConfig): { valid: boolean; errors: st
 
   // Validate Jira configuration when backend is 'jira'
   errors.push(...validateJiraConfig(config));
+
+  // Validate verification quality gate configuration (if defined)
+  errors.push(...validateVerificationConfig(config));
 
   return { valid: errors.length === 0, errors };
 }

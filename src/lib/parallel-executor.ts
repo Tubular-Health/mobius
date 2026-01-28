@@ -20,6 +20,27 @@ import {
 } from './tmux-display.js';
 import { BACKEND_SKILLS } from '../types.js';
 
+// Skills for different task types
+const VERIFICATION_SKILL = '/verify-issue';
+
+/**
+ * Determine which skill to use for a task based on its title
+ *
+ * Tasks with "Verification Gate" in the title are routed to verify-issue,
+ * all other tasks go to execute-issue.
+ */
+function selectSkillForTask(task: SubTask): string {
+  const titleLower = task.title.toLowerCase();
+
+  // Detect verification gate tasks by title pattern
+  if (titleLower.includes('verification') && titleLower.includes('gate')) {
+    return VERIFICATION_SKILL;
+  }
+
+  // Default to execute-issue for implementation tasks
+  return BACKEND_SKILLS.linear;
+}
+
 export interface ExecutionResult {
   taskId: string;
   identifier: string;
@@ -140,7 +161,6 @@ async function spawnAgents(
   config: ExecutionConfig
 ): Promise<AgentHandle[]> {
   const handles: AgentHandle[] = [];
-  const skill = BACKEND_SKILLS.linear; // Currently only linear is supported
 
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
@@ -160,6 +180,10 @@ async function spawnAgents(
       // Create new panes for subsequent agents
       pane = await createAgentPane(session, task);
     }
+
+    // Select the appropriate skill based on task type
+    // Verification Gate tasks route to /verify-issue, others to /execute-issue
+    const skill = selectSkillForTask(task);
 
     // Build the Claude command with the specific subtask identifier
     // This ensures each agent works on its assigned task, not racing for the same one
@@ -346,7 +370,10 @@ export async function spawnAgentInPane(
   config: ExecutionConfig
 ): Promise<ExecutionResult> {
   const startTime = Date.now();
-  const skill = BACKEND_SKILLS.linear;
+
+  // Select the appropriate skill based on task type
+  // Verification Gate tasks route to /verify-issue, others to /execute-issue
+  const skill = selectSkillForTask(task);
 
   // Build and run the command with the task's specific identifier
   const command = buildClaudeCommand(task.identifier, skill, worktreePath, config);

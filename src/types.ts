@@ -12,6 +12,18 @@ export interface TuiConfig {
 }
 
 /**
+ * Verification quality gate configuration
+ * Used by verify-issue skill to create verification sub-tasks
+ */
+export interface VerificationConfig {
+  coverage_threshold: number;      // Minimum test coverage percentage (default: 80)
+  require_all_tests_pass: boolean; // Whether all tests must pass (default: true)
+  performance_check: boolean;      // Enable performance regression checks (default: true)
+  security_check: boolean;         // Enable security vulnerability checks (default: true)
+  max_rework_iterations: number;   // Maximum rework cycles before escalation (default: 3)
+}
+
+/**
  * Represents an actively running task with its process info
  */
 export interface ActiveTask {
@@ -69,6 +81,8 @@ export interface ExecutionConfig {
   verification_timeout?: number;  // Timeout for Linear verification in ms (default: 5000)
   // TUI dashboard options
   tui?: TuiConfig;
+  // Quality gate verification settings
+  verification?: VerificationConfig;
 }
 
 export interface LinearConfig {
@@ -119,6 +133,14 @@ export const DEFAULT_CONFIG: LoopConfig = {
     // Retry and verification defaults
     max_retries: 2,
     verification_timeout: 5000,
+    // Quality gate verification defaults
+    verification: {
+      coverage_threshold: 80,
+      require_all_tests_pass: true,
+      performance_check: true,
+      security_check: true,
+      max_rework_iterations: 3,
+    },
   },
 };
 
