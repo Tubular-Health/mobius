@@ -17,7 +17,7 @@ import type { ParentIssue } from '../lib/linear.js';
 import { fetchJiraIssue, fetchJiraSubTasks } from '../lib/jira.js';
 import { buildTaskGraph } from '../lib/task-graph.js';
 import type { LinearIssue } from '../lib/task-graph.js';
-import { clearAllActiveTasks } from '../lib/execution-state.js';
+import { clearAllRuntimeActiveTasks } from '../lib/context-generator.js';
 import { Dashboard } from '../tui/components/Dashboard.js';
 import { tuiEvents, EXIT_REQUEST_EVENT } from '../tui/events.js';
 
@@ -130,7 +130,7 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
 
   // Clear stale active tasks from any previous execution
   // The loop will re-populate this when tasks actually start running
-  clearAllActiveTasks(taskId, tuiConfig.state_dir);
+  clearAllRuntimeActiveTasks(taskId);
 
   console.log(chalk.gray(`Found ${graph.tasks.size} sub-tasks. Starting TUI...`));
   console.log(''); // Empty line before TUI

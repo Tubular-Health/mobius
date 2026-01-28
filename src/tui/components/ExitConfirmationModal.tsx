@@ -7,7 +7,7 @@
 
 import { Box, Text, useInput } from 'ink';
 import { memo } from 'react';
-import type { ExecutionSummary } from '../../lib/execution-state.js';
+import type { ExecutionSummary } from '../../lib/context-generator.js';
 import { formatDuration } from '../utils/formatDuration.js';
 import { AURORA, STRUCTURE_COLORS } from '../theme.js';
 

@@ -9,8 +9,9 @@ import { Box, Text, useApp, useInput } from 'ink';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { TaskGraph } from '../../lib/task-graph.js';
 import { getGraphStats } from '../../lib/task-graph.js';
-import type { ExecutionState, TuiConfig } from '../../types.js';
-import { readExecutionState, watchExecutionState, getModalSummary } from '../../lib/execution-state.js';
+import type { TuiConfig } from '../../types.js';
+import type { RuntimeState } from '../../types/context.js';
+import { readRuntimeState, watchRuntimeState, getModalSummary } from '../../lib/context-generator.js';
 import { getSessionName } from '../../lib/tmux-display.js';
 import { tuiEvents, EXIT_REQUEST_EVENT } from '../events.js';
 import { TaskTree } from './TaskTree.js';
@@ -35,7 +36,7 @@ export interface DashboardProps {
  */
 function isExecutionComplete(
   graph: TaskGraph,
-  executionState: ExecutionState | null
+  executionState: RuntimeState | null
 ): boolean {
   if (!executionState) {
     return false;
@@ -71,7 +72,7 @@ function isExecutionComplete(
  */
 export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Element {
   const { exit } = useApp();
-  const [executionState, setExecutionState] = useState<ExecutionState | null>(null);
+  const [executionState, setRuntimeState] = useState<RuntimeState | null>(null);
   const [isComplete, setIsComplete] = useState(false);
   // Single tick counter that drives all time-based updates
   // This consolidates Header and TaskNode timers into one batched update
@@ -81,29 +82,28 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
 
   // Config defaults
   const showLegend = config?.show_legend ?? true;
-  const stateDir = config?.state_dir;
 
   // Memoize the state change handler to prevent recreating on each render
-  // This callback is passed to watchExecutionState and called when state file changes
+  // This callback is passed to watchRuntimeState and called when state file changes
   const handleStateChange = useCallback(
-    (state: ExecutionState | null) => {
-      setExecutionState(state);
+    (state: RuntimeState | null) => {
+      setRuntimeState(state);
       setIsComplete(isExecutionComplete(graph, state));
     },
     [graph]
   );
 
-  // Subscribe to execution state file changes
+  // Subscribe to runtime state file changes
   useEffect(() => {
     // Read initial state
-    const initialState = readExecutionState(parentId, stateDir);
+    const initialState = readRuntimeState(parentId);
     handleStateChange(initialState);
 
     // Watch for changes - uses memoized callback
-    const cleanup = watchExecutionState(parentId, handleStateChange, stateDir);
+    const cleanup = watchRuntimeState(parentId, handleStateChange);
 
     return cleanup;
-  }, [parentId, stateDir, handleStateChange]);
+  }, [parentId, handleStateChange]);
 
   // Single consolidated timer for header elapsed time
   useEffect(() => {

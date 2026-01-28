@@ -12,7 +12,7 @@
 
 import { describe, it, expect, mock } from 'bun:test';
 import { ExitConfirmationModal, type ExitConfirmationModalProps } from './ExitConfirmationModal.js';
-import type { ExecutionSummary } from '../../lib/execution-state.js';
+import type { ExecutionSummary } from '../../lib/context-generator.js';
 
 // Helper to create mock ExecutionSummary
 function createMockSummary(overrides?: Partial<ExecutionSummary>): ExecutionSummary {

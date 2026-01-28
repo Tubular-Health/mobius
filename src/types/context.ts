@@ -47,6 +47,64 @@ export interface ContextMetadata {
 }
 
 /**
+ * Session information for the active working session
+ * Stored at ~/.mobius/issues/{parentId}/execution/session.json
+ *
+ * This replaces the old ~/.mobius/current-task.json file.
+ * Session data is tied to a specific parent issue rather than being global.
+ */
+export interface SessionInfo {
+  parentId: string;        // Parent issue identifier (e.g., "MOB-161")
+  backend: 'linear' | 'jira';
+  startedAt: string;       // ISO timestamp when session started
+  worktreePath?: string;   // Path to worktree if created
+  status: 'active' | 'completed' | 'failed' | 'paused';
+}
+
+/**
+ * Active task running in a pane
+ * Used for TUI monitoring of parallel execution
+ */
+export interface RuntimeActiveTask {
+  id: string;              // Task identifier (e.g., "MOB-126")
+  pid: number;             // Claude process ID
+  pane: string;            // tmux pane identifier (e.g., "%0")
+  startedAt: string;       // ISO timestamp
+  worktree?: string;       // Worktree path if applicable
+}
+
+/**
+ * Completed or failed task with timing info
+ */
+export interface RuntimeCompletedTask {
+  id: string;              // Task identifier (e.g., "MOB-126")
+  completedAt: string;     // ISO timestamp when task finished
+  duration: number;        // Duration in milliseconds
+}
+
+/**
+ * Runtime execution state for TUI monitoring
+ * Stored at ~/.mobius/issues/{parentId}/execution/runtime.json
+ *
+ * This replaces the old ~/.mobius/state/{parentId}.json file.
+ * Runtime state is ephemeral and tied to a specific parent issue context.
+ */
+export interface RuntimeState {
+  parentId: string;        // Parent issue identifier (e.g., "MOB-11")
+  parentTitle: string;     // Parent issue title for display
+
+  activeTasks: RuntimeActiveTask[];
+  completedTasks: (string | RuntimeCompletedTask)[];  // Supports legacy string format
+  failedTasks: (string | RuntimeCompletedTask)[];     // Supports legacy string format
+
+  startedAt: string;       // ISO timestamp - loop start
+  updatedAt: string;       // ISO timestamp - last update
+
+  loopPid?: number;        // PID of the loop process (for cleanup)
+  totalTasks?: number;     // Total number of tasks (for completion detection)
+}
+
+/**
  * Complete issue context stored locally
  *
  * Structure on disk:

@@ -47,18 +47,21 @@ import {
   hasPermamentFailures,
 } from '../lib/execution-tracker.js';
 import {
-  initializeExecutionState,
-  addActiveTask,
-  completeTask,
-  failTask,
-  removeActiveTask,
-  updateActiveTaskPane,
-  clearAllActiveTasks,
-  deleteExecutionState,
-} from '../lib/execution-state.js';
+  initializeRuntimeState,
+  addRuntimeActiveTask,
+  completeRuntimeTask,
+  failRuntimeTask,
+  removeRuntimeActiveTask,
+  updateRuntimeTaskPane,
+  clearAllRuntimeActiveTasks,
+  deleteRuntimeState,
+  createSession as createMobiusSession,
+  endSession as endMobiusSession,
+} from '../lib/context-generator.js';
 import {
   generateContext,
   writeFullContextFile,
+  queuePendingUpdate,
 } from '../lib/context-generator.js';
 import {
   parseSkillOutput,
@@ -66,13 +69,8 @@ import {
   isTerminalStatus,
   SkillOutputParseError,
 } from '../lib/output-parser.js';
-import {
-  updateLinearIssueStatus,
-  addLinearComment,
-} from '../lib/linear.js';
 import type { SubTask } from '../lib/task-graph.js';
-import type { ExecutionState } from '../types.js';
-import type { IssueContext } from '../types/context.js';
+import type { IssueContext, RuntimeState } from '../types/context.js';
 
 export interface LoopOptions {
   maxIterations?: number;
@@ -120,7 +118,7 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
 
   // Set up signal handlers to clean up active tasks on exit
   const cleanupOnSignal = () => {
-    clearAllActiveTasks(taskId, executionConfig.tui?.state_dir);
+    clearAllRuntimeActiveTasks(taskId);
     process.exit(130); // 128 + SIGINT (2)
   };
   process.on('SIGINT', cleanupOnSignal);
@@ -128,7 +126,7 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
 
   // Clear stale state if --fresh flag is set
   if (options.fresh) {
-    const deleted = deleteExecutionState(taskId, executionConfig.tui?.state_dir);
+    const deleted = deleteRuntimeState(taskId);
     if (deleted) {
       console.log(chalk.yellow('Cleared stale state from previous execution.'));
     }
@@ -217,12 +215,14 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
   // Track tasks pending retry
   let retryQueue: SubTask[] = [];
 
-  // Initialize TUI execution state for file-based monitoring
-  let executionState: ExecutionState = initializeExecutionState(
+  // Create session in context system
+  createMobiusSession(taskId, backend, worktreeInfo.path);
+
+  // Initialize TUI runtime state for file-based monitoring
+  let runtimeState: RuntimeState = initializeRuntimeState(
     taskId,
     parentIssue.title,
     {
-      stateDir: executionConfig.tui?.state_dir,
       loopPid: process.pid,
       totalTasks: graph.tasks.size,
     }
@@ -232,10 +232,9 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
   // This handles the case where we're called on an already-completed task
   for (const task of graph.tasks.values()) {
     if (task.status === 'done') {
-      executionState = completeTask(
-        executionState,
-        task.identifier,
-        executionConfig.tui?.state_dir
+      runtimeState = completeRuntimeTask(
+        runtimeState,
+        task.identifier
       );
     }
   }
@@ -306,19 +305,18 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         assignTask(tracker, task);
       }
 
-      // Update execution state with active tasks (for TUI monitoring)
+      // Update runtime state with active tasks (for TUI monitoring)
       // Initially set pane to empty string - will be updated with real pane IDs after executeParallel
       for (const task of tasksToExecute) {
-        executionState = addActiveTask(
-          executionState,
+        runtimeState = addRuntimeActiveTask(
+          runtimeState,
           {
             id: task.identifier,
             pid: 0, // Will be updated when process spawns
             pane: '', // Placeholder until real pane ID is available
             startedAt: new Date().toISOString(),
             worktree: worktreeInfo.path,
-          },
-          executionConfig.tui?.state_dir
+          }
         );
       }
 
@@ -345,25 +343,23 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         contextFilePath
       );
 
-      // Update execution state with real pane IDs from execution results
+      // Update runtime state with real pane IDs from execution results
       for (const result of results) {
         if (result.pane) {
-          executionState = updateActiveTaskPane(
-            executionState,
+          runtimeState = updateRuntimeTaskPane(
+            runtimeState,
             result.identifier,
-            result.pane,
-            executionConfig.tui?.state_dir
+            result.pane
           );
         }
       }
 
-      // Parse skill outputs and execute SDK updates based on structured output
-      console.log(chalk.gray('Processing skill outputs...'));
+      // Parse skill outputs and queue updates for later sync via `mobius push`
       for (const result of results) {
         if (result.rawOutput) {
-          const skillResult = await processSkillOutput(result.rawOutput, backend);
+          const skillResult = processSkillOutput(result.rawOutput, backend, taskId);
           if (skillResult.processed) {
-            console.log(chalk.gray(`  Processed ${result.identifier}: ${skillResult.status}`));
+            console.log(chalk.gray(`Queued updates for ${result.identifier}: ${skillResult.status}`));
           }
         }
       }
@@ -384,22 +380,20 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         )
       );
 
-      // Update graph and execution state for verified results
+      // Update graph and runtime state for verified results
       for (const result of verifiedResults) {
         if (result.success && result.linearVerified) {
           graph = updateTaskStatus(graph, result.taskId, 'done');
-          executionState = completeTask(
-            executionState,
-            result.identifier,
-            executionConfig.tui?.state_dir
+          runtimeState = completeRuntimeTask(
+            runtimeState,
+            result.identifier
           );
           console.log(chalk.green(`  ✓ ${result.identifier} (Linear: ${result.linearStatus})`));
         } else if (result.shouldRetry) {
           // Remove from active tasks for retry (will be re-added next iteration)
-          executionState = removeActiveTask(
-            executionState,
-            result.identifier,
-            executionConfig.tui?.state_dir
+          runtimeState = removeRuntimeActiveTask(
+            runtimeState,
+            result.identifier
           );
           console.log(chalk.yellow(`  ↻ ${result.identifier}: Retrying (${result.error ?? 'verification pending'})`));
         } else {
@@ -414,18 +408,16 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
               retryQueue.push(task);
             }
             // Remove from active tasks for retry (will be re-added next iteration)
-            executionState = removeActiveTask(
-              executionState,
-              result.identifier,
-              executionConfig.tui?.state_dir
+            runtimeState = removeRuntimeActiveTask(
+              runtimeState,
+              result.identifier
             );
             console.log(chalk.yellow(`  ↻ ${result.identifier}: Pane still active, queuing retry`));
           } else {
             // Permanent failure - pane is actually dead
-            executionState = failTask(
-              executionState,
-              result.identifier,
-              executionConfig.tui?.state_dir
+            runtimeState = failRuntimeTask(
+              runtimeState,
+              result.identifier
             );
             console.log(chalk.red(`  ✗ ${result.identifier}: ${result.error ?? result.status}`));
           }
@@ -455,8 +447,15 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
     console.log(`  Tasks: ${finalStats.done}/${finalStats.total} completed`);
     console.log(`  Time: ${formatElapsed(Date.now() - startTime)}`);
 
-    // Clear active tasks from execution state since loop is done
-    clearAllActiveTasks(taskId, executionConfig.tui?.state_dir);
+    // Clear active tasks from runtime state since loop is done
+    clearAllRuntimeActiveTasks(taskId);
+
+    // Mark mobius session as completed or failed based on outcome
+    if (allComplete) {
+      endMobiusSession(taskId, 'completed');
+    } else if (anyFailed) {
+      endMobiusSession(taskId, 'failed');
+    }
 
     // Cleanup on success
     if (allComplete && executionConfig.cleanup_on_success !== false) {
@@ -480,8 +479,9 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       console.log(chalk.gray(`  tmux attach -t ${sessionName}`));
     }
   } catch (error) {
-    // Clear active tasks from execution state on error
-    clearAllActiveTasks(taskId, executionConfig.tui?.state_dir);
+    // Clear active tasks from runtime state on error
+    clearAllRuntimeActiveTasks(taskId);
+    endMobiusSession(taskId, 'failed');
 
     console.error(chalk.red('\nLoop error:'));
     console.error(chalk.gray(error instanceof Error ? error.message : String(error)));
@@ -607,19 +607,21 @@ function formatElapsed(ms: number): string {
 }
 
 /**
- * Process skill output and execute SDK status updates
+ * Process skill output and queue updates for later sync
  *
- * Parses the structured output from a skill and performs appropriate
- * actions based on the status (update issue status, add comments, etc.)
+ * Parses the structured output from a skill and queues appropriate
+ * updates to pending-updates.json for later sync via `mobius push`.
  *
  * @param rawOutput - The raw output string from the skill (pane content)
  * @param backend - The backend to use for SDK calls (linear or jira)
+ * @param parentId - The parent issue identifier for queuing updates
  * @returns Whether the skill output was successfully processed
  */
-async function processSkillOutput(
+function processSkillOutput(
   rawOutput: string,
-  backend: Backend
-): Promise<{ processed: boolean; status?: string; error?: string }> {
+  backend: Backend,
+  parentId: string
+): { processed: boolean; status?: string; error?: string } {
   // Try to extract just the status for quick check
   const status = extractStatus(rawOutput);
   if (!status) {
@@ -627,7 +629,7 @@ async function processSkillOutput(
     return { processed: false };
   }
 
-  // Only process terminal statuses that require SDK updates
+  // Only process terminal statuses that require updates
   if (!isTerminalStatus(status)) {
     return { processed: true, status };
   }
@@ -637,9 +639,9 @@ async function processSkillOutput(
     const parsed = parseSkillOutput(rawOutput);
     const output = parsed.output;
 
-    // Execute SDK updates based on the status
+    // Queue updates for later sync via `mobius push`
     if (backend === 'linear') {
-      await executeLinearUpdates(output);
+      queueLinearUpdates(output, parentId);
     }
     // TODO: Add Jira support when needed
 
@@ -657,58 +659,73 @@ async function processSkillOutput(
 }
 
 /**
- * Execute Linear SDK updates based on parsed skill output
+ * Queue Linear updates for later sync via `mobius push`
+ *
+ * Instead of making direct SDK calls, this queues updates to
+ * pending-updates.json for batch sync.
  */
-async function executeLinearUpdates(
-  output: ReturnType<typeof parseSkillOutput>['output']
-): Promise<void> {
+function queueLinearUpdates(
+  output: ReturnType<typeof parseSkillOutput>['output'],
+  parentId: string
+): void {
   switch (output.status) {
     case 'SUBTASK_COMPLETE': {
-      // Move subtask to Done
+      // Queue status change to Done
       if (output.subtaskId) {
-        const result = await updateLinearIssueStatus(output.subtaskId, 'Done');
-        if (result.success) {
-          console.log(chalk.gray(`  SDK: Updated ${output.subtaskId} to Done`));
-        } else {
-          console.log(chalk.gray(`  SDK: Failed to update ${output.subtaskId}: ${result.error}`));
-        }
+        queuePendingUpdate(parentId, {
+          type: 'status_change',
+          issueId: output.subtaskId,
+          identifier: output.subtaskId,
+          oldStatus: 'In Progress',
+          newStatus: 'Done',
+        });
+        console.log(chalk.gray(`  Queued: ${output.subtaskId} status -> Done`));
 
-        // Add completion comment with details
+        // Queue completion comment with details
         const commentBody = buildCompletionComment(output);
-        const commentResult = await addLinearComment(output.subtaskId, commentBody);
-        if (commentResult.success) {
-          console.log(chalk.gray(`  SDK: Added completion comment to ${output.subtaskId}`));
-        }
+        queuePendingUpdate(parentId, {
+          type: 'add_comment',
+          issueId: output.subtaskId,
+          identifier: output.subtaskId,
+          body: commentBody,
+        });
+        console.log(chalk.gray(`  Queued: ${output.subtaskId} completion comment`));
       }
       break;
     }
 
     case 'VERIFICATION_FAILED': {
-      // Keep subtask in progress but add failure comment
+      // Queue failure comment (keep subtask in progress)
       if (output.subtaskId) {
         const commentBody = buildFailureComment(output);
-        const commentResult = await addLinearComment(output.subtaskId, commentBody);
-        if (commentResult.success) {
-          console.log(chalk.gray(`  SDK: Added failure comment to ${output.subtaskId}`));
-        }
+        queuePendingUpdate(parentId, {
+          type: 'add_comment',
+          issueId: output.subtaskId,
+          identifier: output.subtaskId,
+          body: commentBody,
+        });
+        console.log(chalk.gray(`  Queued: ${output.subtaskId} failure comment`));
       }
       break;
     }
 
     case 'NEEDS_WORK': {
-      // Add rework comment with issues found
+      // Queue rework comment with issues found
       if (output.subtaskId) {
         const commentBody = buildNeedsWorkComment(output);
-        const commentResult = await addLinearComment(output.subtaskId, commentBody);
-        if (commentResult.success) {
-          console.log(chalk.gray(`  SDK: Added rework comment to ${output.subtaskId}`));
-        }
+        queuePendingUpdate(parentId, {
+          type: 'add_comment',
+          issueId: output.subtaskId,
+          identifier: output.subtaskId,
+          body: commentBody,
+        });
+        console.log(chalk.gray(`  Queued: ${output.subtaskId} rework comment`));
       }
       break;
     }
 
     // Other statuses (ALL_COMPLETE, ALL_BLOCKED, NO_SUBTASKS, PASS, FAIL)
-    // don't require SDK updates at the subtask level
+    // don't require updates at the subtask level
     default:
       break;
   }
