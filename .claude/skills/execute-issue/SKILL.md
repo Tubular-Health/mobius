@@ -37,61 +37,147 @@ The workflow for each invocation:
 The loop script handles iteration. This skill handles ONE task.
 </one_subtask_rule>
 
-<backend_detection>
-**FIRST**: Detect the backend from mobius config before proceeding.
+<context_input>
+**The mobius loop provides issue context via environment variable and local files.**
 
-Read `~/.config/mobius/config.yaml` or `mobius.config.yaml` in the project root:
+The skill receives context through:
+1. `MOBIUS_CONTEXT_FILE` environment variable - path to the context JSON file
+2. Local files at `~/.mobius/issues/{parentId}/`
 
-```yaml
-backend: linear  # or 'jira'
+**Context file structure** (at `MOBIUS_CONTEXT_FILE` path):
+
+```json
+{
+  "parent": {
+    "id": "uuid",
+    "identifier": "MOB-161",
+    "title": "Parent issue title",
+    "description": "Full description with acceptance criteria",
+    "gitBranchName": "branch-name",
+    "status": "Backlog",
+    "labels": ["Feature"],
+    "url": "https://linear.app/..."
+  },
+  "subTasks": [
+    {
+      "id": "uuid",
+      "identifier": "MOB-177",
+      "title": "Sub-task title",
+      "description": "Full description with acceptance criteria",
+      "status": "pending",
+      "gitBranchName": "branch-name",
+      "blockedBy": [{"id": "uuid", "identifier": "MOB-176"}],
+      "blocks": [{"id": "uuid", "identifier": "MOB-182"}]
+    }
+  ],
+  "metadata": {
+    "fetchedAt": "2026-01-28T12:00:00Z",
+    "updatedAt": "2026-01-28T12:00:00Z",
+    "backend": "linear"
+  }
+}
 ```
 
-**Default**: If no backend is specified, default to `linear`.
+**Reading context**:
+```bash
+# Context file path from environment
+CONTEXT_FILE="$MOBIUS_CONTEXT_FILE"
 
-The detected backend determines which MCP tools to use throughout this skill. All subsequent tool references use the backend-specific tools from the `<backend_context>` section below.
-</backend_detection>
+# Or read directly from local storage
+cat ~/.mobius/issues/MOB-161/parent.json
+cat ~/.mobius/issues/MOB-161/tasks/MOB-177.json
+```
 
-<backend_context>
-<linear>
-**MCP Tools for Linear**:
+**Sub-task status values**: `pending`, `in_progress`, `done`
 
-- **Fetch issue**: `mcp__plugin_linear_linear__get_issue`
-  - Parameters: `id` (issue ID), `includeRelations` (boolean)
-  - Returns: Issue with status, description, blockedBy relations
+**Backend detection**: The `metadata.backend` field indicates whether the issue is from Linear or Jira. This affects status transition names but the skill should treat the context data uniformly.
+</context_input>
 
-- **List sub-tasks**: `mcp__plugin_linear_linear__list_issues`
-  - Parameters: `parentId`, `includeArchived`
-  - Returns: Array of child issues
+<structured_output>
+**This skill MUST output structured data for the mobius loop to parse.**
 
-- **Update status**: `mcp__plugin_linear_linear__update_issue`
-  - Parameters: `id`, `state` (e.g., "In Progress", "Done")
-  - Transitions: Backlog -> In Progress -> Done
+At the END of your response, output a YAML or JSON block with the execution result. The mobius loop parses this to execute status updates, add comments, and determine next actions.
 
-- **Add comment**: `mcp__plugin_linear_linear__create_comment`
-  - Parameters: `issueId`, `body` (markdown)
-  - Use for: Work started, completion notes, progress updates
-</linear>
+**Output format** (YAML preferred for readability):
 
-<jira>
-**MCP Tools for Jira**:
+```yaml
+---
+status: SUBTASK_COMPLETE  # Required: one of the valid status values
+timestamp: "2026-01-28T12:00:00Z"  # Required: ISO-8601 timestamp
+subtaskId: "MOB-177"  # Required for subtask statuses
+parentId: "MOB-161"  # Required for parent-level statuses
 
-- **Fetch issue**: `mcp_plugin_atlassian_jira__get_issue`
-  - Parameters: `issueIdOrKey` (e.g., "PROJ-123")
-  - Returns: Issue with status, description, links (blocking relationships)
+# For SUBTASK_COMPLETE:
+commitHash: "abc1234"
+filesModified:
+  - "src/lib/feature.ts"
+  - "src/lib/feature.test.ts"
+verificationResults:
+  typecheck: PASS
+  tests: PASS
+  lint: PASS
+  subtaskVerify: PASS  # or N/A if no verify block
 
-- **List sub-tasks**: `mcp_plugin_atlassian_jira__list_issues`
-  - Parameters: `jql` (e.g., "parent = PROJ-123")
-  - Returns: Array of child issues
+# For SUBTASK_PARTIAL:
+progressMade:
+  - "Implemented core function"
+  - "Added type definitions"
+remainingWork:
+  - "Add unit tests"
+  - "Fix lint errors"
 
-- **Update status**: `mcp_plugin_atlassian_jira__transition_issue`
-  - Parameters: `issueIdOrKey`, `transitionId` or `transitionName`
-  - Transitions: To Do -> In Progress -> Done
+# For ALL_BLOCKED:
+blockedCount: 3
+waitingOn:
+  - "MOB-176"
+  - "MOB-175"
 
-- **Add comment**: `mcp_plugin_atlassian_jira__add_comment`
-  - Parameters: `issueIdOrKey`, `body` (markdown or Jira wiki markup)
-  - Use for: Work started, completion notes, progress updates
-</jira>
-</backend_context>
+# For VERIFICATION_FAILED:
+errorType: "tests"  # typecheck | tests | lint | subtask_verify
+errorOutput: "Test failed: expected 2 but got 3"
+attemptedFixes:
+  - "Updated expected value"
+  - "Fixed calculation logic"
+uncommittedFiles:
+  - "src/lib/feature.ts"
+---
+```
+
+**Valid status values**:
+| Status | When to use |
+|--------|-------------|
+| `SUBTASK_COMPLETE` | Sub-task fully implemented, verified, committed |
+| `SUBTASK_PARTIAL` | Partial progress made, continuing next loop |
+| `ALL_COMPLETE` | All sub-tasks of parent are done |
+| `ALL_BLOCKED` | Remaining sub-tasks are blocked |
+| `NO_SUBTASKS` | Parent has no sub-tasks |
+| `VERIFICATION_FAILED` | Tests/typecheck/lint failed after retries |
+
+**Critical requirements**:
+1. Output MUST be valid YAML or JSON
+2. Output MUST appear at the END of your response
+3. Output MUST include `status` and `timestamp` fields
+4. Include all required fields for the specific status type
+
+**Example complete output**:
+
+```yaml
+---
+status: SUBTASK_COMPLETE
+timestamp: "2026-01-28T16:45:00Z"
+subtaskId: "MOB-177"
+parentId: "MOB-161"
+commitHash: "f2ccd9e"
+filesModified:
+  - ".claude/skills/execute-issue/SKILL.md"
+verificationResults:
+  typecheck: PASS
+  tests: PASS
+  lint: PASS
+  subtaskVerify: PASS
+---
+```
+</structured_output>
 
 <context>
 This skill is the execution phase of the issue workflow:
@@ -173,9 +259,7 @@ Checkpoints are only used for **non-trivial tasks** (estimated >5 minutes or inv
 <save_checkpoint>
 **Add checkpoint comment to issue** after completing each phase.
 
-Use the backend-appropriate comment tool:
-- **Linear**: `mcp__plugin_linear_linear__create_comment`
-- **Jira**: `mcp_plugin_atlassian_jira__add_comment`
+Checkpoints are written to the local context and queued for sync. The checkpoint data is included in the structured output.
 
 **Checkpoint comment format** (structured for parsing):
 
@@ -309,20 +393,16 @@ When running in parallel mode, each agent receives a specific subtask ID to prev
 <detect_issue_type>
 **FIRST**: Determine if the passed issue ID is a subtask or a parent issue.
 
-Use the backend-appropriate fetch tool:
-- **Linear**: `mcp__plugin_linear_linear__get_issue` with `includeRelations: true`
-- **Jira**: `mcp_plugin_atlassian_jira__get_issue`
+Read from the context file provided via `MOBIUS_CONTEXT_FILE` environment variable.
 
-**Check the `parent` field in the response**:
+**Check the context structure**:
 
-1. **If `parent` field EXISTS** -> This is a **SUBTASK**
-   - The passed ID is the specific subtask to execute (e.g., "PROJ-124")
+1. **If context contains a specific subtask to execute** -> This is a **SUBTASK**
+   - The context file will have the subtask pre-selected
    - Skip the "find ready subtask" phase entirely
    - Use this subtask directly for implementation
-   - Load the parent issue for context (the `parent.id` from response)
 
-2. **If `parent` field is NULL/MISSING** -> This is a **PARENT ISSUE**
-   - The passed ID is the parent (e.g., "PROJ-123")
+2. **If context contains parent with multiple subtasks** -> Find ready subtask
    - Continue with the "find ready subtask" flow below
    - This is the fallback for backward compatibility
 
@@ -330,62 +410,53 @@ Use the backend-appropriate fetch tool:
 </detect_issue_type>
 
 <load_parent_issue>
-If the issue is a subtask, fetch its parent for high-level context.
-If the issue is a parent, this is the issue itself.
+Read the parent issue from the context file:
 
-Use the backend-appropriate fetch tool to get:
-- **Goal**: What the overall feature/fix achieves
+```bash
+# Read from context file
+cat "$MOBIUS_CONTEXT_FILE" | jq '.parent'
+```
+
+Extract:
+- **Goal**: What the overall feature/fix achieves (from description)
 - **Acceptance criteria**: High-level success conditions
 - **Context**: Any technical notes or constraints
 - **Related issues**: For broader understanding
 </load_parent_issue>
 
 <find_ready_subtask>
-**Skip this section if executing a specific subtask (issue had `parent` field).**
+**Skip this section if executing a specific subtask (context has pre-selected subtask).**
 
-If a parent issue was passed, list all sub-tasks:
-- **Linear**: `mcp__plugin_linear_linear__list_issues` with `parentId`
-- **Jira**: `mcp_plugin_atlassian_jira__list_issues` with JQL `parent = {issue-key}`
+Read all sub-tasks from the context file:
+
+```bash
+cat "$MOBIUS_CONTEXT_FILE" | jq '.subTasks[]'
+```
 
 For each sub-task, check:
-1. State is not "Done" or "Canceled"
-2. All blocking issues are in "Done" state
+1. Status is not "done" or "canceled"
+2. All blocking issues (in `blockedBy` array) have status "done"
 
 Select the FIRST sub-task where all blockers are resolved.
 
-**STOP CONDITIONS** (report and end immediately):
+**STOP CONDITIONS** (output structured status and end immediately):
 
 1. **All sub-tasks are Done**:
-   ```
-   STATUS: ALL_COMPLETE
-   All N sub-tasks of {parent-id} are complete.
-   Parent issue is ready for review.
-   ```
+   Output structured status with `status: ALL_COMPLETE`
 
 2. **All remaining sub-tasks are blocked**:
-   ```
-   STATUS: ALL_BLOCKED
-   N sub-tasks remain, but all are blocked.
-   Waiting on: {list of blocking issues}
-   ```
+   Output structured status with `status: ALL_BLOCKED`
 
 3. **No sub-tasks exist**:
-   ```
-   STATUS: NO_SUBTASKS
-   Issue {parent-id} has no sub-tasks.
-   Consider running /refine first.
-   ```
+   Output structured status with `status: NO_SUBTASKS`
 
-If any stop condition is met, output the status message and STOP. Do not continue.
+If any stop condition is met, output the structured status and STOP. Do not continue.
 </find_ready_subtask>
 
 <mark_in_progress>
-**IMMEDIATELY** after selecting a sub-task to work on, move it to "In Progress":
+**IMMEDIATELY** after selecting a sub-task to work on, note it as "In Progress" in your structured output.
 
-- **Linear**: `mcp__plugin_linear_linear__update_issue` with `state: "In Progress"`
-- **Jira**: `mcp_plugin_atlassian_jira__transition_issue` to "In Progress"
-
-Add a comment indicating work has started using the backend-appropriate comment tool.
+The mobius loop will handle the actual status update via SDK after parsing your output.
 
 **Why this matters**: Moving to "In Progress" immediately ensures:
 - Other agents (in parallel mode) won't pick up the same task
@@ -947,10 +1018,9 @@ Confirm:
 
 <status_update_phase>
 <update_subtask_status_done>
-After successful commit with all acceptance criteria met, move sub-task to "Done":
+After successful commit with all acceptance criteria met, include status update in your structured output.
 
-- **Linear**: `mcp__plugin_linear_linear__update_issue` with `state: "Done"`
-- **Jira**: `mcp_plugin_atlassian_jira__transition_issue` to "Done"
+The mobius loop will execute the actual status transition via SDK based on your output.
 
 **Criteria for moving to "Done"**:
 - All acceptance criteria from the sub-task are implemented
@@ -960,28 +1030,22 @@ After successful commit with all acceptance criteria met, move sub-task to "Done
 </update_subtask_status_done>
 
 <add_completion_comment>
-Add comment documenting the implementation using the backend-appropriate comment tool:
+Include completion details in your structured output. The mobius loop will create the comment via SDK.
 
-```markdown
-## Implementation Complete
+The structured output should include:
 
-**Commit**: {commit-hash}
-**Files modified**:
-- {file1}
-- {file2}
-
-**Changes**:
-{brief summary of what was implemented}
-
-**Verification**:
-- Typecheck: PASS
-- Tests: PASS
-- Lint: PASS
-
-**Acceptance Criteria**:
-- [x] {criterion 1}
-- [x] {criterion 2}
-- [x] {criterion 3}
+```yaml
+status: SUBTASK_COMPLETE
+subtaskId: "MOB-177"
+commitHash: "abc123"
+filesModified:
+  - "src/file1.ts"
+  - "src/file2.ts"
+verificationResults:
+  typecheck: PASS
+  tests: PASS
+  lint: PASS
+  subtaskVerify: PASS
 ```
 </add_completion_comment>
 
