@@ -215,6 +215,18 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
     while (iteration < maxIterations) {
       iteration++;
 
+      // Re-sync task graph from backend to pick up external status changes
+      graph = await syncGraphFromBackend(graph, parentIssue, backend);
+
+      // Check if verification task is complete - exit early with success
+      const verificationTask = getVerificationTask(graph);
+      if (verificationTask?.status === 'done') {
+        allComplete = true;
+        console.log(chalk.green('\n✓ Verification task completed successfully!'));
+        console.log(chalk.green(`  ${verificationTask.identifier}: ${verificationTask.title}`));
+        break;
+      }
+
       // Get ready tasks (combine fresh ready tasks with retry queue)
       let readyTasks = getReadyTasks(graph);
 
