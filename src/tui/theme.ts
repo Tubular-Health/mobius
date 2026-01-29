@@ -42,12 +42,12 @@ export const AURORA = {
  * Status color mappings using Nord Aurora palette
  */
 export const STATUS_COLORS: Record<TaskStatus, string> = {
-  done: AURORA.green,       // #A3BE8C
-  ready: FROST.nord8,       // #88C0D0 (cyan)
+  done: AURORA.green, // #A3BE8C
+  ready: FROST.nord8, // #88C0D0 (cyan)
   blocked: POLAR_NIGHT.nord3, // #4C566A (muted)
   in_progress: AURORA.yellow, // #EBCB8B
   pending: POLAR_NIGHT.nord3, // #4C566A (muted)
-  failed: AURORA.red,       // #BF616A
+  failed: AURORA.red, // #BF616A
 } as const;
 
 /**
@@ -66,8 +66,8 @@ export const STATUS_ICONS: Record<TaskStatus, string> = {
  * Border and structural element colors
  */
 export const STRUCTURE_COLORS = {
-  border: FROST.nord9,      // #81A1C1
-  header: FROST.nord8,      // #88C0D0
-  text: SNOW_STORM.nord4,   // #D8DEE9
+  border: FROST.nord9, // #81A1C1
+  header: FROST.nord8, // #88C0D0
+  text: SNOW_STORM.nord4, // #D8DEE9
   muted: POLAR_NIGHT.nord3, // #4C566A
 } as const;

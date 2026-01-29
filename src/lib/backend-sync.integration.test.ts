@@ -11,31 +11,31 @@
  * - But real behavior fails (push never called, verification fails)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
+  cleanupContext,
   queuePendingUpdate,
   readPendingUpdates,
   writePendingUpdates,
-  cleanupContext,
 } from './context-generator.js';
 import {
-  createTracker,
   assignTask,
-  verifyLinearCompletion,
+  createTracker,
   getRetryTasks,
   hasPermamentFailures,
   type VerifiedResult,
+  verifyLinearCompletion,
 } from './execution-tracker.js';
-import {
-  buildTaskGraph,
-  getReadyTasks,
-  updateTaskStatus,
-  getGraphStats,
-  type LinearIssue,
-  type SubTask,
-} from './task-graph.js';
 import { extractStatus, isTerminalStatus, parseSkillOutput } from './output-parser.js';
 import type { ExecutionResult } from './parallel-executor.js';
+import {
+  buildTaskGraph,
+  getGraphStats,
+  getReadyTasks,
+  type LinearIssue,
+  type SubTask,
+  updateTaskStatus,
+} from './task-graph.js';
 
 // =============================================================================
 // Test Helpers and Mocks
@@ -174,7 +174,7 @@ class MockLinearBackend {
     }
 
     const completedStatuses = ['Done', 'Completed', 'Cancelled'];
-    const isComplete = completedStatuses.some(s =>
+    const isComplete = completedStatuses.some((s) =>
       status.toLowerCase().includes(s.toLowerCase())
     );
 
@@ -190,7 +190,7 @@ async function simulatePush(
   backend: MockLinearBackend
 ): Promise<{ success: number; failed: number }> {
   const queue = readPendingUpdates(parentId);
-  const pending = queue.updates.filter(u => !u.syncedAt && !u.error);
+  const pending = queue.updates.filter((u) => !u.syncedAt && !u.error);
 
   let success = 0;
   let failed = 0;
@@ -340,12 +340,50 @@ function processSkillOutputAndQueue(
       }
 
       case 'NEEDS_WORK': {
-        if (output.subtaskId) {
+        // Support both execute-issue format (subtaskId) and verify-issue format (failingSubtasks)
+        const failingTasks: Array<{ id: string; identifier: string }> = [];
+
+        if ('subtaskId' in output && output.subtaskId) {
+          failingTasks.push({ id: output.subtaskId, identifier: output.subtaskId });
+        }
+        if ('failingSubtasks' in output && Array.isArray(output.failingSubtasks)) {
+          for (const task of output.failingSubtasks) {
+            failingTasks.push({ id: task.id, identifier: task.identifier });
+          }
+        }
+
+        // Queue status change for each failing task
+        for (const task of failingTasks) {
+          queuePendingUpdate(parentId, {
+            type: 'status_change',
+            issueId: task.id,
+            identifier: task.identifier,
+            oldStatus: 'Done',
+            newStatus: 'Todo',
+          });
+        }
+
+        // Queue feedback comments
+        if ('feedbackComments' in output && Array.isArray(output.feedbackComments)) {
+          for (const fc of output.feedbackComments) {
+            queuePendingUpdate(parentId, {
+              type: 'add_comment',
+              issueId: fc.subtaskId,
+              identifier: fc.subtaskId,
+              body: fc.comment,
+            });
+          }
+        } else if (
+          'subtaskId' in output &&
+          output.subtaskId &&
+          'issues' in output &&
+          Array.isArray(output.issues)
+        ) {
           queuePendingUpdate(parentId, {
             type: 'add_comment',
             issueId: output.subtaskId,
             identifier: output.subtaskId,
-            body: `## 🔧 Needs Rework\n\n### Issues\n${output.issues.map(i => `- ${i}`).join('\n')}`,
+            body: `## 🔧 Needs Rework\n\n### Issues\n${output.issues.map((i: string) => `- ${i}`).join('\n')}`,
           });
         }
         return { processed: true, status };
@@ -441,18 +479,14 @@ describe('Backend Sync Integration Tests', () => {
       expect(mockBackend.getComments('SYNC-101')[0]).toContain('Subtask Completed');
 
       // Step 5: Verify SUCCEEDS after push
-      const verifyAfterPush = await simulateProcessResults(
-        tracker,
-        [executionResult],
-        mockBackend
-      );
+      const verifyAfterPush = await simulateProcessResults(tracker, [executionResult], mockBackend);
       expect(verifyAfterPush[0].linearVerified).toBe(true);
       expect(verifyAfterPush[0].linearStatus).toBe('Done');
       expect(verifyAfterPush[0].shouldRetry).toBe(false);
 
       // Step 6: Verify pending updates are marked as synced
       const queueAfter = readPendingUpdates(testParentId);
-      const syncedUpdates = queueAfter.updates.filter(u => u.syncedAt);
+      const syncedUpdates = queueAfter.updates.filter((u) => u.syncedAt);
       expect(syncedUpdates.length).toBe(2);
     });
 
@@ -489,14 +523,10 @@ describe('Backend Sync Integration Tests', () => {
       // Verify pending queue has updates
       const queue = readPendingUpdates(testParentId);
       expect(queue.updates.length).toBe(2);
-      expect(queue.updates.every(u => !u.syncedAt)).toBe(true); // None synced
+      expect(queue.updates.every((u) => !u.syncedAt)).toBe(true); // None synced
 
       // Verification fails because Linear was never updated
-      const verification = await simulateProcessResults(
-        tracker,
-        [executionResult],
-        mockBackend
-      );
+      const verification = await simulateProcessResults(tracker, [executionResult], mockBackend);
 
       expect(verification[0].linearVerified).toBe(false);
       expect(verification[0].shouldRetry).toBe(true);
@@ -506,7 +536,7 @@ describe('Backend Sync Integration Tests', () => {
 
       // This is the key assertion: updates are queued but not pushed
       const queueCheck = readPendingUpdates(testParentId);
-      const pendingCount = queueCheck.updates.filter(u => !u.syncedAt).length;
+      const pendingCount = queueCheck.updates.filter((u) => !u.syncedAt).length;
       expect(pendingCount).toBe(2); // Still pending!
     });
 
@@ -544,11 +574,7 @@ describe('Backend Sync Integration Tests', () => {
         processSkillOutputAndQueue(rawOutput, testParentId);
 
         // Verification fails
-        const verification = await simulateProcessResults(
-          tracker,
-          [executionResult],
-          mockBackend
-        );
+        const verification = await simulateProcessResults(tracker, [executionResult], mockBackend);
 
         if (attempt < 3) {
           expect(verification[0].shouldRetry).toBe(true);
@@ -564,7 +590,7 @@ describe('Backend Sync Integration Tests', () => {
       expect(queue.updates.length).toBe(2); // Deduplication works correctly
 
       // All still pending
-      expect(queue.updates.every(u => !u.syncedAt)).toBe(true);
+      expect(queue.updates.every((u) => !u.syncedAt)).toBe(true);
     });
   });
 
@@ -603,11 +629,7 @@ describe('Backend Sync Integration Tests', () => {
       expect(pushResult.success).toBe(2);
 
       // Now verification succeeds
-      const verification = await simulateProcessResults(
-        tracker,
-        [executionResult],
-        mockBackend
-      );
+      const verification = await simulateProcessResults(tracker, [executionResult], mockBackend);
 
       expect(verification[0].linearVerified).toBe(true);
       expect(verification[0].shouldRetry).toBe(false);
@@ -652,7 +674,7 @@ describe('Backend Sync Integration Tests', () => {
       expect(verification1[0].linearVerified).toBe(true);
 
       // Update graph
-      let updatedGraph = updateTaskStatus(graph, task1.id, 'done');
+      const updatedGraph = updateTaskStatus(graph, task1.id, 'done');
 
       // Execute second task (now unblocked)
       const task2 = getReadyTasks(updatedGraph)[0];
@@ -678,7 +700,7 @@ describe('Backend Sync Integration Tests', () => {
 
       // All updates synced
       const queue = readPendingUpdates(testParentId);
-      const allSynced = queue.updates.every(u => u.syncedAt);
+      const allSynced = queue.updates.every((u) => u.syncedAt);
       expect(allSynced).toBe(true);
 
       // Both issues marked Done in backend
@@ -713,7 +735,7 @@ describe('Backend Sync Integration Tests', () => {
 
       // Updates marked with error
       const queue = readPendingUpdates(testParentId);
-      const failedUpdates = queue.updates.filter(u => u.error);
+      const failedUpdates = queue.updates.filter((u) => u.error);
       expect(failedUpdates.length).toBe(2);
       expect(failedUpdates[0].error).toContain('Issue not found');
     });
@@ -751,7 +773,7 @@ describe('Backend Sync Integration Tests', () => {
   });
 
   describe('NEEDS_WORK Flow', () => {
-    it('NEEDS_WORK queues rework comment and triggers retry', async () => {
+    it('NEEDS_WORK queues status change and rework comment', async () => {
       mockBackend.initIssue('SYNC-101', 'Done'); // Already completed
       mockBackend.initIssue('SYNC-VERIFY', 'In Progress');
 
@@ -762,22 +784,91 @@ describe('Backend Sync Integration Tests', () => {
       expect(result.processed).toBe(true);
       expect(result.status).toBe('NEEDS_WORK');
 
-      // Rework comment queued
+      // Status change and rework comment queued
       const queue = readPendingUpdates(testParentId);
-      expect(queue.updates.length).toBe(1);
-      expect(queue.updates[0].type).toBe('add_comment');
-      if (queue.updates[0].type === 'add_comment') {
-        expect(queue.updates[0].body).toContain('Needs Rework');
-        expect(queue.updates[0].identifier).toBe('SYNC-101'); // Target, not the verifier
+      expect(queue.updates.length).toBe(2);
+
+      // First update: status change to reopen the task
+      expect(queue.updates[0].type).toBe('status_change');
+      if (queue.updates[0].type === 'status_change') {
+        expect(queue.updates[0].identifier).toBe('SYNC-101');
+        expect(queue.updates[0].oldStatus).toBe('Done');
+        expect(queue.updates[0].newStatus).toBe('Todo');
       }
 
-      // Push the comment
+      // Second update: rework comment
+      expect(queue.updates[1].type).toBe('add_comment');
+      if (queue.updates[1].type === 'add_comment') {
+        expect(queue.updates[1].body).toContain('Needs Rework');
+        expect(queue.updates[1].identifier).toBe('SYNC-101');
+      }
+
+      // Push the updates
       await simulatePush(testParentId, mockBackend);
+
+      // Status changed to Todo
+      expect(mockBackend.getStatus('SYNC-101')).toBe('Todo');
 
       // Comment added to target issue
       const comments = mockBackend.getComments('SYNC-101');
       expect(comments.length).toBe(1);
       expect(comments[0]).toContain('Needs Rework');
+    });
+
+    it('NEEDS_WORK with verify-issue format handles multiple failing subtasks', async () => {
+      mockBackend.initIssue('SYNC-101', 'Done');
+      mockBackend.initIssue('SYNC-102', 'Done');
+      mockBackend.initIssue('SYNC-VERIFY', 'In Progress');
+
+      // Verify-issue format output with multiple failing subtasks
+      const rawOutput = `---
+status: NEEDS_WORK
+timestamp: ${new Date().toISOString()}
+parentId: SYNC-PARENT
+verificationTaskId: SYNC-VERIFY
+failingSubtasks:
+  - id: SYNC-101
+    identifier: SYNC-101
+    issues:
+      - type: critical
+        description: Missing tests
+  - id: SYNC-102
+    identifier: SYNC-102
+    issues:
+      - type: important
+        description: Code style issues
+reworkIteration: 1
+feedbackComments:
+  - subtaskId: SYNC-101
+    comment: "## Rework: Missing tests"
+  - subtaskId: SYNC-102
+    comment: "## Rework: Code style issues"
+---`;
+
+      const result = processSkillOutputAndQueue(rawOutput, testParentId);
+      expect(result.processed).toBe(true);
+      expect(result.status).toBe('NEEDS_WORK');
+
+      // Should have 4 updates: 2 status changes + 2 comments
+      const queue = readPendingUpdates(testParentId);
+      expect(queue.updates.length).toBe(4);
+
+      // Status changes for both tasks
+      const statusChanges = queue.updates.filter((u) => u.type === 'status_change');
+      expect(statusChanges.length).toBe(2);
+      expect(statusChanges.map((u) => u.identifier).sort()).toEqual(['SYNC-101', 'SYNC-102']);
+
+      // Comments for both tasks
+      const comments = queue.updates.filter((u) => u.type === 'add_comment');
+      expect(comments.length).toBe(2);
+      expect(comments.map((u) => u.identifier).sort()).toEqual(['SYNC-101', 'SYNC-102']);
+
+      // Push the updates
+      await simulatePush(testParentId, mockBackend);
+
+      // Both tasks reopened
+      expect(mockBackend.getStatus('SYNC-101')).toBe('Todo');
+      expect(mockBackend.getStatus('SYNC-102')).toBe('Todo');
     });
   });
 

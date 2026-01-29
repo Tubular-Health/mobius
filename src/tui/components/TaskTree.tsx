@@ -7,16 +7,16 @@
 
 import { Box, Text } from 'ink';
 import { memo, useMemo } from 'react';
+import { getCompletedTaskId, normalizeCompletedTask } from '../../lib/context-generator.js';
 import type { SubTask, TaskGraph, TaskStatus } from '../../lib/task-graph.js';
-import type { RuntimeState, RuntimeActiveTask, RuntimeCompletedTask } from '../../types/context.js';
-import { normalizeCompletedTask, getCompletedTaskId } from '../../lib/context-generator.js';
-import { TaskNode } from './TaskNode.js';
+import type { RuntimeActiveTask, RuntimeCompletedTask, RuntimeState } from '../../types/context.js';
 import { STRUCTURE_COLORS } from '../theme.js';
 import { getElapsedMs } from '../utils/formatDuration.js';
+import { TaskNode } from './TaskNode.js';
 
 export interface TaskTreeProps {
   graph: TaskGraph;
-  executionState?: RuntimeState;  // For live status updates
+  executionState?: RuntimeState; // For live status updates
   /** Tick counter from parent - drives elapsed time recalculation */
   tick?: number;
 }
@@ -34,7 +34,7 @@ function buildChildrenMap(graph: TaskGraph): Map<string, SubTask[]> {
       if (!childrenMap.has(parentId)) {
         childrenMap.set(parentId, []);
       }
-      childrenMap.get(parentId)!.push(task);
+      childrenMap.get(parentId)?.push(task);
     }
   }
 
@@ -130,9 +130,7 @@ function getStatusOverrides(
  * Build lookup maps for task timing info from execution state
  * Returns maps from task identifier -> timing info
  */
-function buildTimingMaps(
-  executionState?: RuntimeState
-): {
+function buildTimingMaps(executionState?: RuntimeState): {
   completedTaskMap: Map<string, RuntimeCompletedTask>;
   activeTaskMap: Map<string, RuntimeActiveTask>;
   failedTaskMap: Map<string, RuntimeCompletedTask>;
@@ -225,7 +223,8 @@ const TaskTreeNode = memo(function TaskTreeNode({
   const childPrefix = prefix + (isLast ? '    ' : '│   ');
 
   // Get timing info for this task (use task.identifier to look up)
-  const completedTaskInfo = completedTaskMap.get(task.identifier) ?? failedTaskMap.get(task.identifier);
+  const completedTaskInfo =
+    completedTaskMap.get(task.identifier) ?? failedTaskMap.get(task.identifier);
   const activeElapsedMs = activeElapsedMap.get(task.identifier);
 
   return (
@@ -275,7 +274,11 @@ const TaskTreeNode = memo(function TaskTreeNode({
  * └── [·] MOB-129: Integration tests (blocked by: 126, 128)
  * ```
  */
-export const TaskTree = memo(function TaskTree({ graph, executionState, tick }: TaskTreeProps): JSX.Element {
+export const TaskTree = memo(function TaskTree({
+  graph,
+  executionState,
+  tick: _tick,
+}: TaskTreeProps): JSX.Element {
   // Memoize expensive computations to avoid recalculating on every render
   const childrenMap = useMemo(() => buildChildrenMap(graph), [graph]);
   const rootTasks = useMemo(() => getRootTasks(graph), [graph]);
@@ -295,14 +298,12 @@ export const TaskTree = memo(function TaskTree({ graph, executionState, tick }: 
   const activeElapsedMap = useMemo(
     () => buildElapsedMap(activeTaskMap),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick drives updates
-    [activeTaskMap, tick]
+    [activeTaskMap]
   );
 
   return (
     <Box flexDirection="column">
-      <Text color={STRUCTURE_COLORS.header}>
-        Task Tree for {graph.parentIdentifier}:
-      </Text>
+      <Text color={STRUCTURE_COLORS.header}>Task Tree for {graph.parentIdentifier}:</Text>
       {rootTasks.map((task, index) => {
         const isLast = index === rootTasks.length - 1;
         return (

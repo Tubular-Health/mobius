@@ -1,20 +1,22 @@
 #!/usr/bin/env node
 
-import { createRequire } from 'module';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { program } from 'commander';
-import { doctor } from '../commands/doctor.js';
-import { setup } from '../commands/setup.js';
-import { run } from '../commands/run.js';
-import { loop } from '../commands/loop.js';
-import { tree } from '../commands/tree.js';
 import { showConfig } from '../commands/config.js';
+import { doctor } from '../commands/doctor.js';
+import { loop } from '../commands/loop.js';
+import { pull } from '../commands/pull.js';
+import { push } from '../commands/push.js';
+import { run } from '../commands/run.js';
+import { setId } from '../commands/set-id.js';
+import { setup } from '../commands/setup.js';
 import { submit } from '../commands/submit.js';
-import { sync } from '../commands/sync.js';
-import { tui } from './mobius-tui.js';
+import { tree } from '../commands/tree.js';
 import type { Backend, Model } from '../types.js';
+import { tui } from './mobius-tui.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -23,10 +25,7 @@ const require = createRequire(import.meta.url);
 const pkg = require('../../package.json') as { version: string };
 const version = pkg.version;
 
-program
-  .name('mobius')
-  .description('AI-Powered Development Workflow Tool')
-  .version(version);
+program.name('mobius').description('AI-Powered Development Workflow Tool').version(version);
 
 program
   .command('setup')
@@ -88,6 +87,10 @@ program
   .option('-p, --parallel <count>', 'Max parallel agents (overrides config)', parseInt)
   .option('-n, --max-iterations <count>', 'Maximum iterations', parseInt)
   .option('-f, --fresh', 'Clear stale state from previous executions before starting')
+  .option(
+    '--debug [verbosity]',
+    'Enable debug mode for state drift diagnostics (minimal|normal|verbose)'
+  )
   .action(async (taskId: string, options) => {
     await loop(taskId, {
       local: options.local,
@@ -96,6 +99,7 @@ program
       parallel: options.parallel,
       maxIterations: options.maxIterations,
       fresh: options.fresh,
+      debug: options.debug,
     });
   });
 
@@ -114,16 +118,38 @@ program
   });
 
 program
-  .command('sync [parent-id]')
-  .description('Sync pending local changes to Linear/Jira')
+  .command('push [parent-id]')
+  .description('Push pending local changes to Linear/Jira')
   .option('-b, --backend <backend>', 'Backend: linear or jira')
-  .option('--dry-run', 'Show pending changes without syncing')
-  .option('-a, --all', 'Sync all issues with pending updates')
+  .option('--dry-run', 'Show pending changes without pushing')
+  .option('-a, --all', 'Push all issues with pending updates')
   .action(async (parentId: string | undefined, options) => {
-    await sync(parentId, {
+    await push(parentId, {
       backend: options.backend as Backend | undefined,
       dryRun: options.dryRun,
       all: options.all,
+    });
+  });
+
+program
+  .command('pull [task-id]')
+  .description('Fetch fresh context from Linear/Jira')
+  .option('-b, --backend <backend>', 'Backend: linear or jira')
+  .action(async (taskId: string | undefined, options) => {
+    await pull(taskId, {
+      backend: options.backend as Backend | undefined,
+    });
+  });
+
+program
+  .command('set-id [task-id]')
+  .description('Set or show the current task ID')
+  .option('-b, --backend <backend>', 'Backend: linear or jira')
+  .option('-c, --clear', 'Clear the current task ID')
+  .action(async (taskId: string | undefined, options) => {
+    await setId(taskId, {
+      backend: options.backend as Backend | undefined,
+      clear: options.clear,
     });
   });
 
@@ -156,6 +182,10 @@ program
   .option('-d, --delay <seconds>', 'Delay between iterations (sequential mode)', parseInt)
   .option('-f, --fresh', 'Clear stale state from previous executions before starting')
   .option('--no-tui', 'Disable TUI dashboard (use traditional output)')
+  .option(
+    '--debug [verbosity]',
+    'Enable debug mode for state drift diagnostics (minimal|normal|verbose)'
+  )
   .action(async (taskId: string | undefined, options) => {
     // If no task ID, show help
     if (!taskId) {
@@ -164,7 +194,22 @@ program
     }
 
     // If task ID looks like a command, let commander handle it
-    if (['setup', 'doctor', 'config', 'tree', 'run', 'loop', 'submit', 'sync', 'tui', 'help'].includes(taskId)) {
+    if (
+      [
+        'setup',
+        'doctor',
+        'config',
+        'tree',
+        'run',
+        'loop',
+        'submit',
+        'push',
+        'pull',
+        'set-id',
+        'tui',
+        'help',
+      ].includes(taskId)
+    ) {
       return;
     }
 
@@ -189,6 +234,7 @@ program
         parallel: options.parallel,
         maxIterations: options.maxIterations,
         fresh: options.fresh,
+        debug: options.debug,
       });
       return;
     }
@@ -202,6 +248,7 @@ program
     if (options.parallel) loopArgs.push('--parallel', String(options.parallel));
     if (options.maxIterations) loopArgs.push('--max-iterations', String(options.maxIterations));
     if (options.fresh) loopArgs.push('--fresh');
+    if (options.debug) loopArgs.push('--debug', options.debug === true ? 'normal' : options.debug);
 
     // Spawn the loop process in the background
     const loopProcess = spawn(process.execPath, [join(__dirname, 'mobius.js'), ...loopArgs], {
@@ -230,7 +277,7 @@ program
     process.on('exit', cleanup);
 
     // Brief delay to allow loop to initialize state file
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Run the TUI in the foreground
     await tui(taskId, {

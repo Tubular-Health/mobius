@@ -5,71 +5,69 @@
  * Uses temporary directories to avoid polluting the real ~/.mobius directory.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
 import type {
   IssueContext,
   ParentIssueContext,
-  SubTaskContext,
   PendingUpdatesQueue,
+  RuntimeActiveTask,
+  RuntimeState,
+  SessionInfo,
+  SubTaskContext,
 } from '../types/context.js';
 import {
-  getMobiusBasePath,
-  getContextPath,
-  getParentContextPath,
-  getTasksDirectoryPath,
-  getTaskContextPath,
-  getPendingUpdatesPath,
-  getSyncLogPath,
-  getFullContextPath,
-  getExecutionPath,
-  getSessionPath,
-  getRuntimePath,
-  getCurrentSessionPointerPath,
-  writeFullContextFile,
-  readContext,
-  contextExists,
-  isContextFresh,
+  addRuntimeActiveTask,
   cleanupContext,
-  updateTaskContext,
-  readPendingUpdates,
-  writePendingUpdates,
-  queuePendingUpdate,
+  clearAllRuntimeActiveTasks,
+  clearCurrentSessionPointer,
+  completeRuntimeTask,
+  contextExists,
   // Session management
   createSession,
-  readSession,
-  writeSession,
-  updateSession,
-  endSession,
+  deleteRuntimeState,
   deleteSession,
-  setCurrentSessionPointer,
+  endSession,
+  failRuntimeTask,
+  getContextPath,
   getCurrentSessionParentId,
-  clearCurrentSessionPointer,
-  resolveTaskId,
-  resolveTaskContext,
+  getCurrentSessionPointerPath,
+  getExecutionPath,
+  getFullContextPath,
+  getMobiusBasePath,
+  getModalSummary,
+  getParentContextPath,
+  getPendingUpdatesPath,
+  getProgressSummary,
+  getRuntimePath,
+  getSessionPath,
+  getSyncLogPath,
+  getTaskContextPath,
+  getTasksDirectoryPath,
   // Runtime state management
   initializeRuntimeState,
-  readRuntimeState,
-  writeRuntimeState,
-  addRuntimeActiveTask,
-  completeRuntimeTask,
-  failRuntimeTask,
-  removeRuntimeActiveTask,
-  updateRuntimeTaskPane,
-  clearAllRuntimeActiveTasks,
-  deleteRuntimeState,
-  updateBackendStatus,
-  getProgressSummary,
-  getModalSummary,
+  isContextFresh,
   type PendingUpdateInput,
+  queuePendingUpdate,
+  readContext,
+  readPendingUpdates,
+  readRuntimeState,
+  readSession,
+  removeRuntimeActiveTask,
+  resolveTaskContext,
+  resolveTaskId,
+  setCurrentSessionPointer,
+  updateBackendStatus,
+  updateRuntimeTaskPane,
+  updateSession,
+  updateTaskContext,
+  writeFullContextFile,
+  writePendingUpdates,
+  writeRuntimeState,
+  writeSession,
 } from './context-generator.js';
-import type {
-  SessionInfo,
-  RuntimeState,
-  RuntimeActiveTask,
-} from '../types/context.js';
 
 describe('context-generator module', () => {
   let tempDir: string;
@@ -548,11 +546,7 @@ describe('context-generator module', () => {
         mkdirSync(contextPath, { recursive: true });
 
         // Write invalid JSON
-        writeFileSync(
-          getPendingUpdatesPath('INVALID-PENDING'),
-          'invalid json {{{',
-          'utf-8'
-        );
+        writeFileSync(getPendingUpdatesPath('INVALID-PENDING'), 'invalid json {{{', 'utf-8');
 
         const queue = readPendingUpdates('INVALID-PENDING');
         expect(queue.updates).toEqual([]);
@@ -1349,11 +1343,162 @@ describe('context-generator module', () => {
         const written = JSON.parse(readFileSync(runtimePath, 'utf-8'));
         expect(written.parentId).toBe(testParentId);
       });
+
+      it('rebuilds backendStatuses from synced pending updates', () => {
+        // Setup: write pending-updates.json with synced status changes
+        const queue: PendingUpdatesQueue = {
+          updates: [
+            {
+              id: 'update-1',
+              type: 'status_change',
+              issueId: 'issue-uuid-1',
+              identifier: 'RUNTIME-TEST-1',
+              oldStatus: 'pending',
+              newStatus: 'In Progress',
+              createdAt: '2024-01-15T10:00:00Z',
+              syncedAt: '2024-01-15T10:01:00Z',
+            },
+            {
+              id: 'update-2',
+              type: 'status_change',
+              issueId: 'issue-uuid-2',
+              identifier: 'RUNTIME-TEST-2',
+              oldStatus: 'In Progress',
+              newStatus: 'Done',
+              createdAt: '2024-01-15T11:00:00Z',
+              syncedAt: '2024-01-15T11:01:00Z',
+            },
+          ],
+        };
+        writePendingUpdates(testParentId, queue);
+
+        // Call initializeRuntimeState
+        const state = initializeRuntimeState(testParentId, 'Rebuild Test');
+
+        // Assert backendStatuses is populated with mapped TaskStatus values
+        expect(state.backendStatuses).toBeDefined();
+        expect(state.backendStatuses?.['RUNTIME-TEST-1']).toEqual({
+          identifier: 'RUNTIME-TEST-1',
+          status: 'in_progress', // Mapped from "In Progress"
+          syncedAt: '2024-01-15T10:01:00Z',
+        });
+        expect(state.backendStatuses?.['RUNTIME-TEST-2']).toEqual({
+          identifier: 'RUNTIME-TEST-2',
+          status: 'done', // Mapped from "Done"
+          syncedAt: '2024-01-15T11:01:00Z',
+        });
+
+        // Assert completedTasks includes tasks with "done" status
+        expect(state.completedTasks).toContain('RUNTIME-TEST-2');
+        expect(state.completedTasks).not.toContain('RUNTIME-TEST-1'); // in_progress, not done
+      });
+
+      it('keeps only the most recent synced status for each task', () => {
+        // Setup: multiple status changes for same task, only synced ones count
+        const queue: PendingUpdatesQueue = {
+          updates: [
+            {
+              id: 'update-1',
+              type: 'status_change',
+              issueId: 'issue-uuid',
+              identifier: 'RUNTIME-TEST-MULTI',
+              oldStatus: 'pending',
+              newStatus: 'In Progress',
+              createdAt: '2024-01-15T10:00:00Z',
+              syncedAt: '2024-01-15T10:01:00Z',
+            },
+            {
+              id: 'update-2',
+              type: 'status_change',
+              issueId: 'issue-uuid',
+              identifier: 'RUNTIME-TEST-MULTI',
+              oldStatus: 'In Progress',
+              newStatus: 'Done',
+              createdAt: '2024-01-15T11:00:00Z',
+              syncedAt: '2024-01-15T11:01:00Z', // More recent
+            },
+          ],
+        };
+        writePendingUpdates(testParentId, queue);
+
+        const state = initializeRuntimeState(testParentId, 'Multi Status Test');
+
+        // Should have the most recent status (mapped to TaskStatus)
+        expect(state.backendStatuses?.['RUNTIME-TEST-MULTI'].status).toBe('done');
+        expect(state.backendStatuses?.['RUNTIME-TEST-MULTI'].syncedAt).toBe('2024-01-15T11:01:00Z');
+
+        // Should be in completedTasks since final status is done
+        expect(state.completedTasks).toContain('RUNTIME-TEST-MULTI');
+      });
+
+      it('ignores unsynced pending updates', () => {
+        // Setup: mix of synced and unsynced updates
+        const queue: PendingUpdatesQueue = {
+          updates: [
+            {
+              id: 'update-synced',
+              type: 'status_change',
+              issueId: 'issue-uuid-1',
+              identifier: 'RUNTIME-TEST-SYNCED',
+              oldStatus: 'pending',
+              newStatus: 'Done',
+              createdAt: '2024-01-15T10:00:00Z',
+              syncedAt: '2024-01-15T10:01:00Z',
+            },
+            {
+              id: 'update-pending',
+              type: 'status_change',
+              issueId: 'issue-uuid-2',
+              identifier: 'RUNTIME-TEST-PENDING',
+              oldStatus: 'pending',
+              newStatus: 'In Progress',
+              createdAt: '2024-01-15T11:00:00Z',
+              // No syncedAt - not synced yet
+            },
+          ],
+        };
+        writePendingUpdates(testParentId, queue);
+
+        const state = initializeRuntimeState(testParentId, 'Unsynced Test');
+
+        // Only synced update should be in backendStatuses
+        expect(state.backendStatuses?.['RUNTIME-TEST-SYNCED']).toBeDefined();
+        expect(state.backendStatuses?.['RUNTIME-TEST-PENDING']).toBeUndefined();
+
+        // completedTasks should include synced Done task
+        expect(state.completedTasks).toContain('RUNTIME-TEST-SYNCED');
+        expect(state.completedTasks).not.toContain('RUNTIME-TEST-PENDING');
+      });
+
+      it('returns undefined backendStatuses when no synced status updates exist', () => {
+        // Setup: only non-status updates
+        const queue: PendingUpdatesQueue = {
+          updates: [
+            {
+              id: 'update-comment',
+              type: 'add_comment',
+              issueId: 'issue-uuid',
+              identifier: 'RUNTIME-TEST-COMMENT',
+              body: 'A comment',
+              createdAt: '2024-01-15T10:00:00Z',
+              syncedAt: '2024-01-15T10:01:00Z',
+            },
+          ],
+        };
+        writePendingUpdates(testParentId, queue);
+
+        const state = initializeRuntimeState(testParentId, 'No Status Test');
+
+        // Should be undefined since no status_change updates
+        expect(state.backendStatuses).toBeUndefined();
+        // completedTasks should be empty
+        expect(state.completedTasks).toEqual([]);
+      });
     });
 
     describe('readRuntimeState', () => {
       it('reads state from file', () => {
-        const original = initializeRuntimeState(testParentId, 'Test Issue', {
+        const _original = initializeRuntimeState(testParentId, 'Test Issue', {
           loopPid: 999,
         });
 
@@ -1450,7 +1595,7 @@ describe('context-generator module', () => {
     });
 
     describe('updateBackendStatus', () => {
-      it('adds backend status to runtime state', () => {
+      it('adds backend status to runtime state with mapped TaskStatus', () => {
         initializeRuntimeState(testParentId, 'Backend Status Test');
 
         updateBackendStatus(testParentId, 'MOB-124', 'Done');
@@ -1458,7 +1603,7 @@ describe('context-generator module', () => {
         const state = readRuntimeState(testParentId);
         expect(state?.backendStatuses).toBeDefined();
         expect(state?.backendStatuses?.['MOB-124']).toBeDefined();
-        expect(state?.backendStatuses?.['MOB-124'].status).toBe('Done');
+        expect(state?.backendStatuses?.['MOB-124'].status).toBe('done'); // Mapped from "Done"
         expect(state?.backendStatuses?.['MOB-124'].identifier).toBe('MOB-124');
         expect(state?.backendStatuses?.['MOB-124'].syncedAt).toBeDefined();
       });
@@ -1470,7 +1615,7 @@ describe('context-generator module', () => {
         updateBackendStatus(testParentId, 'MOB-125', 'Done');
 
         const state = readRuntimeState(testParentId);
-        expect(state?.backendStatuses?.['MOB-125'].status).toBe('Done');
+        expect(state?.backendStatuses?.['MOB-125'].status).toBe('done'); // Mapped from "Done"
       });
 
       it('preserves other backend statuses when updating one', () => {
@@ -1481,8 +1626,8 @@ describe('context-generator module', () => {
         updateBackendStatus(testParentId, 'MOB-126', 'Reopened');
 
         const state = readRuntimeState(testParentId);
-        expect(state?.backendStatuses?.['MOB-126'].status).toBe('Reopened');
-        expect(state?.backendStatuses?.['MOB-127'].status).toBe('In Progress');
+        expect(state?.backendStatuses?.['MOB-126'].status).toBe('pending'); // "Reopened" maps to pending
+        expect(state?.backendStatuses?.['MOB-127'].status).toBe('in_progress'); // Mapped from "In Progress"
       });
 
       it('does nothing if runtime state does not exist', () => {
@@ -1587,6 +1732,44 @@ describe('context-generator module', () => {
 
         expect(updated.activeTasks).toHaveLength(1);
         expect(updated.activeTasks[0].id).toBe('TASK-2');
+      });
+
+      it('prevents duplicate entries in completedTasks', () => {
+        const state = initializeRuntimeState(testParentId, 'Duplicate Prevention Test');
+
+        const task: RuntimeActiveTask = {
+          id: 'TASK-DUP',
+          pid: 1234,
+          pane: '%0',
+          startedAt: new Date(Date.now() - 5000).toISOString(),
+        };
+
+        // Add and complete the task
+        let updated = addRuntimeActiveTask(state, task);
+        updated = completeRuntimeTask(updated, 'TASK-DUP');
+
+        // Try to complete the same task again
+        updated = completeRuntimeTask(updated, 'TASK-DUP');
+
+        // Should still only have one entry
+        expect(updated.completedTasks).toHaveLength(1);
+        expect(updated.completedTasks[0]).toMatchObject({ id: 'TASK-DUP' });
+      });
+
+      it('prevents duplicates when task is already in completedTasks as string', () => {
+        const state = initializeRuntimeState(testParentId, 'String Duplicate Test');
+
+        // Manually set up state with a string-based completed task (legacy format)
+        const stateWithStringCompleted: RuntimeState = {
+          ...state,
+          completedTasks: ['TASK-LEGACY'] as unknown as RuntimeState['completedTasks'],
+        };
+
+        // Try to complete the same task
+        const updated = completeRuntimeTask(stateWithStringCompleted, 'TASK-LEGACY');
+
+        // Should still only have one entry
+        expect(updated.completedTasks).toHaveLength(1);
       });
     });
 

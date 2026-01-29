@@ -2,13 +2,13 @@
  * Unit tests for output-parser module
  */
 
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import {
-  parseSkillOutput,
   extractStatus,
-  isTerminalStatus,
-  isSuccessStatus,
   isFailureStatus,
+  isSuccessStatus,
+  isTerminalStatus,
+  parseSkillOutput,
   SkillOutputParseError,
 } from './output-parser.js';
 
@@ -130,7 +130,7 @@ describe('output-parser module', () => {
         }
       });
 
-      it('parses valid JSON NEEDS_WORK output', () => {
+      it('parses valid JSON NEEDS_WORK output (execute-issue format)', () => {
         const input = JSON.stringify({
           status: 'NEEDS_WORK',
           timestamp: '2024-01-15T14:30:00Z',
@@ -142,8 +142,34 @@ describe('output-parser module', () => {
         const result = parseSkillOutput(input);
 
         expect(result.output.status).toBe('NEEDS_WORK');
-        if (result.output.status === 'NEEDS_WORK') {
+        if (result.output.status === 'NEEDS_WORK' && 'issues' in result.output) {
           expect(result.output.issues).toEqual(['Missing error handling']);
+        }
+      });
+
+      it('parses valid JSON NEEDS_WORK output (verify-issue format)', () => {
+        const input = JSON.stringify({
+          status: 'NEEDS_WORK',
+          timestamp: '2024-01-15T14:30:00Z',
+          parentId: 'MOB-161',
+          verificationTaskId: 'MOB-191',
+          failingSubtasks: [
+            {
+              id: 'uuid-123',
+              identifier: 'MOB-189',
+              issues: [{ type: 'critical', description: 'Missing config validation' }],
+            },
+          ],
+          reworkIteration: 1,
+          feedbackComments: [{ subtaskId: 'MOB-189', comment: 'Please add config validation' }],
+        });
+
+        const result = parseSkillOutput(input);
+
+        expect(result.output.status).toBe('NEEDS_WORK');
+        if (result.output.status === 'NEEDS_WORK' && 'failingSubtasks' in result.output) {
+          expect(result.output.failingSubtasks).toHaveLength(1);
+          expect(result.output.failingSubtasks[0].identifier).toBe('MOB-189');
         }
       });
 

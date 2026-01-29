@@ -1,4 +1,4 @@
-import type { CheckResult, Backend } from '../../types.js';
+import type { Backend, CheckResult } from '../../types.js';
 
 /**
  * Check API key configuration based on backend
@@ -28,7 +28,8 @@ function checkLinearApiKey(): CheckResult {
       status: 'warn',
       message: 'LINEAR_API_KEY not set',
       required: false,
-      details: 'Set: export LINEAR_API_KEY="lin_api_xxxxx" - Get key from https://linear.app/settings/api',
+      details:
+        'Set: export LINEAR_API_KEY="lin_api_xxxxx" - Get key from https://linear.app/settings/api',
     };
   }
 

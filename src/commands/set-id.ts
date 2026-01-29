@@ -6,17 +6,17 @@
  */
 
 import chalk from 'chalk';
+import { readConfig } from '../lib/config.js';
 import {
-  readSession,
   createSession,
   deleteSession,
   getCurrentSessionParentId,
+  readSession,
   setCurrentSessionPointer,
 } from '../lib/context-generator.js';
 import { resolvePaths } from '../lib/paths.js';
-import { readConfig } from '../lib/config.js';
-import { BACKEND_ID_PATTERNS } from '../types.js';
 import type { Backend } from '../types.js';
+import { BACKEND_ID_PATTERNS } from '../types.js';
 
 export interface SetIdOptions {
   backend?: Backend;
@@ -29,10 +29,7 @@ export interface SetIdOptions {
  * @param taskId - Optional task ID to set
  * @param options - Command options
  */
-export async function setId(
-  taskId: string | undefined,
-  options: SetIdOptions
-): Promise<void> {
+export async function setId(taskId: string | undefined, options: SetIdOptions): Promise<void> {
   // Handle --clear flag
   if (options.clear) {
     const currentId = getCurrentSessionParentId();

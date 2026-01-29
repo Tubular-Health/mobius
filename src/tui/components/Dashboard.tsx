@@ -6,42 +6,47 @@
  */
 
 import { Box, Text, useApp, useInput } from 'ink';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  getModalSummary,
+  readPendingUpdates,
+  readRuntimeState,
+  watchRuntimeState,
+} from '../../lib/context-generator.js';
+import { debugLog, getRecentDebugEvents, isDebugEnabled } from '../../lib/debug-logger.js';
 import type { TaskGraph } from '../../lib/task-graph.js';
 import { getGraphStats } from '../../lib/task-graph.js';
-import type { TuiConfig, Backend } from '../../types.js';
-import { BackendStatusBox } from './BackendStatusBox.js';
-import type { BackendTask } from './BackendStatusBox.js';
-import type { RuntimeState } from '../../types/context.js';
-import { readRuntimeState, watchRuntimeState, getModalSummary } from '../../lib/context-generator.js';
 import { getSessionName } from '../../lib/tmux-display.js';
-import { tuiEvents, EXIT_REQUEST_EVENT } from '../events.js';
-import { TaskTree } from './TaskTree.js';
-import { AgentSlots } from './AgentSlots.js';
-import { Legend } from './Legend.js';
-import { Header } from './Header.js';
-import { ExitConfirmationModal } from './ExitConfirmationModal.js';
-import { STRUCTURE_COLORS, AURORA } from '../theme.js';
+import type { RuntimeState } from '../../types/context.js';
+import type { Backend, TuiConfig } from '../../types.js';
+import { EXIT_REQUEST_EVENT, tuiEvents } from '../events.js';
+import { AURORA, STRUCTURE_COLORS } from '../theme.js';
 import { formatDuration, getElapsedMs } from '../utils/formatDuration.js';
+import { AgentSlots } from './AgentSlots.js';
+import type { BackendTask } from './BackendStatusBox.js';
+import { BackendStatusBox } from './BackendStatusBox.js';
+import { DebugPanel } from './DebugPanel.js';
+import { ExitConfirmationModal } from './ExitConfirmationModal.js';
+import { Header } from './Header.js';
+import { Legend } from './Legend.js';
+import { TaskTree } from './TaskTree.js';
 
 /** Single tick interval for all time-based updates - consolidates all timers */
 const TICK_INTERVAL_MS = 1000;
 
 export interface DashboardProps {
   parentId: string;
-  graph: TaskGraph;        // Local/execution state (merged with runtime state)
-  apiGraph: TaskGraph;     // Backend state (unmodified API data)
-  backend: Backend;        // Which backend we're connected to
+  graph: TaskGraph; // Local/execution state (merged with runtime state)
+  apiGraph: TaskGraph; // Backend state (unmodified API data)
+  backend: Backend; // Which backend we're connected to
   config?: TuiConfig;
+  debugMode?: boolean; // Whether debug mode is enabled
 }
 
 /**
  * Check if all tasks are in a terminal state (done or failed)
  */
-function isExecutionComplete(
-  graph: TaskGraph,
-  executionState: RuntimeState | null
-): boolean {
+function isExecutionComplete(graph: TaskGraph, executionState: RuntimeState | null): boolean {
   if (!executionState) {
     return false;
   }
@@ -74,7 +79,14 @@ function isExecutionComplete(
  * │  Legend: [✓] Done  [→] Ready  [·] Blocked  [⟳] In Progress          │
  * └─────────────────────────────────────────────────────────────────────┘
  */
-export function Dashboard({ parentId, graph, apiGraph, backend, config }: DashboardProps): JSX.Element {
+export function Dashboard({
+  parentId,
+  graph,
+  apiGraph,
+  backend,
+  config,
+  debugMode,
+}: DashboardProps): JSX.Element {
   const { exit } = useApp();
   const [executionState, setRuntimeState] = useState<RuntimeState | null>(null);
   const [isComplete, setIsComplete] = useState(false);
@@ -83,18 +95,38 @@ export function Dashboard({ parentId, graph, apiGraph, backend, config }: Dashbo
   const [tick, setTick] = useState(0);
   // Exit confirmation modal state
   const [showExitModal, setShowExitModal] = useState(false);
+  // Debug events for the panel
+  const [debugEvents, setDebugEvents] = useState(getRecentDebugEvents());
+  // Pending update count for drift indicator
+  const [pendingCount, setPendingCount] = useState(0);
 
   // Config defaults
   const showLegend = config?.show_legend ?? true;
+  // Debug mode enabled if prop is true or global debug is enabled
+  const showDebugPanel = debugMode || isDebugEnabled();
 
   // Memoize the state change handler to prevent recreating on each render
   // This callback is passed to watchRuntimeState and called when state file changes
   const handleStateChange = useCallback(
     (state: RuntimeState | null) => {
+      // Log TUI state receive event for debugging
+      if (showDebugPanel) {
+        debugLog('tui_state_receive', 'tui', parentId, {
+          activeTasks: state?.activeTasks.length ?? 0,
+          completedTasks: state?.completedTasks.length ?? 0,
+          failedTasks: state?.failedTasks.length ?? 0,
+        });
+        // Update debug events from ring buffer
+        setDebugEvents(getRecentDebugEvents());
+        // Update pending count for drift indicator
+        const queue = readPendingUpdates(parentId);
+        setPendingCount(queue.updates.filter((u) => !u.syncedAt && !u.error).length);
+      }
+
       setRuntimeState(state);
       setIsComplete(isExecutionComplete(graph, state));
     },
-    [graph]
+    [graph, parentId, showDebugPanel]
   );
 
   // Subscribe to runtime state file changes
@@ -230,7 +262,7 @@ export function Dashboard({ parentId, graph, apiGraph, backend, config }: Dashbo
           return {
             identifier: t.identifier,
             // Use pushed status if available, otherwise fall back to API graph
-            status: pushedStatus ? pushedStatus.status as typeof t.status : t.status,
+            status: pushedStatus ? (pushedStatus.status as typeof t.status) : t.status,
           };
         })
         .sort((a, b) => a.identifier.localeCompare(b.identifier)),
@@ -243,12 +275,12 @@ export function Dashboard({ parentId, graph, apiGraph, backend, config }: Dashbo
     if (!executionState?.startedAt) return undefined;
     return getElapsedMs(executionState.startedAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- tick drives updates
-  }, [executionState?.startedAt, tick]);
+  }, [executionState?.startedAt]);
 
   // Show "Waiting for execution..." when state file missing
   if (!executionState) {
     return (
-      <Box flexDirection="column" padding={1} >
+      <Box flexDirection="column" padding={1}>
         <Header parentId={parentId} elapsedMs={undefined} />
         {/* Side-by-side: Task Tree + Backend Status */}
         <Box flexDirection="row">
@@ -280,7 +312,7 @@ export function Dashboard({ parentId, graph, apiGraph, backend, config }: Dashbo
     const statusText = hasFailures ? 'completed with failures' : 'completed successfully';
 
     return (
-      <Box flexDirection="column" padding={1} >
+      <Box flexDirection="column" padding={1}>
         <Header parentId={parentId} elapsedMs={elapsedMs} />
         {/* Side-by-side: Task Tree + Backend Status */}
         <Box flexDirection="row">
@@ -298,15 +330,14 @@ export function Dashboard({ parentId, graph, apiGraph, backend, config }: Dashbo
             Execution {statusText}
           </Text>
           <Text color={STRUCTURE_COLORS.text}>
-            Total: {stats.total} | Done: {completedCount} | Failed: {failedCount} | Runtime: {formatDuration(elapsedMs ?? 0)}
+            Total: {stats.total} | Done: {completedCount} | Failed: {failedCount} | Runtime:{' '}
+            {formatDuration(elapsedMs ?? 0)}
           </Text>
         </Box>
 
         {/* Exit instruction */}
         <Box marginTop={1}>
-          <Text color={STRUCTURE_COLORS.muted}>
-            Exiting in 2s... (press any key to exit now)
-          </Text>
+          <Text color={STRUCTURE_COLORS.muted}>Exiting in 2s... (press any key to exit now)</Text>
         </Box>
 
         {showLegend && (
@@ -324,7 +355,7 @@ export function Dashboard({ parentId, graph, apiGraph, backend, config }: Dashbo
 
   // Normal running state - show full dashboard
   return (
-    <Box flexDirection="column" padding={1} >
+    <Box flexDirection="column" padding={1}>
       {/* Header */}
       <Header parentId={parentId} elapsedMs={elapsedMs} />
 
@@ -340,16 +371,20 @@ export function Dashboard({ parentId, graph, apiGraph, backend, config }: Dashbo
 
       {/* Agent Slots */}
       <Box marginTop={1}>
-        <AgentSlots
-          activeTasks={executionState.activeTasks}
-          maxSlots={4}
-        />
+        <AgentSlots activeTasks={executionState.activeTasks} maxSlots={4} />
       </Box>
 
       {/* Legend */}
       {showLegend && (
         <Box marginTop={1}>
           <Legend visible={showLegend} />
+        </Box>
+      )}
+
+      {/* Debug Panel - shown when debug mode is enabled */}
+      {showDebugPanel && (
+        <Box marginTop={1}>
+          <DebugPanel events={debugEvents} pendingCount={pendingCount} maxLines={8} />
         </Box>
       )}
 

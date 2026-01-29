@@ -7,16 +7,16 @@
 
 import chalk from 'chalk';
 import ora from 'ora';
-import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
-import { BACKEND_ID_PATTERNS } from '../types.js';
-import type { Backend } from '../types.js';
 import {
-  resolveTaskId,
   generateContext,
-  writeFullContextFile,
   getFullContextPath,
+  resolveTaskId,
+  writeFullContextFile,
 } from '../lib/context-generator.js';
+import { resolvePaths } from '../lib/paths.js';
+import type { Backend } from '../types.js';
+import { BACKEND_ID_PATTERNS } from '../types.js';
 
 export interface PullOptions {
   backend?: Backend;
@@ -28,10 +28,7 @@ export interface PullOptions {
  * @param taskId - Optional task ID (falls back to current task)
  * @param options - Command options
  */
-export async function pull(
-  taskId: string | undefined,
-  options: PullOptions
-): Promise<void> {
+export async function pull(taskId: string | undefined, options: PullOptions): Promise<void> {
   // Resolve task ID
   const resolvedId = resolveTaskId(taskId);
 

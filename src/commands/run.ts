@@ -1,10 +1,10 @@
 import { existsSync } from 'node:fs';
-import { execa } from 'execa';
 import chalk from 'chalk';
-import { resolvePaths } from '../lib/paths.js';
+import { execa } from 'execa';
 import { readConfig } from '../lib/config.js';
-import { BACKEND_ID_PATTERNS } from '../types.js';
+import { resolvePaths } from '../lib/paths.js';
 import type { Backend, Model } from '../types.js';
+import { BACKEND_ID_PATTERNS } from '../types.js';
 
 interface RunOptions {
   local?: boolean;

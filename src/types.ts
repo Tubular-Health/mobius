@@ -5,10 +5,10 @@ export type Model = 'opus' | 'sonnet' | 'haiku';
  * TUI dashboard configuration options
  */
 export interface TuiConfig {
-  show_legend?: boolean;        // Default: true
-  state_dir?: string;           // Default: ~/.mobius/state/
-  panel_refresh_ms?: number;    // Default: 300
-  panel_lines?: number;         // Default: 8 (lines per agent panel)
+  show_legend?: boolean; // Default: true
+  state_dir?: string; // Default: ~/.mobius/state/
+  panel_refresh_ms?: number; // Default: 300
+  panel_lines?: number; // Default: 8 (lines per agent panel)
 }
 
 /**
@@ -16,31 +16,31 @@ export interface TuiConfig {
  * Used by verify-issue skill to create verification sub-tasks
  */
 export interface VerificationConfig {
-  coverage_threshold: number;      // Minimum test coverage percentage (default: 80)
+  coverage_threshold: number; // Minimum test coverage percentage (default: 80)
   require_all_tests_pass: boolean; // Whether all tests must pass (default: true)
-  performance_check: boolean;      // Enable performance regression checks (default: true)
-  security_check: boolean;         // Enable security vulnerability checks (default: true)
-  max_rework_iterations: number;   // Maximum rework cycles before escalation (default: 3)
+  performance_check: boolean; // Enable performance regression checks (default: true)
+  security_check: boolean; // Enable security vulnerability checks (default: true)
+  max_rework_iterations: number; // Maximum rework cycles before escalation (default: 3)
 }
 
 /**
  * Represents an actively running task with its process info
  */
 export interface ActiveTask {
-  id: string;                    // Task identifier (e.g., "MOB-126")
-  pid: number;                   // Claude process ID
-  pane: string;                  // tmux pane identifier (e.g., "%0")
-  startedAt: string;             // ISO timestamp
-  worktree?: string;             // Worktree path if applicable
+  id: string; // Task identifier (e.g., "MOB-126")
+  pid: number; // Claude process ID
+  pane: string; // tmux pane identifier (e.g., "%0")
+  startedAt: string; // ISO timestamp
+  worktree?: string; // Worktree path if applicable
 }
 
 /**
  * Represents a completed or failed task with timing info
  */
 export interface CompletedTask {
-  id: string;                    // Task identifier (e.g., "MOB-126")
-  completedAt: string;           // ISO timestamp when task finished
-  duration: number;              // Duration in milliseconds
+  id: string; // Task identifier (e.g., "MOB-126")
+  completedAt: string; // ISO timestamp when task finished
+  duration: number; // Duration in milliseconds
 }
 
 /**
@@ -51,18 +51,18 @@ export interface CompletedTask {
  * and new format (CompletedTask[]) for backward compatibility.
  */
 export interface ExecutionState {
-  parentId: string;              // Parent issue identifier (e.g., "MOB-11")
-  parentTitle: string;           // Parent issue title for display
+  parentId: string; // Parent issue identifier (e.g., "MOB-11")
+  parentTitle: string; // Parent issue title for display
 
-  activeTasks: ActiveTask[];     // Currently running tasks
-  completedTasks: (string | CompletedTask)[];  // Completed task identifiers or objects
-  failedTasks: (string | CompletedTask)[];     // Failed task identifiers or objects
+  activeTasks: ActiveTask[]; // Currently running tasks
+  completedTasks: (string | CompletedTask)[]; // Completed task identifiers or objects
+  failedTasks: (string | CompletedTask)[]; // Failed task identifiers or objects
 
-  startedAt: string;             // ISO timestamp - loop start
-  updatedAt: string;             // ISO timestamp - last update
+  startedAt: string; // ISO timestamp - loop start
+  updatedAt: string; // ISO timestamp - last update
 
-  loopPid?: number;              // PID of the loop process (for cleanup)
-  totalTasks?: number;           // Total number of tasks (for completion detection)
+  loopPid?: number; // PID of the loop process (for cleanup)
+  totalTasks?: number; // Total number of tasks (for completion detection)
 }
 
 export interface ExecutionConfig {
@@ -77,17 +77,18 @@ export interface ExecutionConfig {
   cleanup_on_success?: boolean;
   base_branch?: string;
   // Retry and verification settings
-  max_retries?: number;           // Maximum retry attempts per task (default: 2)
-  verification_timeout?: number;  // Timeout for Linear verification in ms (default: 5000)
+  max_retries?: number; // Maximum retry attempts per task (default: 2)
+  verification_timeout?: number; // Timeout for Linear verification in ms (default: 5000)
   // TUI dashboard options
   tui?: TuiConfig;
   // Quality gate verification settings
   verification?: VerificationConfig;
+  // Tool filtering - patterns to disable specific MCP tools
+  // Supports glob patterns: "mcp__linear__*", "mcp__atlassian__*"
+  disallowed_tools?: string[];
 }
 
-export interface LinearConfig {
-  // Linear MCP auto-configures via Claude Code
-}
+export type LinearConfig = Record<string, never>;
 
 export interface JiraConfig {
   base_url?: string;

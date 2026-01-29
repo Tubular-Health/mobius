@@ -6,8 +6,8 @@
  */
 
 import chalk from 'chalk';
-import type { TaskGraph, SubTask, TaskStatus } from './task-graph.js';
-import { getReadyTasks, getBlockers } from './task-graph.js';
+import type { SubTask, TaskGraph, TaskStatus } from './task-graph.js';
+import { getBlockers, getReadyTasks } from './task-graph.js';
 
 /**
  * Nord color palette
@@ -24,9 +24,9 @@ const NORD = {
   nord5: '#E5E9F0',
   nord6: '#ECEFF4',
   // Frost (blues/cyans) - used for depth coloring
-  nord7: '#8FBCBB',  // teal
-  nord8: '#88C0D0',  // light blue
-  nord9: '#81A1C1',  // blue
+  nord7: '#8FBCBB', // teal
+  nord8: '#88C0D0', // light blue
+  nord9: '#81A1C1', // blue
   nord10: '#5E81AC', // dark blue
   // Aurora (accent colors) - used for status
   nord11: '#BF616A', // red
@@ -40,9 +40,9 @@ const NORD = {
  * Depth colors cycle through Frost palette
  */
 const DEPTH_COLORS = [
-  NORD.nord8,  // light blue (depth 0)
-  NORD.nord7,  // teal (depth 1)
-  NORD.nord9,  // blue (depth 2)
+  NORD.nord8, // light blue (depth 0)
+  NORD.nord7, // teal (depth 1)
+  NORD.nord9, // blue (depth 2)
   NORD.nord10, // dark blue (depth 3)
   NORD.nord15, // purple (depth 4)
 ];
@@ -51,12 +51,12 @@ const DEPTH_COLORS = [
  * Status colors from Aurora palette
  */
 const STATUS_COLORS: Record<TaskStatus, string> = {
-  done: NORD.nord14,       // green
-  ready: NORD.nord8,       // light blue
-  blocked: NORD.nord13,    // yellow
+  done: NORD.nord14, // green
+  ready: NORD.nord8, // light blue
+  blocked: NORD.nord13, // yellow
   in_progress: NORD.nord12, // orange
-  pending: NORD.nord3,     // gray
-  failed: NORD.nord11,     // red
+  pending: NORD.nord3, // gray
+  failed: NORD.nord11, // red
 };
 
 /**
@@ -111,7 +111,7 @@ export function renderAsciiTree(graph: TaskGraph): string {
     if (!childrenMap.has(parentId)) {
       childrenMap.set(parentId, []);
     }
-    childrenMap.get(parentId)!.push(task);
+    childrenMap.get(parentId)?.push(task);
   }
 
   // Sort children by identifier
@@ -179,9 +179,9 @@ function formatBlockerSuffix(task: SubTask, graph: TaskGraph): string {
     return '';
   }
 
-  const blockerIds = unresolvedBlockers.map((b) =>
-    chalk.hex(NORD.nord11)(b.identifier)
-  ).join(chalk.hex(NORD.nord3)(', '));
+  const blockerIds = unresolvedBlockers
+    .map((b) => chalk.hex(NORD.nord11)(b.identifier))
+    .join(chalk.hex(NORD.nord3)(', '));
 
   return chalk.hex(NORD.nord3)(` (blocked by: `) + blockerIds + chalk.hex(NORD.nord3)(')');
 }
@@ -195,7 +195,7 @@ export function renderLegend(): string {
   const blocked = chalk.hex(STATUS_COLORS.blocked)('[·] Blocked');
   const inProgress = chalk.hex(STATUS_COLORS.in_progress)('[!] In Progress');
 
-  return chalk.hex(NORD.nord4)('Legend: ') + `${done}  ${ready}  ${blocked}  ${inProgress}`;
+  return `${chalk.hex(NORD.nord4)('Legend: ')}${done}  ${ready}  ${blocked}  ${inProgress}`;
 }
 
 /**
@@ -208,15 +208,17 @@ export function renderReadySummary(graph: TaskGraph): string {
     return chalk.hex(NORD.nord13)('No tasks ready for execution');
   }
 
-  const taskIds = readyTasks.map((t) =>
-    chalk.hex(NORD.nord8).bold(t.identifier)
-  ).join(chalk.hex(NORD.nord3)(', '));
+  const taskIds = readyTasks
+    .map((t) => chalk.hex(NORD.nord8).bold(t.identifier))
+    .join(chalk.hex(NORD.nord3)(', '));
 
   const agentText = readyTasks.length === 1 ? '1 agent' : `${readyTasks.length} agents`;
 
-  return chalk.hex(NORD.nord4)('Ready for parallel execution: ') +
-         taskIds +
-         chalk.hex(NORD.nord3)(` (${agentText})`);
+  return (
+    chalk.hex(NORD.nord4)('Ready for parallel execution: ') +
+    taskIds +
+    chalk.hex(NORD.nord3)(` (${agentText})`)
+  );
 }
 
 /**

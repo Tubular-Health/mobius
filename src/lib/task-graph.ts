@@ -53,12 +53,22 @@ export function mapLinearStatus(linearStatus: string): TaskStatus {
   const statusLower = linearStatus.toLowerCase();
 
   // Done states
-  if (statusLower === 'done' || statusLower === 'completed' || statusLower === 'cancelled' || statusLower === 'canceled') {
+  if (
+    statusLower === 'done' ||
+    statusLower === 'completed' ||
+    statusLower === 'cancelled' ||
+    statusLower === 'canceled'
+  ) {
     return 'done';
   }
 
   // In progress states
-  if (statusLower === 'in progress' || statusLower === 'in review' || statusLower === 'started' || statusLower === 'active') {
+  if (
+    statusLower === 'in progress' ||
+    statusLower === 'in review' ||
+    statusLower === 'started' ||
+    statusLower === 'active'
+  ) {
     return 'in_progress';
   }
 
@@ -84,8 +94,8 @@ export function buildTaskGraph(
 
   // First pass: create all tasks
   for (const issue of issues) {
-    const blockedByIds = issue.relations?.blockedBy?.map(b => b.id) ?? [];
-    const blocksIds = issue.relations?.blocks?.map(b => b.id) ?? [];
+    const blockedByIds = issue.relations?.blockedBy?.map((b) => b.id) ?? [];
+    const blocksIds = issue.relations?.blocks?.map((b) => b.id) ?? [];
 
     const task: SubTask = {
       id: issue.id,
@@ -126,7 +136,7 @@ function calculateTaskStatus(task: SubTask, allTasks: Map<string, SubTask>): Tas
   }
 
   // Check if all blockers are done
-  const allBlockersDone = task.blockedBy.every(blockerId => {
+  const allBlockersDone = task.blockedBy.every((blockerId) => {
     const blocker = allTasks.get(blockerId);
     // If blocker not in our graph (external), assume it's done
     // This handles cases where blockedBy references tasks outside the parent

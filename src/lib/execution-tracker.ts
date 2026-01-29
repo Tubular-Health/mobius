@@ -82,19 +82,13 @@ export async function verifyLinearCompletion(
     });
 
     // Race the API call against the timeout
-    const issue = await Promise.race([
-      client.issue(taskIdentifier),
-      timeoutPromise,
-    ]);
+    const issue = await Promise.race([client.issue(taskIdentifier), timeoutPromise]);
 
     if (!issue) {
       return { verified: false, error: 'Issue not found' };
     }
 
-    const state = await Promise.race([
-      issue.state,
-      timeoutPromise,
-    ]);
+    const state = await Promise.race([issue.state, timeoutPromise]);
 
     const statusName = state?.name || 'Unknown';
 
@@ -102,7 +96,7 @@ export async function verifyLinearCompletion(
     const completedStatuses = ['done', 'completed', 'cancelled', 'canceled'];
 
     const lowerStatus = statusName.toLowerCase();
-    const isCompleted = completedStatuses.some(s => lowerStatus.includes(s));
+    const isCompleted = completedStatuses.some((s) => lowerStatus.includes(s));
 
     // Only mark as verified when Linear shows task is actually completed
     // "In Progress" means the agent is still working - don't mark as done yet
@@ -180,38 +174,31 @@ export async function processResults(
 /**
  * Get tasks that should be retried based on verification results
  */
-export function getRetryTasks(
-  results: VerifiedResult[],
-  allTasks: SubTask[]
-): SubTask[] {
-  const retryTaskIds = results
-    .filter(r => r.shouldRetry)
-    .map(r => r.taskId);
+export function getRetryTasks(results: VerifiedResult[], allTasks: SubTask[]): SubTask[] {
+  const retryTaskIds = results.filter((r) => r.shouldRetry).map((r) => r.taskId);
 
-  return allTasks.filter(t => retryTaskIds.includes(t.id));
+  return allTasks.filter((t) => retryTaskIds.includes(t.id));
 }
 
 /**
  * Get tasks that permanently failed (exceeded max retries)
  */
-export function getPermanentlyFailedTasks(
-  results: VerifiedResult[]
-): VerifiedResult[] {
-  return results.filter(r => !r.success && !r.shouldRetry);
+export function getPermanentlyFailedTasks(results: VerifiedResult[]): VerifiedResult[] {
+  return results.filter((r) => !r.success && !r.shouldRetry);
 }
 
 /**
  * Check if all verified results succeeded
  */
 export function allSucceeded(results: VerifiedResult[]): boolean {
-  return results.every(r => r.success && r.linearVerified);
+  return results.every((r) => r.success && r.linearVerified);
 }
 
 /**
  * Check if any task has permanently failed
  */
 export function hasPermamentFailures(results: VerifiedResult[]): boolean {
-  return results.some(r => !r.success && !r.shouldRetry);
+  return results.some((r) => !r.success && !r.shouldRetry);
 }
 
 /**

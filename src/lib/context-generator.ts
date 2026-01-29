@@ -6,25 +6,37 @@
  * and Jira backends based on configuration.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, renameSync, unlinkSync, watch, type FSWatcher } from 'node:fs';
-import { join } from 'node:path';
+import {
+  existsSync,
+  type FSWatcher,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  unlinkSync,
+  watch,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type {
+  ContextMetadata,
   IssueContext,
   ParentIssueContext,
-  SubTaskContext,
-  ContextMetadata,
-  PendingUpdatesQueue,
   PendingUpdate,
-  SessionInfo,
-  RuntimeState,
+  PendingUpdatesQueue,
   RuntimeActiveTask,
   RuntimeCompletedTask,
+  RuntimeState,
+  SessionInfo,
+  SubTaskContext,
 } from '../types/context.js';
 import type { Backend } from '../types.js';
 import { readConfig } from './config.js';
-import { fetchLinearIssue, fetchLinearSubTasks } from './linear.js';
+import { debugLog } from './debug-logger.js';
 import { fetchJiraIssue, fetchJiraSubTasks } from './jira.js';
+import { fetchLinearIssue, fetchLinearSubTasks } from './linear.js';
 import { mapLinearStatus } from './task-graph.js';
 
 /**
@@ -96,10 +108,7 @@ export function getFullContextPath(parentId: string): string {
  * @param context - The IssueContext to write
  * @returns The path to the written context file
  */
-export function writeFullContextFile(
-  parentIdentifier: string,
-  context: IssueContext
-): string {
+export function writeFullContextFile(parentIdentifier: string, context: IssueContext): string {
   ensureContextDirectories(parentIdentifier);
   const contextFilePath = getFullContextPath(parentIdentifier);
   writeFileSync(contextFilePath, JSON.stringify(context, null, 2), 'utf-8');
@@ -208,9 +217,7 @@ async function fetchJiraParentContext(
 /**
  * Fetch sub-tasks from Linear and convert to SubTaskContext format
  */
-async function fetchLinearSubTaskContexts(
-  parentId: string
-): Promise<SubTaskContext[]> {
+async function fetchLinearSubTaskContexts(parentId: string): Promise<SubTaskContext[]> {
   const subTasks = await fetchLinearSubTasks(parentId);
   if (!subTasks) {
     return [];
@@ -231,9 +238,7 @@ async function fetchLinearSubTaskContexts(
 /**
  * Fetch sub-tasks from Jira and convert to SubTaskContext format
  */
-async function fetchJiraSubTaskContexts(
-  parentKey: string
-): Promise<SubTaskContext[]> {
+async function fetchJiraSubTaskContexts(parentKey: string): Promise<SubTaskContext[]> {
   const subTasks = await fetchJiraSubTasks(parentKey);
   if (!subTasks) {
     return [];
@@ -431,7 +436,7 @@ export function isContextFresh(
   }
 
   try {
-    const stats = require('fs').statSync(parentPath);
+    const stats = require('node:fs').statSync(parentPath);
     const age = Date.now() - stats.mtimeMs;
     return age < maxAgeMs;
   } catch {
@@ -463,10 +468,7 @@ export function cleanupContext(parentIdentifier: string): void {
  * @param parentIdentifier - The parent issue identifier
  * @param task - The updated task context
  */
-export function updateTaskContext(
-  parentIdentifier: string,
-  task: SubTaskContext
-): void {
+export function updateTaskContext(parentIdentifier: string, task: SubTaskContext): void {
   const taskPath = getTaskContextPath(parentIdentifier, task.identifier);
   const tasksDir = getTasksDirectoryPath(parentIdentifier);
 
@@ -499,16 +501,9 @@ export function readPendingUpdates(parentIdentifier: string): PendingUpdatesQueu
 /**
  * Write pending updates queue
  */
-export function writePendingUpdates(
-  parentIdentifier: string,
-  queue: PendingUpdatesQueue
-): void {
+export function writePendingUpdates(parentIdentifier: string, queue: PendingUpdatesQueue): void {
   ensureContextDirectories(parentIdentifier);
-  writeFileSync(
-    getPendingUpdatesPath(parentIdentifier),
-    JSON.stringify(queue, null, 2),
-    'utf-8'
-  );
+  writeFileSync(getPendingUpdatesPath(parentIdentifier), JSON.stringify(queue, null, 2), 'utf-8');
 }
 
 /**
@@ -517,9 +512,21 @@ export function writePendingUpdates(
  * We need to define this explicitly because Omit doesn't distribute over unions.
  */
 export type PendingUpdateInput =
-  | { type: 'status_change'; issueId: string; identifier: string; oldStatus: string; newStatus: string }
+  | {
+      type: 'status_change';
+      issueId: string;
+      identifier: string;
+      oldStatus: string;
+      newStatus: string;
+    }
   | { type: 'add_comment'; issueId: string; identifier: string; body: string }
-  | { type: 'create_subtask'; parentId: string; title: string; description: string; blockedBy?: string[] }
+  | {
+      type: 'create_subtask';
+      parentId: string;
+      title: string;
+      description: string;
+      blockedBy?: string[];
+    }
   | { type: 'update_description'; issueId: string; identifier: string; description: string }
   | { type: 'add_label'; issueId: string; identifier: string; label: string }
   | { type: 'remove_label'; issueId: string; identifier: string; label: string };
@@ -530,10 +537,7 @@ export type PendingUpdateInput =
  * Used to prevent duplicate updates from being queued when the same
  * change is detected multiple times (e.g., during polling or retries).
  */
-function isDuplicateUpdate(
-  existing: PendingUpdate,
-  incoming: PendingUpdateInput
-): boolean {
+function isDuplicateUpdate(existing: PendingUpdate, incoming: PendingUpdateInput): boolean {
   if (existing.type !== incoming.type) return false;
 
   switch (existing.type) {
@@ -585,17 +589,14 @@ function isDuplicateUpdate(
  * @param parentIdentifier - The parent issue identifier (e.g., "MOB-161")
  * @param update - The update to queue (without id and createdAt fields)
  */
-export function queuePendingUpdate(
-  parentIdentifier: string,
-  update: PendingUpdateInput
-): void {
+export function queuePendingUpdate(parentIdentifier: string, update: PendingUpdateInput): void {
   const queue = readPendingUpdates(parentIdentifier);
 
-  // Check for duplicate updates (both synced and unsynced)
-  // A status change like "In Progress → Done" should only be queued once
-  const isDuplicate = queue.updates.some(
-    existing => isDuplicateUpdate(existing, update)
-  );
+  // Check for duplicate updates - only check UNSYNCED updates
+  // Once an update has been synced, it shouldn't block new updates
+  // (e.g., status might have been changed externally and needs re-applying)
+  const unsyncedUpdates = queue.updates.filter((u) => !u.syncedAt && !u.error);
+  const isDuplicate = unsyncedUpdates.some((existing) => isDuplicateUpdate(existing, update));
 
   if (isDuplicate) {
     return;
@@ -881,7 +882,7 @@ function isLockStale(lockPath: string): boolean {
   try {
     const content = readFileSync(lockPath, 'utf-8');
     const lockTime = parseInt(content, 10);
-    if (isNaN(lockTime)) return true;
+    if (Number.isNaN(lockTime)) return true;
     return Date.now() - lockTime > LOCK_TIMEOUT_MS;
   } catch {
     return true;
@@ -1058,12 +1059,33 @@ export function withRuntimeStateSync(
   // Busy-wait for lock acquisition
   while (Date.now() - startTime < LOCK_TIMEOUT_MS) {
     if (tryAcquireLock(lockPath)) {
+      const lockAcquireTime = Date.now();
+      debugLog('lock_acquire', 'context-generator', parentId, {
+        waitMs: lockAcquireTime - startTime,
+      });
+
       try {
         const currentState = readRuntimeState(parentId);
+        debugLog('runtime_state_read', 'context-generator', parentId, {
+          activeTasks: currentState?.activeTasks.length ?? 0,
+          completedTasks: currentState?.completedTasks.length ?? 0,
+        });
+
         const newState = mutate(currentState);
         writeRuntimeState(newState);
+
+        debugLog('runtime_state_write', 'context-generator', parentId, {
+          activeTasks: newState.activeTasks.length,
+          completedTasks: newState.completedTasks.length,
+          failedTasks: newState.failedTasks.length,
+        });
+
         return newState;
       } finally {
+        const lockDuration = Date.now() - lockAcquireTime;
+        debugLog('lock_release', 'context-generator', parentId, {
+          durationMs: lockDuration,
+        });
         releaseLock(lockPath);
       }
     }
@@ -1075,7 +1097,53 @@ export function withRuntimeStateSync(
     }
   }
 
-  throw new Error(`Failed to acquire lock on runtime state for ${parentId} within ${LOCK_TIMEOUT_MS}ms`);
+  throw new Error(
+    `Failed to acquire lock on runtime state for ${parentId} within ${LOCK_TIMEOUT_MS}ms`
+  );
+}
+
+/**
+ * Rebuild backendStatuses and completedTasks from synced pending updates.
+ * This ensures TUI shows correct status even after session restart.
+ *
+ * @param parentId - Parent issue identifier
+ * @returns Object with backendStatuses and completedTasks arrays
+ */
+function rebuildStateFromPendingUpdates(parentId: string): {
+  backendStatuses: RuntimeState['backendStatuses'];
+  completedTasks: string[];
+} {
+  const queue = readPendingUpdates(parentId);
+  const backendStatuses: NonNullable<RuntimeState['backendStatuses']> = {};
+
+  for (const update of queue.updates) {
+    if (update.type === 'status_change' && update.syncedAt) {
+      // Only keep the most recent sync for each task
+      const existing = backendStatuses[update.identifier];
+      if (!existing || new Date(update.syncedAt) > new Date(existing.syncedAt)) {
+        // Map the backend status to internal TaskStatus format for TUI display
+        const mappedStatus = mapLinearStatus(update.newStatus);
+        backendStatuses[update.identifier] = {
+          identifier: update.identifier,
+          status: mappedStatus,
+          syncedAt: update.syncedAt,
+        };
+      }
+    }
+  }
+
+  // Build completedTasks from tasks whose final status is "done"
+  const completedTasks: string[] = [];
+  for (const [identifier, entry] of Object.entries(backendStatuses)) {
+    if (entry.status === 'done') {
+      completedTasks.push(identifier);
+    }
+  }
+
+  return {
+    backendStatuses: Object.keys(backendStatuses).length > 0 ? backendStatuses : undefined,
+    completedTasks,
+  };
 }
 
 /**
@@ -1096,16 +1164,20 @@ export function initializeRuntimeState(
 ): RuntimeState {
   const now = new Date().toISOString();
 
+  // Rebuild state from any previously synced updates
+  const { backendStatuses, completedTasks } = rebuildStateFromPendingUpdates(parentId);
+
   const state: RuntimeState = {
     parentId,
     parentTitle,
     activeTasks: [],
-    completedTasks: [],
+    completedTasks,
     failedTasks: [],
     startedAt: now,
     updatedAt: now,
     loopPid: options?.loopPid,
     totalTasks: options?.totalTasks,
+    backendStatuses,
   };
 
   writeRuntimeState(state);
@@ -1115,10 +1187,13 @@ export function initializeRuntimeState(
 /**
  * Add an active task to runtime state
  */
-export function addRuntimeActiveTask(
-  state: RuntimeState,
-  task: RuntimeActiveTask
-): RuntimeState {
+export function addRuntimeActiveTask(state: RuntimeState, task: RuntimeActiveTask): RuntimeState {
+  debugLog('task_state_change', 'context-generator', task.id, {
+    transition: 'add_active',
+    pane: task.pane,
+    pid: task.pid,
+  });
+
   return withRuntimeStateSync(state.parentId, (currentState) => {
     const baseState = currentState ?? state;
     return {
@@ -1131,18 +1206,26 @@ export function addRuntimeActiveTask(
 /**
  * Complete a task in runtime state
  */
-export function completeRuntimeTask(
-  state: RuntimeState,
-  taskId: string
-): RuntimeState {
+export function completeRuntimeTask(state: RuntimeState, taskId: string): RuntimeState {
+  debugLog('task_state_change', 'context-generator', taskId, {
+    transition: 'complete',
+  });
+
   return withRuntimeStateSync(state.parentId, (currentState) => {
     const baseState = currentState ?? state;
-    const now = new Date();
-    const activeTask = baseState.activeTasks.find(t => t.id === taskId);
 
-    const duration = activeTask
-      ? now.getTime() - new Date(activeTask.startedAt).getTime()
-      : 0;
+    // Check if task is already in completedTasks (prevent duplicates)
+    const alreadyCompleted = baseState.completedTasks.some(
+      (t) => (typeof t === 'string' ? t : t.id) === taskId
+    );
+    if (alreadyCompleted) {
+      return baseState;
+    }
+
+    const now = new Date();
+    const activeTask = baseState.activeTasks.find((t) => t.id === taskId);
+
+    const duration = activeTask ? now.getTime() - new Date(activeTask.startedAt).getTime() : 0;
 
     const completedTask: RuntimeCompletedTask = {
       id: taskId,
@@ -1152,7 +1235,7 @@ export function completeRuntimeTask(
 
     return {
       ...baseState,
-      activeTasks: baseState.activeTasks.filter(t => t.id !== taskId),
+      activeTasks: baseState.activeTasks.filter((t) => t.id !== taskId),
       completedTasks: [...baseState.completedTasks, completedTask],
     };
   });
@@ -1161,18 +1244,17 @@ export function completeRuntimeTask(
 /**
  * Fail a task in runtime state
  */
-export function failRuntimeTask(
-  state: RuntimeState,
-  taskId: string
-): RuntimeState {
+export function failRuntimeTask(state: RuntimeState, taskId: string): RuntimeState {
+  debugLog('task_state_change', 'context-generator', taskId, {
+    transition: 'fail',
+  });
+
   return withRuntimeStateSync(state.parentId, (currentState) => {
     const baseState = currentState ?? state;
     const now = new Date();
-    const activeTask = baseState.activeTasks.find(t => t.id === taskId);
+    const activeTask = baseState.activeTasks.find((t) => t.id === taskId);
 
-    const duration = activeTask
-      ? now.getTime() - new Date(activeTask.startedAt).getTime()
-      : 0;
+    const duration = activeTask ? now.getTime() - new Date(activeTask.startedAt).getTime() : 0;
 
     const failedTask: RuntimeCompletedTask = {
       id: taskId,
@@ -1182,7 +1264,7 @@ export function failRuntimeTask(
 
     return {
       ...baseState,
-      activeTasks: baseState.activeTasks.filter(t => t.id !== taskId),
+      activeTasks: baseState.activeTasks.filter((t) => t.id !== taskId),
       failedTasks: [...baseState.failedTasks, failedTask],
     };
   });
@@ -1191,15 +1273,12 @@ export function failRuntimeTask(
 /**
  * Remove an active task without marking as completed/failed (for retries)
  */
-export function removeRuntimeActiveTask(
-  state: RuntimeState,
-  taskId: string
-): RuntimeState {
+export function removeRuntimeActiveTask(state: RuntimeState, taskId: string): RuntimeState {
   return withRuntimeStateSync(state.parentId, (currentState) => {
     const baseState = currentState ?? state;
     return {
       ...baseState,
-      activeTasks: baseState.activeTasks.filter(t => t.id !== taskId),
+      activeTasks: baseState.activeTasks.filter((t) => t.id !== taskId),
     };
   });
 }
@@ -1216,7 +1295,7 @@ export function updateRuntimeTaskPane(
     const baseState = currentState ?? state;
     return {
       ...baseState,
-      activeTasks: baseState.activeTasks.map(task =>
+      activeTasks: baseState.activeTasks.map((task) =>
         task.id === taskId ? { ...task, pane: paneId } : task
       ),
     };
@@ -1282,13 +1361,21 @@ export function updateBackendStatus(
     return;
   }
 
+  // Map the backend status to internal TaskStatus format for TUI display
+  const mappedStatus = mapLinearStatus(status);
+
+  debugLog('backend_status_update', 'context-generator', taskIdentifier, {
+    status: mappedStatus,
+    syncedAt: new Date().toISOString(),
+  });
+
   withRuntimeStateSync(parentId, (state) => {
     const baseState = state ?? currentState;
     const backendStatuses = { ...(baseState.backendStatuses ?? {}) };
 
     backendStatuses[taskIdentifier] = {
       identifier: taskIdentifier,
-      status,
+      status: mappedStatus,
       syncedAt: new Date().toISOString(),
     };
 
@@ -1324,15 +1411,12 @@ export function getCompletedTaskId(entry: string | RuntimeCompletedTask): string
 /**
  * Check if new active tasks were added (significant change that needs immediate update)
  */
-function hasNewActiveTasks(
-  oldState: RuntimeState | null,
-  newState: RuntimeState | null
-): boolean {
+function hasNewActiveTasks(oldState: RuntimeState | null, newState: RuntimeState | null): boolean {
   if (!newState || !newState.activeTasks.length) return false;
   if (!oldState) return newState.activeTasks.length > 0;
 
-  const oldIds = new Set(oldState.activeTasks.map(t => t.id));
-  return newState.activeTasks.some(t => !oldIds.has(t.id));
+  const oldIds = new Set(oldState.activeTasks.map((t) => t.id));
+  return newState.activeTasks.some((t) => !oldIds.has(t.id));
 }
 
 /**
@@ -1393,10 +1477,7 @@ function backendStatusesEqual(
  * Check if runtime state content has actually changed
  * Ignores updatedAt timestamp to prevent unnecessary re-renders
  */
-function hasContentChanged(
-  oldState: RuntimeState | null,
-  newState: RuntimeState | null
-): boolean {
+function hasContentChanged(oldState: RuntimeState | null, newState: RuntimeState | null): boolean {
   if (oldState === null && newState === null) return false;
   if (oldState === null || newState === null) return true;
 
@@ -1439,6 +1520,10 @@ export function watchRuntimeState(
         return;
       }
 
+      debugLog('runtime_watcher_trigger', 'context-generator', parentId, {
+        event: _eventType,
+      });
+
       const newState = readRuntimeState(parentId);
 
       // Fast path: immediately notify for new active tasks
@@ -1447,6 +1532,10 @@ export function watchRuntimeState(
           clearTimeout(debounceTimer);
           debounceTimer = null;
         }
+        debugLog('runtime_watcher_trigger', 'context-generator', parentId, {
+          fastPath: true,
+          reason: 'new_active_tasks',
+        });
         lastState = newState;
         callback(newState);
         return;
@@ -1462,6 +1551,10 @@ export function watchRuntimeState(
         const currentState = readRuntimeState(parentId);
 
         if (hasContentChanged(lastState, currentState)) {
+          debugLog('runtime_watcher_trigger', 'context-generator', parentId, {
+            debounced: true,
+            debounceMs: DEBOUNCE_MS,
+          });
           lastState = currentState;
           callback(currentState);
         }
@@ -1499,7 +1592,7 @@ export function isProcessRunning(pid: number): boolean {
  * Filter active tasks to only include those with running processes
  */
 export function filterRunningTasks(activeTasks: RuntimeActiveTask[]): RuntimeActiveTask[] {
-  return activeTasks.filter(task => isProcessRunning(task.pid));
+  return activeTasks.filter((task) => isProcessRunning(task.pid));
 }
 
 /**
@@ -1541,10 +1634,7 @@ export function getProgressSummary(state: RuntimeState | null): ProgressSummary 
 /**
  * Get execution summary for modal display
  */
-export function getModalSummary(
-  state: RuntimeState | null,
-  elapsedMs: number
-): ExecutionSummary {
+export function getModalSummary(state: RuntimeState | null, elapsedMs: number): ExecutionSummary {
   return {
     ...getProgressSummary(state),
     elapsedMs,

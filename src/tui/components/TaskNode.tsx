@@ -12,16 +12,16 @@ import type { SubTask, TaskGraph, TaskStatus } from '../../lib/task-graph.js';
 import { getBlockers } from '../../lib/task-graph.js';
 import type { CompletedTask } from '../../types.js';
 import { STRUCTURE_COLORS } from '../theme.js';
-import { StatusIndicator } from './StatusIndicator.js';
 import { formatDuration } from '../utils/formatDuration.js';
+import { StatusIndicator } from './StatusIndicator.js';
 
 export interface TaskNodeProps {
   task: SubTask;
   graph: TaskGraph;
-  statusOverrides?: Map<string, TaskStatus>;  // Runtime status overrides from execution state
-  prefix: string;     // Box-drawing characters for indentation
-  connector: string;  // "├── " or "└── "
-  completedTaskInfo?: CompletedTask;  // Timing info for completed/failed tasks
+  statusOverrides?: Map<string, TaskStatus>; // Runtime status overrides from execution state
+  prefix: string; // Box-drawing characters for indentation
+  connector: string; // "├── " or "└── "
+  completedTaskInfo?: CompletedTask; // Timing info for completed/failed tasks
   /** Elapsed time in ms for active tasks - calculated by parent to consolidate timers */
   activeElapsedMs?: number;
 }
@@ -29,10 +29,7 @@ export interface TaskNodeProps {
 /**
  * Get effective status for a task, considering runtime overrides
  */
-function getEffectiveStatus(
-  task: SubTask,
-  overrides?: Map<string, TaskStatus>
-): TaskStatus {
+function getEffectiveStatus(task: SubTask, overrides?: Map<string, TaskStatus>): TaskStatus {
   return overrides?.get(task.id) ?? task.status;
 }
 
@@ -66,10 +63,7 @@ function formatBlockerSuffix(
 /**
  * Format the runtime suffix for a task
  */
-function formatRuntimeSuffix(
-  completedTaskInfo?: CompletedTask,
-  activeElapsedMs?: number
-): string {
+function formatRuntimeSuffix(completedTaskInfo?: CompletedTask, activeElapsedMs?: number): string {
   if (completedTaskInfo && completedTaskInfo.duration > 0) {
     return ` (${formatDuration(completedTaskInfo.duration)})`;
   }
@@ -105,15 +99,17 @@ export const TaskNode = memo(function TaskNode({
 
   return (
     <Text>
-      <Text color={STRUCTURE_COLORS.muted}>{prefix}{connector}</Text>
+      <Text color={STRUCTURE_COLORS.muted}>
+        {prefix}
+        {connector}
+      </Text>
       <StatusIndicator status={task.status} />
-      <Text color={STRUCTURE_COLORS.text}> {task.identifier}: {task.title}</Text>
-      {runtimeSuffix && (
-        <Text color={STRUCTURE_COLORS.muted}>{runtimeSuffix}</Text>
-      )}
-      {blockerSuffix && (
-        <Text color={STRUCTURE_COLORS.muted}>{blockerSuffix}</Text>
-      )}
+      <Text color={STRUCTURE_COLORS.text}>
+        {' '}
+        {task.identifier}: {task.title}
+      </Text>
+      {runtimeSuffix && <Text color={STRUCTURE_COLORS.muted}>{runtimeSuffix}</Text>}
+      {blockerSuffix && <Text color={STRUCTURE_COLORS.muted}>{blockerSuffix}</Text>}
     </Text>
   );
 });

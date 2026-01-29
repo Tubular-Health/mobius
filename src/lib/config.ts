@@ -1,13 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, cpSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import type { LoopConfig, PathConfig } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
 import {
-  getBundledSkillsDir,
-  getBundledCommandsDir,
-  getDefaultConfigPath,
   getAgentsTemplatePath,
+  getBundledCommandsDir,
+  getBundledSkillsDir,
+  getDefaultConfigPath,
   getGlobalCommandsDir,
 } from './paths.js';
 
@@ -164,9 +164,7 @@ function validateVerificationConfig(config: LoopConfig): string[] {
       verification.coverage_threshold < 0 ||
       verification.coverage_threshold > 100
     ) {
-      errors.push(
-        'execution.verification.coverage_threshold must be a number between 0 and 100'
-      );
+      errors.push('execution.verification.coverage_threshold must be a number between 0 and 100');
     }
   }
 
@@ -227,10 +225,7 @@ function validateJiraConfig(config: LoopConfig): string[] {
       errors.push('jira.project_key must be uppercase letters only');
     }
 
-    if (
-      config.jira?.auth_method &&
-      !['api_token', 'oauth'].includes(config.jira.auth_method)
-    ) {
+    if (config.jira?.auth_method && !['api_token', 'oauth'].includes(config.jira.auth_method)) {
       errors.push('jira.auth_method must be "api_token" or "oauth"');
     }
   }

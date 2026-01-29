@@ -7,18 +7,18 @@
 
 import { execa } from 'execa';
 import type { ExecutionConfig } from '../types.js';
+import { BACKEND_SKILLS } from '../types.js';
 import type { SubTask } from './task-graph.js';
 import {
-  type TmuxSession,
-  type TmuxPane,
-  createAgentPane,
-  runInPane,
   capturePaneContent,
-  layoutPanes,
-  setPaneTitle,
+  createAgentPane,
   killPane,
+  layoutPanes,
+  runInPane,
+  setPaneTitle,
+  type TmuxPane,
+  type TmuxSession,
 } from './tmux-display.js';
-import { BACKEND_SKILLS } from '../types.js';
 
 // Skills for different task types
 const VERIFICATION_SKILL = '/verify-issue';
@@ -116,9 +116,7 @@ export async function executeParallel(
   await layoutPanes(session, handles.length);
 
   // Wait for all agents to complete with Promise.allSettled
-  const results = await Promise.allSettled(
-    handles.map(handle => waitForAgent(handle, timeout))
-  );
+  const results = await Promise.allSettled(handles.map((handle) => waitForAgent(handle, timeout)));
 
   // Process results
   const executionResults: ExecutionResult[] = [];
@@ -192,7 +190,13 @@ async function spawnAgents(
 
     // Build the Claude command with the specific subtask identifier
     // This ensures each agent works on its assigned task, not racing for the same one
-    const claudeCommand = buildClaudeCommand(task.identifier, skill, worktreePath, config, contextFilePath);
+    const claudeCommand = buildClaudeCommand(
+      task.identifier,
+      skill,
+      worktreePath,
+      config,
+      contextFilePath
+    );
 
     const handle: AgentHandle = {
       task,
@@ -201,8 +205,8 @@ async function spawnAgents(
       command: claudeCommand,
     };
 
-    // Run the command in the pane
-    await runInPane(pane, claudeCommand);
+    // Run the command in the pane (clear first to remove any old output from retries)
+    await runInPane(pane, claudeCommand, true);
 
     handles.push(handle);
   }
@@ -227,10 +231,14 @@ export function buildClaudeCommand(
   // Build the model flag if specified
   const modelFlag = config.model ? `--model ${config.model}` : '';
 
-  // Build the environment variable prefix if context file is provided
-  const envPrefix = contextFilePath
-    ? `MOBIUS_CONTEXT_FILE="${contextFilePath}" `
+  // Build the disallowed tools flag if specified
+  // Patterns like "mcp__linear__*" or "mcp__atlassian__*" disable entire MCP servers
+  const disallowedToolsFlag = config.disallowed_tools?.length
+    ? `--disallowedTools '${config.disallowed_tools.join(',')}'`
     : '';
+
+  // Build the environment variable prefix if context file is provided
+  const envPrefix = contextFilePath ? `MOBIUS_CONTEXT_FILE="${contextFilePath}" ` : '';
 
   // The command:
   // 1. cd to worktree
@@ -243,7 +251,7 @@ export function buildClaudeCommand(
     '&&',
     `${envPrefix}echo '${skill} ${subtaskIdentifier}'`,
     '|',
-    `claude -p --dangerously-skip-permissions --verbose --output-format stream-json ${modelFlag}`.trim(),
+    `claude -p --dangerously-skip-permissions --verbose --output-format stream-json ${modelFlag} ${disallowedToolsFlag}`.trim(),
     '|',
     'cclean',
   ].join(' ');
@@ -254,10 +262,7 @@ export function buildClaudeCommand(
 /**
  * Wait for an agent to complete by monitoring its pane output
  */
-async function waitForAgent(
-  handle: AgentHandle,
-  timeout: number
-): Promise<ExecutionResult> {
+async function waitForAgent(handle: AgentHandle, timeout: number): Promise<ExecutionResult> {
   const startTime = handle.startTime;
   const deadline = startTime + timeout;
   const paneId = handle.pane.id;
@@ -311,7 +316,10 @@ export function parseAgentOutput(
   const duration = Date.now() - startTime;
 
   // Check for successful completion
-  if (STATUS_PATTERNS.SUBTASK_COMPLETE.test(content) || STATUS_PATTERNS.EXECUTION_COMPLETE.test(content)) {
+  if (
+    STATUS_PATTERNS.SUBTASK_COMPLETE.test(content) ||
+    STATUS_PATTERNS.EXECUTION_COMPLETE.test(content)
+  ) {
     return {
       taskId: task.id,
       identifier: task.identifier,
@@ -448,15 +456,15 @@ export function aggregateResults(results: ExecutionResult[]): {
   completed: string[];
   failed_tasks: string[];
 } {
-  const succeeded = results.filter(r => r.success);
-  const failed = results.filter(r => !r.success);
+  const succeeded = results.filter((r) => r.success);
+  const failed = results.filter((r) => !r.success);
 
   return {
     total: results.length,
     succeeded: succeeded.length,
     failed: failed.length,
-    completed: succeeded.map(r => r.identifier),
-    failed_tasks: failed.map(r => `${r.identifier}: ${r.error ?? r.status}`),
+    completed: succeeded.map((r) => r.identifier),
+    failed_tasks: failed.map((r) => `${r.identifier}: ${r.error ?? r.status}`),
   };
 }
 
@@ -464,7 +472,7 @@ export function aggregateResults(results: ExecutionResult[]): {
  * Simple sleep utility
  */
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -492,7 +500,10 @@ export async function isPaneStillRunning(paneId: string): Promise<boolean> {
     ]);
 
     // Parse output to find our pane
-    const lines = stdout.trim().split('\n').filter((line: string) => line.length > 0);
+    const lines = stdout
+      .trim()
+      .split('\n')
+      .filter((line: string) => line.length > 0);
 
     for (const line of lines) {
       const [id, dead] = line.split(':');

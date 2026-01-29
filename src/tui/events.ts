@@ -7,7 +7,7 @@
  * (which needs to listen for exit events).
  */
 
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'node:events';
 
 /**
  * Event emitter for TUI-level events
