@@ -6,6 +6,7 @@ import {
   getPathsForType,
   getGlobalConfigDir,
   getBundledSkillsDir,
+  resolvePaths,
 } from '../lib/paths.js';
 import {
   writeConfig,
@@ -21,9 +22,7 @@ export interface SetupOptions {
   updateSkills?: boolean;
 }
 
-export async function setup(_options: SetupOptions = {}): Promise<void> {
-  console.log(chalk.bold('\nMobius Setup Wizard\n'));
-
+export async function setup(options: SetupOptions = {}): Promise<void> {
   // Check if bundled skills exist
   const bundledSkills = getBundledSkillsDir();
   if (!existsSync(bundledSkills)) {
@@ -31,6 +30,35 @@ export async function setup(_options: SetupOptions = {}): Promise<void> {
     console.log(chalk.gray('This may indicate a corrupted installation.'));
     process.exit(1);
   }
+
+  // --update-skills: Skip config wizard, just update skills/commands
+  if (options.updateSkills) {
+    console.log(chalk.bold('\nUpdating skills and commands...\n'));
+
+    // Use existing installation paths (auto-detect local vs global)
+    const paths = resolvePaths();
+
+    // Copy skills
+    console.log(chalk.gray(`Copying skills to ${paths.skillsPath}...`));
+    copySkills(paths.skillsPath);
+
+    // Copy commands
+    console.log(chalk.gray('Copying commands...'));
+    copyCommands(paths);
+
+    console.log(chalk.green('\n✓ Skills and commands updated!\n'));
+
+    if (paths.type === 'local') {
+      console.log(chalk.gray(`Skills updated at: ${paths.skillsPath}`));
+    } else {
+      console.log(chalk.gray(`Skills updated at: ${paths.skillsPath}`));
+    }
+
+    console.log('');
+    return;
+  }
+
+  console.log(chalk.bold('\nMobius Setup Wizard\n'));
 
   // 1. Installation type
   const installType = await select<'local' | 'global'>({
