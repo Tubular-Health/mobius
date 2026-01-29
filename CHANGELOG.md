@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.3.0...mobius-ai-v1.4.0) (2026-01-29)
+
+
+### Features
+
+* **setup:** add --update-skills flag for quick skills/commands refresh ([#39](https://github.com/Tubular-Health/mobius/issues/39)) ([261257d](https://github.com/Tubular-Health/mobius/commit/261257d55cf4fcb1685683b342584cc881d05d7a))
+
+
+### Code Refactoring
+
+* **context:** replace MCP tools with SDK-based local context system ([#37](https://github.com/Tubular-Health/mobius/issues/37)) ([10288e9](https://github.com/Tubular-Health/mobius/commit/10288e94bb1a8715fba85ebf14feb01ba778ea39))
+
 ## [1.3.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.2.3...mobius-ai-v1.3.0) (2026-01-28)
 
 
