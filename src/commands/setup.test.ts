@@ -180,6 +180,7 @@ execution:
 describe('setup command: --update-skills global config', () => {
   let testDir: string;
   let originalCwd: string;
+  let originalXdgConfigHome: string | undefined;
   let consoleLogSpy: ReturnType<typeof spyOn>;
   let consoleOutput: string[];
 
@@ -188,6 +189,15 @@ describe('setup command: --update-skills global config', () => {
     testDir = join(tmpdir(), `mobius-setup-global-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(testDir, { recursive: true });
     originalCwd = process.cwd();
+    originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+
+    // Point XDG_CONFIG_HOME to our temp directory so we can control global config
+    const globalConfigDir = join(testDir, 'xdg-config', 'mobius');
+    mkdirSync(globalConfigDir, { recursive: true });
+    process.env.XDG_CONFIG_HOME = join(testDir, 'xdg-config');
+
+    // Create a mock global config so setup() doesn't exit
+    writeFileSync(join(globalConfigDir, 'config.yaml'), 'backend: linear\n');
 
     // Capture console output
     consoleOutput = [];
@@ -202,6 +212,14 @@ describe('setup command: --update-skills global config', () => {
 
     // Restore environment
     process.chdir(originalCwd);
+
+    // Restore XDG_CONFIG_HOME
+    if (originalXdgConfigHome !== undefined) {
+      process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+    } else {
+      delete process.env.XDG_CONFIG_HOME;
+    }
+
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true });
     }
