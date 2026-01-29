@@ -5,24 +5,24 @@
  * (Linear API, git commands, Claude agent spawning)
  */
 
-import { describe, it, expect } from 'bun:test';
-import type { ExecutionConfig } from '../types.js';
+import { describe, expect, it } from 'bun:test';
+import { renderMermaidWithTitle } from '../lib/mermaid-renderer.js';
+import {
+  aggregateResults,
+  calculateParallelism,
+  type ExecutionResult,
+} from '../lib/parallel-executor.js';
 import type { LinearIssue } from '../lib/task-graph.js';
 import {
   buildTaskGraph,
-  getReadyTasks,
   getBlockedTasks,
   getGraphStats,
-  updateTaskStatus,
+  getReadyTasks,
   getVerificationTask,
+  updateTaskStatus,
 } from '../lib/task-graph.js';
 import { renderFullTreeOutput } from '../lib/tree-renderer.js';
-import { renderMermaidWithTitle } from '../lib/mermaid-renderer.js';
-import {
-  calculateParallelism,
-  aggregateResults,
-  type ExecutionResult,
-} from '../lib/parallel-executor.js';
+import type { ExecutionConfig } from '../types.js';
 
 // ============================================================================
 // Test Fixtures
@@ -151,14 +151,14 @@ describe('loop integration: task graph building', () => {
     let graph = buildTaskGraph(mockParentIssue.id, mockParentIssue.identifier, mockSubtasks);
 
     // Initially: MOB-103 is ready, MOB-104 is blocked
-    expect(getReadyTasks(graph).map(t => t.identifier)).toEqual(['MOB-103']);
-    expect(getBlockedTasks(graph).map(t => t.identifier)).toEqual(['MOB-104']);
+    expect(getReadyTasks(graph).map((t) => t.identifier)).toEqual(['MOB-103']);
+    expect(getBlockedTasks(graph).map((t) => t.identifier)).toEqual(['MOB-104']);
 
     // Mark MOB-103 as done
     graph = updateTaskStatus(graph, 'id-103', 'done');
 
     // Now: MOB-104 should be ready
-    expect(getReadyTasks(graph).map(t => t.identifier)).toEqual(['MOB-104']);
+    expect(getReadyTasks(graph).map((t) => t.identifier)).toEqual(['MOB-104']);
     expect(getBlockedTasks(graph).length).toBe(0);
   });
 });
@@ -405,7 +405,7 @@ describe('loop integration: state machine', () => {
   });
 
   it('handles failure scenario - stops on task failure', () => {
-    let graph = buildTaskGraph(mockParentIssue.id, mockParentIssue.identifier, mockSubtasks);
+    const graph = buildTaskGraph(mockParentIssue.id, mockParentIssue.identifier, mockSubtasks);
 
     // Simulate MOB-103 execution failure
     // In the real loop, this would stop execution
@@ -508,20 +508,20 @@ describe('loop integration: edge cases', () => {
     // Initially: MOB-502 and MOB-503 are ready (parallel), MOB-504 is blocked
     const ready1 = getReadyTasks(graph);
     expect(ready1.length).toBe(2);
-    expect(ready1.map(t => t.identifier).sort()).toEqual(['MOB-502', 'MOB-503']);
+    expect(ready1.map((t) => t.identifier).sort()).toEqual(['MOB-502', 'MOB-503']);
     expect(getBlockedTasks(graph).length).toBe(1);
 
     // Complete MOB-502 only
     graph = updateTaskStatus(graph, 'id-2', 'done');
 
     // MOB-504 still blocked (needs MOB-503)
-    expect(getBlockedTasks(graph).map(t => t.identifier)).toEqual(['MOB-504']);
+    expect(getBlockedTasks(graph).map((t) => t.identifier)).toEqual(['MOB-504']);
 
     // Complete MOB-503
     graph = updateTaskStatus(graph, 'id-3', 'done');
 
     // Now MOB-504 is ready
-    expect(getReadyTasks(graph).map(t => t.identifier)).toEqual(['MOB-504']);
+    expect(getReadyTasks(graph).map((t) => t.identifier)).toEqual(['MOB-504']);
   });
 
   it('handles single task scenario', () => {
@@ -636,16 +636,10 @@ describe('loop integration: verification exit', () => {
       [{ id: 'id-701', identifier: 'MOB-701' }],
       [{ id: 'id-703', identifier: 'MOB-703' }]
     ),
-    createMockLinearIssue(
-      'id-703',
-      'MOB-703',
-      'Verification Gate',
-      'Backlog',
-      [
-        { id: 'id-701', identifier: 'MOB-701' },
-        { id: 'id-702', identifier: 'MOB-702' },
-      ]
-    ),
+    createMockLinearIssue('id-703', 'MOB-703', 'Verification Gate', 'Backlog', [
+      { id: 'id-701', identifier: 'MOB-701' },
+      { id: 'id-702', identifier: 'MOB-702' },
+    ]),
   ];
 
   it('exits loop when verification task completes', () => {
@@ -689,16 +683,10 @@ describe('loop integration: verification exit', () => {
         [{ id: 'id-801', identifier: 'MOB-801' }],
         [{ id: 'id-803', identifier: 'MOB-803' }]
       ),
-      createMockLinearIssue(
-        'id-803',
-        'MOB-803',
-        'Verification Gate',
-        'Backlog',
-        [
-          { id: 'id-801', identifier: 'MOB-801' },
-          { id: 'id-802', identifier: 'MOB-802' },
-        ]
-      ),
+      createMockLinearIssue('id-803', 'MOB-803', 'Verification Gate', 'Backlog', [
+        { id: 'id-801', identifier: 'MOB-801' },
+        { id: 'id-802', identifier: 'MOB-802' },
+      ]),
     ];
 
     const graph = buildTaskGraph('parent-id', 'MOB-800', tasksWithBlockedVerification);
@@ -753,7 +741,7 @@ describe('loop integration: verification exit', () => {
 
     // Ready tasks should include the in_progress verification task (for resume)
     const readyTasks = getReadyTasks(graph);
-    expect(readyTasks.some(t => t.identifier === 'MOB-903')).toBe(true);
+    expect(readyTasks.some((t) => t.identifier === 'MOB-903')).toBe(true);
   });
 
   it('handles no verification task gracefully', () => {

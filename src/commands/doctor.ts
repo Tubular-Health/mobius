@@ -1,17 +1,17 @@
 import chalk from 'chalk';
-import { resolvePaths } from '../lib/paths.js';
-import { readConfig } from '../lib/config.js';
 import { checkApiKeys } from '../lib/checks/api-keys.js';
-import { checkClaude } from '../lib/checks/claude.js';
-import { checkDocker } from '../lib/checks/docker.js';
 import { checkCclean } from '../lib/checks/cclean.js';
+import { checkClaude } from '../lib/checks/claude.js';
 import { checkConfig } from '../lib/checks/config.js';
+import { checkDocker } from '../lib/checks/docker.js';
 import { checkGit } from '../lib/checks/git.js';
 import { checkJiraMcp } from '../lib/checks/jira-mcp.js';
-import { checkPath, checkSkills } from '../lib/checks/path.js';
 import { checkLinearMcp } from '../lib/checks/linear-mcp.js';
-import { checkNodeVersion, checkJq } from '../lib/checks/optional.js';
+import { checkJq, checkNodeVersion } from '../lib/checks/optional.js';
+import { checkPath, checkSkills } from '../lib/checks/path.js';
 import { checkTmux } from '../lib/checks/tmux.js';
+import { readConfig } from '../lib/config.js';
+import { resolvePaths } from '../lib/paths.js';
 import type { CheckResult } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
 
@@ -118,7 +118,9 @@ export async function doctor(): Promise<void> {
   // Summary
   console.log('');
   const failed = results.filter((r) => r.status === 'fail' && r.required);
-  const warnings = results.filter((r) => r.status === 'warn' || (r.status === 'fail' && !r.required));
+  const warnings = results.filter(
+    (r) => r.status === 'warn' || (r.status === 'fail' && !r.required)
+  );
 
   if (failed.length > 0) {
     console.log(chalk.red(`✗ ${failed.length} required check(s) failed`));

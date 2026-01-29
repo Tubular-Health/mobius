@@ -42,7 +42,7 @@ function truncateTitle(title: string): string {
   if (title.length <= MAX_TITLE_LENGTH) {
     return title;
   }
-  return title.slice(0, MAX_TITLE_LENGTH - 3) + '...';
+  return `${title.slice(0, MAX_TITLE_LENGTH - 3)}...`;
 }
 
 /**

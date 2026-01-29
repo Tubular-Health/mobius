@@ -7,14 +7,14 @@
  * a test Linear workspace.
  */
 
-import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import {
-  getLinearClient,
+  addLinearComment,
+  createLinearIssue,
   fetchLinearIssue,
   fetchLinearSubTasks,
-  createLinearIssue,
+  getLinearClient,
   updateLinearIssueStatus,
-  addLinearComment,
 } from './linear.js';
 
 // Store original env vars to restore after tests

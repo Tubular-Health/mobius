@@ -1036,6 +1036,70 @@ The mobius loop will:
 
 The structured output drives all status transitions - no direct MCP/SDK calls from this skill.
 </update_issue_status>
+
+<update_local_context>
+**CRITICAL: After verification completes, update the local context files.**
+
+The local context files must be updated so that `mobius sync` can push changes to Linear/Jira.
+
+**Files to update**:
+
+1. **Verification task file**: `~/.mobius/issues/{parentId}/tasks/{verificationTaskId}.json`
+   - On PASS/PASS_WITH_NOTES: Change `"status": "in_progress"` to `"status": "done"`
+   - On NEEDS_WORK/FAIL: Keep `"status": "in_progress"`
+
+2. **Failing sub-task files** (on NEEDS_WORK/FAIL): `~/.mobius/issues/{parentId}/tasks/{failingTaskId}.json`
+   - Change `"status": "done"` back to `"status": "pending"` for each failing sub-task
+
+3. **Main context file**: `~/.mobius/issues/{parentId}/context.json`
+   - Update the `verificationTask.status` field accordingly
+   - For failing sub-tasks, update their status in the `subTasks` array to `"pending"`
+   - Update `metadata.updatedAt` to current ISO-8601 timestamp
+
+**Example using Edit tool for PASS**:
+
+```
+# Update verification task file
+Edit ~/.mobius/issues/MOB-161/tasks/MOB-186.json
+  old_string: "status": "in_progress"
+  new_string: "status": "done"
+
+# Update context.json - verification task status
+Edit ~/.mobius/issues/MOB-161/context.json
+  old_string: [find verificationTask block with "status": "in_progress"]
+  new_string: [same block with "status": "done"]
+
+# Update the updatedAt timestamp
+Edit ~/.mobius/issues/MOB-161/context.json
+  old_string: "updatedAt": "2026-01-28T19:05:00.000Z"
+  new_string: "updatedAt": "{current ISO-8601 timestamp}"
+```
+
+**Example using Edit tool for NEEDS_WORK**:
+
+```
+# Reopen failing sub-task files
+Edit ~/.mobius/issues/MOB-161/tasks/MOB-177.json
+  old_string: "status": "done"
+  new_string: "status": "pending"
+
+# Update context.json - reopen failing sub-tasks in subTasks array
+Edit ~/.mobius/issues/MOB-161/context.json
+  old_string: [find the failing subtask block with "status": "done"]
+  new_string: [same block with "status": "pending"]
+
+# Update the updatedAt timestamp
+Edit ~/.mobius/issues/MOB-161/context.json
+  old_string: "updatedAt": "2026-01-28T19:05:00.000Z"
+  new_string: "updatedAt": "{current ISO-8601 timestamp}"
+```
+
+**Why this matters**:
+- The `mobius sync` command reads local context files and pushes changes to Linear/Jira
+- Without updating these files, verification status changes won't propagate to the issue tracker
+- The structured YAML output alone is not sufficient - local files MUST be updated
+- Reopening failing sub-tasks in local files ensures the loop correctly picks them up again
+</update_local_context>
 </ticket_update_phase>
 
 <completion_report>
@@ -1205,6 +1269,13 @@ All criteria met. Ready to close.
 **Don't forget to check sub-tasks**:
 - BAD: Only verify parent issue
 - GOOD: Verify all sub-tasks are complete before overall review
+
+**Don't skip local context updates**:
+- BAD: Only output structured YAML without updating `~/.mobius/issues/` files
+- BAD: Mark verification complete but forget to update task JSON files
+- BAD: Reopen failing sub-tasks in output but not in local files
+- GOOD: Update both task-specific JSON and main context.json after verification
+- GOOD: Update `metadata.updatedAt` timestamp when modifying context
 </anti_patterns>
 
 <success_criteria>
@@ -1261,6 +1332,12 @@ A successful verification achieves:
 - [ ] Verification sub-task marked Done when quality checks pass
 - [ ] Verification report posted to parent issue
 - [ ] Parent issue unblocked for completion (no longer blocked by verification sub-task)
+
+**Local Context Updates**:
+- [ ] **Local context files updated** (`~/.mobius/issues/{parentId}/` task and context.json)
+- [ ] Verification task status updated in local files (to "done" on PASS, stays "in_progress" on FAIL)
+- [ ] Failing sub-task statuses reverted to "pending" in local files (on NEEDS_WORK/FAIL)
+- [ ] `metadata.updatedAt` timestamp updated in context.json
 
 **Reporting**:
 - [ ] Structured review report generated

@@ -5,38 +5,28 @@
  * appropriate SDK calls to push changes to the backend.
  */
 
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import chalk from 'chalk';
 import ora from 'ora';
-import { existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
-import { BACKEND_ID_PATTERNS } from '../types.js';
-import type { Backend } from '../types.js';
 import {
-  resolveTaskId,
-  getMobiusBasePath,
   getContextPath,
+  getMobiusBasePath,
   getPendingUpdatesPath,
   getSyncLogPath,
   readPendingUpdates,
+  resolveTaskId,
+  updateBackendStatus,
   writePendingUpdates,
 } from '../lib/context-generator.js';
-import type {
-  PendingUpdate,
-  SyncLog,
-  SyncLogEntry,
-} from '../types/context.js';
-import {
-  updateLinearIssueStatus,
-  addLinearComment,
-  createLinearIssue,
-} from '../lib/linear.js';
-import {
-  updateJiraIssueStatus,
-  addJiraComment,
-  createJiraIssue,
-} from '../lib/jira.js';
+import { debugLog } from '../lib/debug-logger.js';
+import { addJiraComment, createJiraIssue, updateJiraIssueStatus } from '../lib/jira.js';
+import { addLinearComment, createLinearIssue, updateLinearIssueStatus } from '../lib/linear.js';
+import { resolvePaths } from '../lib/paths.js';
+import type { PendingUpdate, SyncLog, SyncLogEntry } from '../types/context.js';
+import type { Backend } from '../types.js';
+import { BACKEND_ID_PATTERNS } from '../types.js';
 
 export interface PushOptions {
   backend?: Backend;
@@ -64,7 +54,7 @@ export async function push(parentId: string | undefined, options: PushOptions): 
   const backend = options.backend ?? config.backend;
 
   // Resolve task ID (use provided or fall back to current task)
-  const resolvedId = options.all ? undefined : resolveTaskId(parentId) ?? undefined;
+  const resolvedId = options.all ? undefined : (resolveTaskId(parentId) ?? undefined);
 
   // Determine which issues to push
   const issuesToPush = getIssuesToPush(resolvedId, options.all);
@@ -116,7 +106,9 @@ export async function push(parentId: string | undefined, options: PushOptions): 
   if (options.dryRun) {
     console.log(chalk.bold('\nDry run - pending changes to push:\n'));
     displayPendingChanges(allUpdates, backend);
-    console.log(chalk.gray(`\nTotal: ${totalPending} update(s) across ${issuesToPush.length} issue(s)`));
+    console.log(
+      chalk.gray(`\nTotal: ${totalPending} update(s) across ${issuesToPush.length} issue(s)`)
+    );
     console.log(chalk.gray('Run without --dry-run to apply changes'));
     return;
   }
@@ -166,6 +158,72 @@ export async function push(parentId: string | undefined, options: PushOptions): 
     console.log(chalk.gray('Fix the issues and run push again'));
     process.exit(1);
   }
+}
+
+/**
+ * Push pending updates for a specific task (programmatic API for loop.ts)
+ *
+ * Unlike the CLI `push` command, this function:
+ * - Doesn't exit the process on errors
+ * - Returns results for the caller to handle
+ * - Is designed for auto-push after queueing updates
+ *
+ * @param parentId - The parent issue identifier
+ * @param backend - The backend to push to (linear or jira)
+ * @returns Push results with success/failure counts
+ */
+export async function pushPendingUpdatesForTask(
+  parentId: string,
+  backend: Backend
+): Promise<{ success: number; failed: number; errors: string[] }> {
+  const queue = readPendingUpdates(parentId);
+  const pending = queue.updates.filter((u) => !u.syncedAt && !u.error);
+
+  if (pending.length === 0) {
+    return { success: 0, failed: 0, errors: [] };
+  }
+
+  // Log pending updates before push
+  debugLog('pending_update_queue', 'push', parentId, {
+    pendingCount: pending.length,
+    types: pending.map((u) => u.type),
+    identifiers: pending.map((u) => getIssueIdentifier(u)),
+  });
+
+  let success = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const update of pending) {
+    const result = await pushUpdate(update, backend);
+
+    // Log each push result
+    debugLog('pending_update_push', 'push', result.issueIdentifier, {
+      type: result.type,
+      success: result.success,
+      error: result.error,
+    });
+
+    if (result.success) {
+      success++;
+      markUpdateSynced(parentId, update.id);
+
+      // Update backend status in runtime state for TUI to display
+      // This enables real-time status updates without re-fetching the graph
+      if (update.type === 'status_change') {
+        updateBackendStatus(parentId, update.identifier, update.newStatus);
+      }
+    } else {
+      failed++;
+      const errorMsg = result.error || 'Unknown error';
+      errors.push(`${result.issueIdentifier}: ${errorMsg}`);
+      markUpdateFailed(parentId, update.id, errorMsg);
+    }
+
+    logPushResult(parentId, result);
+  }
+
+  return { success, failed, errors };
 }
 
 /**
@@ -262,9 +320,10 @@ function formatUpdateDetails(update: PendingUpdate): string {
   switch (update.type) {
     case 'status_change':
       return `${update.identifier}: ${update.oldStatus} → ${update.newStatus}`;
-    case 'add_comment':
+    case 'add_comment': {
       const truncated = update.body.length > 50 ? `${update.body.slice(0, 50)}...` : update.body;
       return `${update.identifier}: "${truncated}"`;
+    }
     case 'create_subtask':
       return `${update.title} (parent: ${update.parentId})`;
     case 'update_description':
@@ -304,7 +363,11 @@ async function pushUpdate(update: PendingUpdate, backend: Backend): Promise<Push
         // Not yet implemented - would need to add label mutation functions
         return { ...baseResult, success: false, error: `${update.type} not yet implemented` };
       default:
-        return { ...baseResult, success: false, error: `Unknown update type: ${(update as PendingUpdate).type}` };
+        return {
+          ...baseResult,
+          success: false,
+          error: `Unknown update type: ${(update as PendingUpdate).type}`,
+        };
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -503,7 +566,7 @@ function logPushResult(parentId: string, result: PushResult): void {
   const contextDir = getContextPath(parentId);
   if (!existsSync(contextDir)) {
     // Context directory should exist, but create if not
-    require('fs').mkdirSync(contextDir, { recursive: true });
+    require('node:fs').mkdirSync(contextDir, { recursive: true });
   }
 
   writeFileSync(logPath, JSON.stringify(log, null, 2), 'utf-8');

@@ -6,10 +6,7 @@
  */
 
 import { parse as parseYaml } from 'yaml';
-import type {
-  SkillOutput,
-  SkillOutputStatus,
-} from '../types/context.js';
+import type { SkillOutput, SkillOutputStatus } from '../types/context.js';
 
 /**
  * Error thrown when skill output cannot be parsed
@@ -62,6 +59,85 @@ function tryParseYaml(input: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Extract structured output block from raw pane content
+ *
+ * The raw output from tmux panes contains the entire Claude conversation.
+ * The structured output is a YAML or JSON block typically at the end,
+ * delimited by `---` markers (YAML front matter style) or code fences.
+ *
+ * @param rawOutput - The full pane content
+ * @returns The extracted structured block, or null if not found
+ */
+function extractStructuredBlock(rawOutput: string): string | null {
+  // Strategy 1: Look for YAML blocks with --- delimiters
+  // Skills output structured data at the END, so we search from the end
+  const allYamlBlocks = rawOutput.match(/---\s*\n[\s\S]*?\n---/g);
+  if (allYamlBlocks) {
+    // Check blocks from end to start (most recent first)
+    for (let i = allYamlBlocks.length - 1; i >= 0; i--) {
+      const block = allYamlBlocks[i];
+      // Remove the --- delimiters
+      const content = block
+        .replace(/^---\s*\n/, '')
+        .replace(/\n---\s*$/, '')
+        .trim();
+      if (content.includes('status:')) {
+        return content;
+      }
+    }
+  }
+
+  // Strategy 2: Look for code-fenced YAML (```yaml\n...\n```)
+  const fencedYamlRegex = /```ya?ml\s*\n([\s\S]*?)\n```/g;
+  const fencedMatches = [...rawOutput.matchAll(fencedYamlRegex)];
+  for (let i = fencedMatches.length - 1; i >= 0; i--) {
+    const content = fencedMatches[i][1].trim();
+    if (content.includes('status:')) {
+      return content;
+    }
+  }
+
+  // Strategy 3: Look for code-fenced JSON (```json\n...\n```)
+  const fencedJsonRegex = /```json\s*\n([\s\S]*?)\n```/g;
+  const jsonMatches = [...rawOutput.matchAll(fencedJsonRegex)];
+  for (let i = jsonMatches.length - 1; i >= 0; i--) {
+    const content = jsonMatches[i][1].trim();
+    if (content.includes('"status"')) {
+      return content;
+    }
+  }
+
+  // Strategy 4: Try to find a JSON object with status field
+  // Look for { ... "status": "..." ... } pattern
+  const jsonObjectRegex = /\{[^{}]*"status"\s*:\s*"[A-Z_]+"/g;
+  const jsonObjectMatches = [...rawOutput.matchAll(jsonObjectRegex)];
+  if (jsonObjectMatches.length > 0) {
+    // Try to extract the full JSON object starting from the last match
+    for (let i = jsonObjectMatches.length - 1; i >= 0; i--) {
+      const matchStart = jsonObjectMatches[i].index ?? 0;
+      // Find the closing brace by counting braces
+      let braceCount = 0;
+      let endPos = matchStart;
+      for (let j = matchStart; j < rawOutput.length; j++) {
+        if (rawOutput[j] === '{') braceCount++;
+        if (rawOutput[j] === '}') braceCount--;
+        if (braceCount === 0) {
+          endPos = j + 1;
+          break;
+        }
+      }
+      const jsonCandidate = rawOutput.slice(matchStart, endPos);
+      const parsed = tryParseJson(jsonCandidate);
+      if (parsed && typeof parsed === 'object' && 'status' in (parsed as object)) {
+        return jsonCandidate;
+      }
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -151,17 +227,32 @@ function validateStatusSpecificFields(output: Record<string, unknown>): string[]
       }
       break;
 
-    case 'NEEDS_WORK':
-      if (typeof output.subtaskId !== 'string') {
-        errors.push('NEEDS_WORK requires subtaskId (string)');
+    case 'NEEDS_WORK': {
+      // Support both execute-issue format (subtaskId) and verify-issue format (failingSubtasks)
+      const hasExecuteFormat = typeof output.subtaskId === 'string';
+      const hasVerifyFormat =
+        Array.isArray(output.failingSubtasks) && output.failingSubtasks.length > 0;
+
+      if (!hasExecuteFormat && !hasVerifyFormat) {
+        errors.push(
+          'NEEDS_WORK requires either subtaskId (string) or failingSubtasks (array with items)'
+        );
       }
-      if (!Array.isArray(output.issues)) {
-        errors.push('NEEDS_WORK requires issues (array)');
+
+      // For execute-issue format, issues and suggestedFixes are required
+      if (hasExecuteFormat && !hasVerifyFormat) {
+        if (!Array.isArray(output.issues)) {
+          errors.push('NEEDS_WORK with subtaskId requires issues (array)');
+        }
+        if (!Array.isArray(output.suggestedFixes)) {
+          errors.push('NEEDS_WORK with subtaskId requires suggestedFixes (array)');
+        }
       }
-      if (!Array.isArray(output.suggestedFixes)) {
-        errors.push('NEEDS_WORK requires suggestedFixes (array)');
-      }
+
+      // For verify-issue format, feedbackComments and reworkIteration are expected but not required
+      // The failingSubtasks array is validated above
       break;
+    }
 
     case 'PASS':
       // PASS has optional fields only
@@ -180,38 +271,38 @@ function validateStatusSpecificFields(output: Record<string, unknown>): string[]
 /**
  * Parse structured output from a skill
  *
- * Supports both YAML and JSON formats. The function attempts to parse the input
- * as JSON first (for speed), then falls back to YAML parsing.
+ * Supports both YAML and JSON formats. The function first attempts to extract
+ * a structured block from raw pane content (which may contain conversation text),
+ * then parses the extracted block as JSON or YAML.
  *
- * @param rawOutput - The raw output string from the skill
+ * @param rawOutput - The raw output string from the skill (may be full pane content)
  * @returns Typed SkillOutput with discriminated union based on status
  * @throws SkillOutputParseError if the output cannot be parsed or is invalid
  */
 export function parseSkillOutput(rawOutput: string): SkillOutput {
   if (!rawOutput || typeof rawOutput !== 'string') {
-    throw new SkillOutputParseError(
-      'Skill output is empty or not a string',
-      rawOutput ?? ''
-    );
+    throw new SkillOutputParseError('Skill output is empty or not a string', rawOutput ?? '');
   }
 
   const trimmed = rawOutput.trim();
   if (trimmed === '') {
-    throw new SkillOutputParseError(
-      'Skill output is empty after trimming whitespace',
-      rawOutput
-    );
+    throw new SkillOutputParseError('Skill output is empty after trimming whitespace', rawOutput);
   }
+
+  // First, try to extract a structured block from the raw output
+  // This handles the case where rawOutput is full tmux pane content
+  const extractedBlock = extractStructuredBlock(trimmed);
+  const contentToParse = extractedBlock ?? trimmed;
 
   // Try JSON first (faster), then YAML
-  let parsed = tryParseJson(trimmed);
+  let parsed = tryParseJson(contentToParse);
   if (parsed === null) {
-    parsed = tryParseYaml(trimmed);
+    parsed = tryParseYaml(contentToParse);
   }
 
   if (parsed === null) {
     throw new SkillOutputParseError(
-      'Failed to parse skill output as JSON or YAML. Ensure the output is valid JSON or YAML format.',
+      'Failed to parse skill output as JSON or YAML. Ensure the output contains a valid structured block.',
       rawOutput
     );
   }
@@ -228,10 +319,7 @@ export function parseSkillOutput(rawOutput: string): SkillOutput {
 
   // Check for required 'status' field
   if (!('status' in output)) {
-    throw new SkillOutputParseError(
-      'Skill output missing required field: status',
-      rawOutput
-    );
+    throw new SkillOutputParseError('Skill output missing required field: status', rawOutput);
   }
 
   // Validate status is a valid value
@@ -253,10 +341,7 @@ export function parseSkillOutput(rawOutput: string): SkillOutput {
   // Validate status-specific required fields
   const fieldErrors = validateStatusSpecificFields(output);
   if (fieldErrors.length > 0) {
-    throw new SkillOutputParseError(
-      `Invalid skill output: ${fieldErrors.join('; ')}`,
-      rawOutput
-    );
+    throw new SkillOutputParseError(`Invalid skill output: ${fieldErrors.join('; ')}`, rawOutput);
   }
 
   // The output object now has all required fields validated
@@ -271,8 +356,9 @@ export function parseSkillOutput(rawOutput: string): SkillOutput {
  * Extract the status from skill output without full parsing
  *
  * Useful for quick status checks without validating all fields.
+ * Handles raw tmux pane content by extracting the structured block first.
  *
- * @param rawOutput - The raw output string from the skill
+ * @param rawOutput - The raw output string from the skill (may be full pane content)
  * @returns The status string if found, null otherwise
  */
 export function extractStatus(rawOutput: string): SkillOutputStatus | null {
@@ -285,10 +371,14 @@ export function extractStatus(rawOutput: string): SkillOutputStatus | null {
     return null;
   }
 
+  // First, try to extract a structured block from the raw output
+  const extractedBlock = extractStructuredBlock(trimmed);
+  const contentToParse = extractedBlock ?? trimmed;
+
   // Try JSON first, then YAML
-  let parsed = tryParseJson(trimmed);
+  let parsed = tryParseJson(contentToParse);
   if (parsed === null) {
-    parsed = tryParseYaml(trimmed);
+    parsed = tryParseYaml(contentToParse);
   }
 
   if (parsed === null || typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

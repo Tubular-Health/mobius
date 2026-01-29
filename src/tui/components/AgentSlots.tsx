@@ -8,7 +8,7 @@
 import { Box, Text } from 'ink';
 import { memo } from 'react';
 import type { ActiveTask } from '../../types.js';
-import { SNOW_STORM, POLAR_NIGHT, AURORA } from '../theme.js';
+import { AURORA, POLAR_NIGHT, SNOW_STORM } from '../theme.js';
 
 export interface AgentSlotsProps {
   activeTasks: ActiveTask[];
@@ -32,6 +32,7 @@ export const AgentSlots = memo(function AgentSlots({
     <Box>
       <Text color={SNOW_STORM.nord4}>Agents: </Text>
       {slots.map((task, i) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: slots are fixed positional items
         <Box key={i} marginRight={2}>
           {task ? (
             <Text>

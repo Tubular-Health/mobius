@@ -2,22 +2,22 @@
  * Unit tests for the task-graph module
  */
 
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import {
   buildTaskGraph,
-  mapLinearStatus,
-  getReadyTasks,
+  getBlockedBy,
   getBlockedTasks,
+  getBlockers,
   getCompletedTasks,
+  getGraphStats,
   getInProgressTasks,
-  updateTaskStatus,
+  getReadyTasks,
   getTaskById,
   getTaskByIdentifier,
-  getBlockers,
-  getBlockedBy,
-  getGraphStats,
   getVerificationTask,
   type LinearIssue,
+  mapLinearStatus,
+  updateTaskStatus,
 } from './task-graph.js';
 
 // Helper to create mock Linear issues
@@ -193,8 +193,8 @@ describe('getReadyTasks', () => {
     const ready = getReadyTasks(graph);
 
     expect(ready.length).toBe(2);
-    expect(ready.map(t => t.identifier)).toContain('MOB-1');
-    expect(ready.map(t => t.identifier)).toContain('MOB-2');
+    expect(ready.map((t) => t.identifier)).toContain('MOB-1');
+    expect(ready.map((t) => t.identifier)).toContain('MOB-2');
   });
 
   it('returns tasks whose blockers are all done', () => {
@@ -249,7 +249,7 @@ describe('getReadyTasks', () => {
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const ready = getReadyTasks(graph);
 
-    expect(ready.map(t => t.identifier)).toEqual(['MOB-1', 'MOB-2', 'MOB-3']);
+    expect(ready.map((t) => t.identifier)).toEqual(['MOB-1', 'MOB-2', 'MOB-3']);
   });
 });
 
@@ -292,8 +292,8 @@ describe('getCompletedTasks', () => {
     const completed = getCompletedTasks(graph);
 
     expect(completed.length).toBe(2);
-    expect(completed.map(t => t.identifier)).toContain('MOB-1');
-    expect(completed.map(t => t.identifier)).toContain('MOB-2');
+    expect(completed.map((t) => t.identifier)).toContain('MOB-1');
+    expect(completed.map((t) => t.identifier)).toContain('MOB-2');
   });
 
   it('returns empty array when no tasks are completed', () => {
@@ -321,16 +321,14 @@ describe('getInProgressTasks', () => {
     const inProgress = getInProgressTasks(graph);
 
     expect(inProgress.length).toBe(2);
-    expect(inProgress.map(t => t.identifier)).toContain('MOB-1');
-    expect(inProgress.map(t => t.identifier)).toContain('MOB-2');
+    expect(inProgress.map((t) => t.identifier)).toContain('MOB-1');
+    expect(inProgress.map((t) => t.identifier)).toContain('MOB-2');
   });
 });
 
 describe('updateTaskStatus', () => {
   it('updates task status immutably', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const newGraph = updateTaskStatus(graph, 'id-1', 'in_progress');
@@ -356,9 +354,7 @@ describe('updateTaskStatus', () => {
   });
 
   it('returns same graph if task not found', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const newGraph = updateTaskStatus(graph, 'non-existent', 'done');
@@ -392,9 +388,7 @@ describe('updateTaskStatus', () => {
 
 describe('getTaskById', () => {
   it('returns task by ID', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const task = getTaskById(graph, 'id-1');
@@ -403,9 +397,7 @@ describe('getTaskById', () => {
   });
 
   it('returns undefined for non-existent ID', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const task = getTaskById(graph, 'non-existent');
@@ -416,9 +408,7 @@ describe('getTaskById', () => {
 
 describe('getTaskByIdentifier', () => {
   it('returns task by identifier', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const task = getTaskByIdentifier(graph, 'MOB-1');
@@ -427,9 +417,7 @@ describe('getTaskByIdentifier', () => {
   });
 
   it('returns undefined for non-existent identifier', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const task = getTaskByIdentifier(graph, 'NON-EXISTENT');
@@ -453,14 +441,12 @@ describe('getBlockers', () => {
     const blockers = getBlockers(graph, 'id-3');
 
     expect(blockers.length).toBe(2);
-    expect(blockers.map(t => t.identifier)).toContain('MOB-1');
-    expect(blockers.map(t => t.identifier)).toContain('MOB-2');
+    expect(blockers.map((t) => t.identifier)).toContain('MOB-1');
+    expect(blockers.map((t) => t.identifier)).toContain('MOB-2');
   });
 
   it('returns empty array for task with no blockers', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const blockers = getBlockers(graph, 'id-1');
@@ -469,9 +455,7 @@ describe('getBlockers', () => {
   });
 
   it('returns empty array for non-existent task', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const blockers = getBlockers(graph, 'non-existent');
@@ -502,14 +486,12 @@ describe('getBlockedBy', () => {
     const blockedBy = getBlockedBy(graph, 'id-1');
 
     expect(blockedBy.length).toBe(2);
-    expect(blockedBy.map(t => t.identifier)).toContain('MOB-2');
-    expect(blockedBy.map(t => t.identifier)).toContain('MOB-3');
+    expect(blockedBy.map((t) => t.identifier)).toContain('MOB-2');
+    expect(blockedBy.map((t) => t.identifier)).toContain('MOB-3');
   });
 
   it('returns empty array for task that blocks nothing', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
     const blockedBy = getBlockedBy(graph, 'id-1');
@@ -602,9 +584,7 @@ describe('edge cases', () => {
   });
 
   it('handles single task with no dependencies', () => {
-    const issues: LinearIssue[] = [
-      createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog'),
-    ];
+    const issues: LinearIssue[] = [createMockIssue('id-1', 'MOB-1', 'Task 1', 'Backlog')];
 
     const graph = buildTaskGraph('parent-id', 'MOB-100', issues);
 

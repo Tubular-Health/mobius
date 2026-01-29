@@ -2,13 +2,13 @@
  * Unit tests for config module - verification config loading and validation
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { readConfig, validateConfig } from './config.js';
+import { join } from 'node:path';
 import type { LoopConfig } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
+import { readConfig, validateConfig } from './config.js';
 
 describe('config module', () => {
   let tempDir: string;
@@ -458,9 +458,7 @@ execution:
         const result = validateConfig(config);
 
         expect(result.valid).toBe(false);
-        expect(result.errors).toContain(
-          'execution.verification.security_check must be a boolean'
-        );
+        expect(result.errors).toContain('execution.verification.security_check must be a boolean');
       });
     });
 

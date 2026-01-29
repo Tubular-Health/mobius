@@ -101,7 +101,9 @@ export async function fetchJiraIssue(taskId: string): Promise<ParentIssue | null
     };
   } catch (error) {
     console.error(
-      chalk.gray(`Failed to fetch Jira issue: ${error instanceof Error ? error.message : String(error)}`)
+      chalk.gray(
+        `Failed to fetch Jira issue: ${error instanceof Error ? error.message : String(error)}`
+      )
     );
     return null;
   }
@@ -135,7 +137,9 @@ export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[
 
     if (searchResponse.issues) {
       for (const issue of searchResponse.issues) {
-        const blockedBy = extractBlockedByRelations(issue.fields?.issuelinks as JiraIssueLink[] | undefined);
+        const blockedBy = extractBlockedByRelations(
+          issue.fields?.issuelinks as JiraIssueLink[] | undefined
+        );
 
         subTasks.push({
           id: issue.id ?? '',
@@ -166,9 +170,17 @@ export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[
     // Check for common Jira API error patterns
     if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
       console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
-    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+    } else if (
+      status === 403 ||
+      errorMessage.includes('403') ||
+      errorMessage.includes('Forbidden')
+    ) {
       console.error(chalk.gray('  → Permission denied. The API token may lack search permissions'));
-    } else if (status === 404 || errorMessage.includes('404') || errorMessage.includes('not found')) {
+    } else if (
+      status === 404 ||
+      errorMessage.includes('404') ||
+      errorMessage.includes('not found')
+    ) {
       console.error(chalk.gray(`  → Issue ${parentKey} not found or not accessible`));
     } else if (errorMessage.includes('JQL')) {
       console.error(chalk.gray('  → JQL query error. The issue may not support sub-tasks'));
@@ -189,7 +201,9 @@ export async function fetchJiraSubTasks(parentKey: string): Promise<LinearIssue[
  * In Jira, blocking relationships are represented via issue links with
  * types like "Blocks" where the inward description is "is blocked by"
  */
-function extractBlockedByRelations(issuelinks: JiraIssueLink[] | undefined): Array<{ id: string; identifier: string }> {
+function extractBlockedByRelations(
+  issuelinks: JiraIssueLink[] | undefined
+): Array<{ id: string; identifier: string }> {
   const blockedBy: Array<{ id: string; identifier: string }> = [];
 
   if (!issuelinks) {
@@ -200,8 +214,7 @@ function extractBlockedByRelations(issuelinks: JiraIssueLink[] | undefined): Arr
     // Check for "is blocked by" relationship (inward link)
     // The inward description typically contains "is blocked by"
     if (
-      link.inwardIssue &&
-      link.inwardIssue.id &&
+      link.inwardIssue?.id &&
       link.inwardIssue.key &&
       (link.type?.inward?.toLowerCase().includes('blocked by') ||
         link.type?.name?.toLowerCase() === 'blocks')
@@ -228,7 +241,10 @@ function extractBlockedByRelations(issuelinks: JiraIssueLink[] | undefined): Arr
  * @param blockedKey - The issue key that is blocked (e.g., "PROJ-124")
  * @returns true if link was created successfully, false otherwise
  */
-export async function createJiraIssueLink(blockerKey: string, blockedKey: string): Promise<boolean> {
+export async function createJiraIssueLink(
+  blockerKey: string,
+  blockedKey: string
+): Promise<boolean> {
   const client = getJiraClient();
   if (!client) {
     return false;
@@ -254,10 +270,22 @@ export async function createJiraIssueLink(blockerKey: string, blockedKey: string
 
     if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
       console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
-    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
-      console.error(chalk.gray('  → Permission denied. The API token may lack link creation permissions'));
-    } else if (status === 404 || errorMessage.includes('404') || errorMessage.includes('not found')) {
-      console.error(chalk.gray(`  → Issue ${blockerKey} or ${blockedKey} not found or not accessible`));
+    } else if (
+      status === 403 ||
+      errorMessage.includes('403') ||
+      errorMessage.includes('Forbidden')
+    ) {
+      console.error(
+        chalk.gray('  → Permission denied. The API token may lack link creation permissions')
+      );
+    } else if (
+      status === 404 ||
+      errorMessage.includes('404') ||
+      errorMessage.includes('not found')
+    ) {
+      console.error(
+        chalk.gray(`  → Issue ${blockerKey} or ${blockedKey} not found or not accessible`)
+      );
     }
 
     if (httpError.response?.data) {
@@ -325,7 +353,9 @@ export interface CreateJiraIssueOptions {
  * @param options - Issue creation options
  * @returns Created issue details or null on failure
  */
-export async function createJiraIssue(options: CreateJiraIssueOptions): Promise<JiraCreatedIssue | null> {
+export async function createJiraIssue(
+  options: CreateJiraIssueOptions
+): Promise<JiraCreatedIssue | null> {
   const client = getJiraClient();
   if (!client) {
     return null;
@@ -375,10 +405,18 @@ export async function createJiraIssue(options: CreateJiraIssueOptions): Promise<
 
     if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
       console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
-    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
-      console.error(chalk.gray('  → Permission denied. The API token may lack issue creation permissions'));
+    } else if (
+      status === 403 ||
+      errorMessage.includes('403') ||
+      errorMessage.includes('Forbidden')
+    ) {
+      console.error(
+        chalk.gray('  → Permission denied. The API token may lack issue creation permissions')
+      );
     } else if (status === 400 || errorMessage.includes('400')) {
-      console.error(chalk.gray('  → Invalid request. Check project key, issue type, and required fields'));
+      console.error(
+        chalk.gray('  → Invalid request. Check project key, issue type, and required fields')
+      );
     }
 
     if (httpError.response?.data) {
@@ -401,7 +439,10 @@ export async function createJiraIssue(options: CreateJiraIssueOptions): Promise<
  * @param targetStatusName - The target status name (e.g., "In Progress", "Done")
  * @returns true if transition succeeded, false otherwise
  */
-export async function updateJiraIssueStatus(issueKeyOrId: string, targetStatusName: string): Promise<boolean> {
+export async function updateJiraIssueStatus(
+  issueKeyOrId: string,
+  targetStatusName: string
+): Promise<boolean> {
   const client = getJiraClient();
   if (!client) {
     return false;
@@ -419,15 +460,15 @@ export async function updateJiraIssueStatus(issueKeyOrId: string, targetStatusNa
     // Match by transition name or target status name (case-insensitive)
     const targetLower = targetStatusName.toLowerCase();
     const matchingTransition = transitions.find(
-      (t) =>
-        t.name?.toLowerCase() === targetLower ||
-        t.to?.name?.toLowerCase() === targetLower
+      (t) => t.name?.toLowerCase() === targetLower || t.to?.name?.toLowerCase() === targetLower
     );
 
     if (!matchingTransition || !matchingTransition.id) {
       const availableTransitions = transitions.map((t) => `${t.name} → ${t.to?.name}`).join(', ');
       console.error(
-        chalk.gray(`No transition found to status "${targetStatusName}". Available: ${availableTransitions || 'none'}`)
+        chalk.gray(
+          `No transition found to status "${targetStatusName}". Available: ${availableTransitions || 'none'}`
+        )
       );
       return false;
     }
@@ -451,9 +492,19 @@ export async function updateJiraIssueStatus(issueKeyOrId: string, targetStatusNa
 
     if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
       console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
-    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
-      console.error(chalk.gray('  → Permission denied. The API token may lack transition permissions'));
-    } else if (status === 404 || errorMessage.includes('404') || errorMessage.includes('not found')) {
+    } else if (
+      status === 403 ||
+      errorMessage.includes('403') ||
+      errorMessage.includes('Forbidden')
+    ) {
+      console.error(
+        chalk.gray('  → Permission denied. The API token may lack transition permissions')
+      );
+    } else if (
+      status === 404 ||
+      errorMessage.includes('404') ||
+      errorMessage.includes('not found')
+    ) {
       console.error(chalk.gray(`  → Issue ${issueKeyOrId} not found or not accessible`));
     }
 
@@ -482,7 +533,10 @@ export interface JiraCommentResult {
  * @param body - The comment body (plain text or markdown)
  * @returns Comment details or null on failure
  */
-export async function addJiraComment(issueKeyOrId: string, body: string): Promise<JiraCommentResult | null> {
+export async function addJiraComment(
+  issueKeyOrId: string,
+  body: string
+): Promise<JiraCommentResult | null> {
   const client = getJiraClient();
   if (!client) {
     return null;
@@ -510,9 +564,19 @@ export async function addJiraComment(issueKeyOrId: string, body: string): Promis
 
     if (status === 401 || errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
       console.error(chalk.gray('  → Authentication failed. Check JIRA_EMAIL and JIRA_API_TOKEN'));
-    } else if (status === 403 || errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
-      console.error(chalk.gray('  → Permission denied. The API token may lack comment permissions'));
-    } else if (status === 404 || errorMessage.includes('404') || errorMessage.includes('not found')) {
+    } else if (
+      status === 403 ||
+      errorMessage.includes('403') ||
+      errorMessage.includes('Forbidden')
+    ) {
+      console.error(
+        chalk.gray('  → Permission denied. The API token may lack comment permissions')
+      );
+    } else if (
+      status === 404 ||
+      errorMessage.includes('404') ||
+      errorMessage.includes('not found')
+    ) {
       console.error(chalk.gray(`  → Issue ${issueKeyOrId} not found or not accessible`));
     }
 

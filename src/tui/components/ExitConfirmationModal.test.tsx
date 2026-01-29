@@ -10,9 +10,9 @@
  * These tests focus on the component contract and module structure.
  */
 
-import { describe, it, expect, mock } from 'bun:test';
-import { ExitConfirmationModal, type ExitConfirmationModalProps } from './ExitConfirmationModal.js';
+import { describe, expect, it, mock } from 'bun:test';
 import type { ExecutionSummary } from '../../lib/context-generator.js';
+import { ExitConfirmationModal, type ExitConfirmationModalProps } from './ExitConfirmationModal.js';
 
 // Helper to create mock ExecutionSummary
 function createMockSummary(overrides?: Partial<ExecutionSummary>): ExecutionSummary {
@@ -28,7 +28,9 @@ function createMockSummary(overrides?: Partial<ExecutionSummary>): ExecutionSumm
 }
 
 // Helper to create valid props
-function createValidProps(overrides?: Partial<ExitConfirmationModalProps>): ExitConfirmationModalProps {
+function createValidProps(
+  overrides?: Partial<ExitConfirmationModalProps>
+): ExitConfirmationModalProps {
   return {
     sessionName: 'mobius-MOB-123',
     activeAgentCount: 2,

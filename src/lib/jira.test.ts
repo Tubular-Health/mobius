@@ -7,16 +7,16 @@
  * a test Jira instance.
  */
 
-import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import {
+  addJiraComment,
+  createJiraIssue,
   createJiraIssueLink,
   createJiraIssueLinks,
-  getJiraClient,
   fetchJiraIssue,
   fetchJiraSubTasks,
-  createJiraIssue,
+  getJiraClient,
   updateJiraIssueStatus,
-  addJiraComment,
 } from './jira.js';
 
 // Store original env vars to restore after tests
@@ -212,9 +212,7 @@ describe('createJiraIssueLinks (batch processing)', () => {
   it('handles single link in batch', async () => {
     delete process.env.JIRA_HOST;
 
-    const result = await createJiraIssueLinks([
-      { blocker: 'PROJ-1', blocked: 'PROJ-2' },
-    ]);
+    const result = await createJiraIssueLinks([{ blocker: 'PROJ-1', blocked: 'PROJ-2' }]);
 
     expect(result.success).toBe(0);
     expect(result.failed).toBe(1);

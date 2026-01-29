@@ -1,10 +1,10 @@
+import chalk from 'chalk';
 import { execa } from 'execa';
 import which from 'which';
-import chalk from 'chalk';
-import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
-import { BACKEND_ID_PATTERNS } from '../types.js';
+import { resolvePaths } from '../lib/paths.js';
 import type { Backend, Model } from '../types.js';
+import { BACKEND_ID_PATTERNS } from '../types.js';
 
 interface SubmitOptions {
   backend?: Backend;
@@ -21,10 +21,7 @@ async function hasCclean(): Promise<boolean> {
   }
 }
 
-export async function submit(
-  taskId: string | undefined,
-  options: SubmitOptions
-): Promise<void> {
+export async function submit(taskId: string | undefined, options: SubmitOptions): Promise<void> {
   const paths = resolvePaths();
 
   // Load config
@@ -52,7 +49,7 @@ export async function submit(
 
   // Build the prompt to invoke the PR skill
   // The skill auto-detects issue references from branch name, but we can provide context if taskId is specified
-  const skillInvocation = `/pr${skillArgs.length > 0 ? ' ' + skillArgs.join(' ') : ''}`;
+  const skillInvocation = `/pr${skillArgs.length > 0 ? ` ${skillArgs.join(' ')}` : ''}`;
   const contextNote = taskId
     ? `\n\nNote: This PR is for issue ${taskId}. Ensure this issue is linked in the PR.`
     : '';

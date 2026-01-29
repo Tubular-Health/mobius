@@ -1,5 +1,5 @@
-import { existsSync, symlinkSync, lstatSync } from 'node:fs';
-import { basename, resolve, join } from 'node:path';
+import { existsSync, lstatSync, symlinkSync } from 'node:fs';
+import { basename, join, resolve } from 'node:path';
 import { execa } from 'execa';
 import type { ExecutionConfig } from '../types.js';
 
@@ -227,11 +227,11 @@ export async function createWorktree(
         // Could not detect - provide helpful error
         throw new Error(
           `Could not determine base branch for worktree creation.\n\n` +
-          `This repository does not have a 'main' branch, and the default branch could not be detected.\n\n` +
-          `Please set 'base_branch' in your mobius config:\n` +
-          `  1. Run: mobius config -e\n` +
-          `  2. Add under [execution]:\n` +
-          `     base_branch = "master"  # or your default branch name\n`
+            `This repository does not have a 'main' branch, and the default branch could not be detected.\n\n` +
+            `Please set 'base_branch' in your mobius config:\n` +
+            `  1. Run: mobius config -e\n` +
+            `  2. Add under [execution]:\n` +
+            `     base_branch = "master"  # or your default branch name\n`
         );
       }
     }
@@ -244,10 +244,10 @@ export async function createWorktree(
 
       throw new Error(
         `Base branch '${baseBranch}' does not exist in this repository.${suggestion}\n\n` +
-        `Please update 'base_branch' in your mobius config:\n` +
-        `  1. Run: mobius config -e\n` +
-        `  2. Update under [execution]:\n` +
-        `     base_branch = "${detected ?? 'your-default-branch'}"\n`
+          `Please update 'base_branch' in your mobius config:\n` +
+          `  1. Run: mobius config -e\n` +
+          `  2. Update under [execution]:\n` +
+          `     base_branch = "${detected ?? 'your-default-branch'}"\n`
       );
     }
 

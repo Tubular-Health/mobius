@@ -17,9 +17,5 @@ export interface StatusIndicatorProps {
  * All statuses use static icons to avoid render glitches.
  */
 export function StatusIndicator({ status }: StatusIndicatorProps): JSX.Element {
-  return (
-    <Text color={STATUS_COLORS[status]}>
-      {STATUS_ICONS[status]}
-    </Text>
-  );
+  return <Text color={STATUS_COLORS[status]}>{STATUS_ICONS[status]}</Text>;
 }

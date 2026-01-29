@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import type { CheckResult, Backend } from '../../types.js';
+import type { Backend, CheckResult } from '../../types.js';
 
 export async function checkLinearMcp(backend: Backend): Promise<CheckResult> {
   const name = 'Linear MCP';

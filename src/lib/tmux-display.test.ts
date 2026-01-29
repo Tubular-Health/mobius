@@ -10,9 +10,9 @@
  * Uses mocked shell execution - no actual tmux sessions created.
  */
 
-import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { SubTask } from './task-graph.js';
-import type { TmuxSession, TmuxPane } from './tmux-display.js';
+import type { TmuxPane, TmuxSession } from './tmux-display.js';
 
 // Track execa calls for verification
 let execaCalls: Array<{ command: string; args: string[] }> = [];
@@ -25,7 +25,7 @@ mock.module('execa', () => ({
 
     const key = `${command}:${args.join(',')}`;
     if (execaResponses.has(key)) {
-      return { stdout: execaResponses.get(key)! };
+      return { stdout: execaResponses.get(key) ?? '' };
     }
 
     // Default responses based on command patterns
@@ -176,7 +176,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.sessionExists('my-session');
 
       const hasSessionCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'has-session'
+        (c) => c.command === 'tmux' && c.args[0] === 'has-session'
       );
       expect(hasSessionCall).toBeDefined();
       expect(hasSessionCall?.args).toContain('my-session');
@@ -193,7 +193,10 @@ describe('tmux-display', () => {
     });
 
     it('returns session object with id and initialPaneId', async () => {
-      execaResponses.set('tmux:display-message,-t,mobius-MOB-456,-p,#{session_id}:#{pane_id}', '$5:%10');
+      execaResponses.set(
+        'tmux:display-message,-t,mobius-MOB-456,-p,#{session_id}:#{pane_id}',
+        '$5:%10'
+      );
 
       const session = await tmuxDisplay.createSession('mobius-MOB-456');
 
@@ -205,7 +208,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.createSession('mobius-MOB-789');
 
       const newSessionCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'new-session'
+        (c) => c.command === 'tmux' && c.args[0] === 'new-session'
       );
       expect(newSessionCall).toBeDefined();
       expect(newSessionCall?.args).toContain('-d');
@@ -217,7 +220,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.createSession('mobius-TEST');
 
       const displayMsgCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'display-message'
+        (c) => c.command === 'tmux' && c.args[0] === 'display-message'
       );
       expect(displayMsgCall).toBeDefined();
       expect(displayMsgCall?.args).toContain('#{session_id}:#{pane_id}');
@@ -245,7 +248,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.createAgentPane(mockSession, mockTask);
 
       const splitCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'split-window'
+        (c) => c.command === 'tmux' && c.args[0] === 'split-window'
       );
       expect(splitCall).toBeDefined();
       expect(splitCall?.args).toContain('-h'); // horizontal split
@@ -264,7 +267,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.createAgentPane(mockSession, mockTask);
 
       const selectPaneCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'select-pane' && c.args.includes('-T')
+        (c) => c.command === 'tmux' && c.args[0] === 'select-pane' && c.args.includes('-T')
       );
       expect(selectPaneCall).toBeDefined();
       expect(selectPaneCall?.args).toContain('MOB-124: Implement feature X');
@@ -274,7 +277,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.createAgentPane(mockSession, mockTask, '%3');
 
       const splitCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'split-window'
+        (c) => c.command === 'tmux' && c.args[0] === 'split-window'
       );
       expect(splitCall?.args).toContain('%3');
     });
@@ -283,7 +286,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.createAgentPane(mockSession, mockTask);
 
       const splitCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'split-window'
+        (c) => c.command === 'tmux' && c.args[0] === 'split-window'
       );
       expect(splitCall?.args).toContain('%0'); // initialPaneId
     });
@@ -292,7 +295,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.createAgentPane(mockSession, mockTask);
 
       const splitCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'split-window'
+        (c) => c.command === 'tmux' && c.args[0] === 'split-window'
       );
       expect(splitCall?.args).toContain('-t');
     });
@@ -308,7 +311,7 @@ describe('tmux-display', () => {
     it('creates status file at correct path', async () => {
       await tmuxDisplay.createStatusPane(mockSession);
 
-      const touchCall = execaCalls.find(c => c.command === 'touch');
+      const touchCall = execaCalls.find((c) => c.command === 'touch');
       expect(touchCall).toBeDefined();
       expect(touchCall?.args).toContain('/tmp/mobius-status-mobius-MOB-200.txt');
     });
@@ -317,7 +320,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.createStatusPane(mockSession);
 
       const splitCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'split-window'
+        (c) => c.command === 'tmux' && c.args[0] === 'split-window'
       );
       expect(splitCall).toBeDefined();
       expect(splitCall?.args).toContain('-v'); // vertical split
@@ -329,7 +332,7 @@ describe('tmux-display', () => {
       await tmuxDisplay.createStatusPane(mockSession);
 
       const selectPaneCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'select-pane' && c.args.includes('Status')
+        (c) => c.command === 'tmux' && c.args[0] === 'select-pane' && c.args.includes('Status')
       );
       expect(selectPaneCall).toBeDefined();
     });
@@ -338,15 +341,15 @@ describe('tmux-display', () => {
       await tmuxDisplay.createStatusPane(mockSession);
 
       const sendKeysCall = execaCalls.find(
-        c =>
+        (c) =>
           c.command === 'tmux' &&
           c.args[0] === 'send-keys' &&
-          c.args.some(a => a.includes('watch'))
+          c.args.some((a) => a.includes('watch'))
       );
       expect(sendKeysCall).toBeDefined();
-      expect(sendKeysCall?.args.some(a => a.includes('/tmp/mobius-status-mobius-MOB-200.txt'))).toBe(
-        true
-      );
+      expect(
+        sendKeysCall?.args.some((a) => a.includes('/tmp/mobius-status-mobius-MOB-200.txt'))
+      ).toBe(true);
     });
 
     it('returns pane with type status', async () => {
@@ -368,7 +371,9 @@ describe('tmux-display', () => {
     it('formats title correctly with task identifier', async () => {
       await tmuxDisplay.setPaneTitle(mockPane, 'MOB-125: New title');
 
-      const selectPaneCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'select-pane');
+      const selectPaneCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'select-pane'
+      );
       expect(selectPaneCall).toBeDefined();
       expect(selectPaneCall?.args).toContain('-t');
       expect(selectPaneCall?.args).toContain('%5');
@@ -379,7 +384,9 @@ describe('tmux-display', () => {
     it('handles title with special characters', async () => {
       await tmuxDisplay.setPaneTitle(mockPane, 'Task: Fix "issue" & cleanup');
 
-      const selectPaneCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'select-pane');
+      const selectPaneCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'select-pane'
+      );
       expect(selectPaneCall?.args).toContain('Task: Fix "issue" & cleanup');
     });
 
@@ -387,7 +394,9 @@ describe('tmux-display', () => {
       const customPane: TmuxPane = { ...mockPane, id: '%99' };
       await tmuxDisplay.setPaneTitle(customPane, 'Test');
 
-      const selectPaneCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'select-pane');
+      const selectPaneCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'select-pane'
+      );
       expect(selectPaneCall?.args).toContain('%99');
     });
   });
@@ -408,7 +417,9 @@ describe('tmux-display', () => {
     it('uses default line count of 100', async () => {
       await tmuxDisplay.capturePaneContent(mockPane);
 
-      const captureCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'capture-pane');
+      const captureCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'capture-pane'
+      );
       expect(captureCall).toBeDefined();
       expect(captureCall?.args).toContain('-S');
       expect(captureCall?.args).toContain('-100');
@@ -417,14 +428,18 @@ describe('tmux-display', () => {
     it('respects custom line count parameter', async () => {
       await tmuxDisplay.capturePaneContent(mockPane, 50);
 
-      const captureCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'capture-pane');
+      const captureCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'capture-pane'
+      );
       expect(captureCall?.args).toContain('-50');
     });
 
     it('targets correct pane ID', async () => {
       await tmuxDisplay.capturePaneContent(mockPane);
 
-      const captureCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'capture-pane');
+      const captureCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'capture-pane'
+      );
       expect(captureCall?.args).toContain('-t');
       expect(captureCall?.args).toContain('%3');
     });
@@ -440,7 +455,9 @@ describe('tmux-display', () => {
     it('sends command with Enter to pane', async () => {
       await tmuxDisplay.runInPane(mockPane, 'claude execute MOB-123');
 
-      const sendKeysCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'send-keys');
+      const sendKeysCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'send-keys'
+      );
       expect(sendKeysCall).toBeDefined();
       expect(sendKeysCall?.args).toContain('%7');
       expect(sendKeysCall?.args).toContain('claude execute MOB-123');
@@ -451,7 +468,9 @@ describe('tmux-display', () => {
       const customPane: TmuxPane = { ...mockPane, id: '%42' };
       await tmuxDisplay.runInPane(customPane, 'ls -la');
 
-      const sendKeysCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'send-keys');
+      const sendKeysCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'send-keys'
+      );
       expect(sendKeysCall?.args).toContain('%42');
     });
   });
@@ -462,7 +481,7 @@ describe('tmux-display', () => {
 
       await tmuxDisplay.killPane(pane);
 
-      const killCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'kill-pane');
+      const killCall = execaCalls.find((c) => c.command === 'tmux' && c.args[0] === 'kill-pane');
       expect(killCall).toBeDefined();
       expect(killCall?.args).toContain('-t');
       expect(killCall?.args).toContain('%8');
@@ -481,7 +500,7 @@ describe('tmux-display', () => {
       const session: TmuxSession = { name: 'test-session', id: '$1', initialPaneId: '%0' };
       await tmuxDisplay.listPanes(session);
 
-      const listCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'list-panes');
+      const listCall = execaCalls.find((c) => c.command === 'tmux' && c.args[0] === 'list-panes');
       expect(listCall).toBeDefined();
       expect(listCall?.args).toContain('-t');
       expect(listCall?.args).toContain('test-session');
@@ -496,7 +515,7 @@ describe('tmux-display', () => {
 
       await tmuxDisplay.destroySession(session);
 
-      const killCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'kill-session');
+      const killCall = execaCalls.find((c) => c.command === 'tmux' && c.args[0] === 'kill-session');
       expect(killCall).toBeDefined();
       expect(killCall?.args).toContain('-t');
       expect(killCall?.args).toContain('mobius-MOB-999');
@@ -509,14 +528,18 @@ describe('tmux-display', () => {
     it('does not call select-layout for single pane', async () => {
       await tmuxDisplay.layoutPanes(mockSession, 1);
 
-      const layoutCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'select-layout');
+      const layoutCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'select-layout'
+      );
       expect(layoutCall).toBeUndefined();
     });
 
     it('uses even-horizontal layout for 2 panes', async () => {
       await tmuxDisplay.layoutPanes(mockSession, 2);
 
-      const layoutCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'select-layout');
+      const layoutCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'select-layout'
+      );
       expect(layoutCall).toBeDefined();
       expect(layoutCall?.args).toContain('even-horizontal');
     });
@@ -524,14 +547,18 @@ describe('tmux-display', () => {
     it('uses tiled layout for 3 panes', async () => {
       await tmuxDisplay.layoutPanes(mockSession, 3);
 
-      const layoutCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'select-layout');
+      const layoutCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'select-layout'
+      );
       expect(layoutCall?.args).toContain('tiled');
     });
 
     it('uses tiled layout for 4+ panes', async () => {
       await tmuxDisplay.layoutPanes(mockSession, 5);
 
-      const layoutCall = execaCalls.find(c => c.command === 'tmux' && c.args[0] === 'select-layout');
+      const layoutCall = execaCalls.find(
+        (c) => c.command === 'tmux' && c.args[0] === 'select-layout'
+      );
       expect(layoutCall?.args).toContain('tiled');
     });
   });
@@ -552,7 +579,7 @@ describe('tmux-display', () => {
 
       // Verify tmux commands used the session name
       const newSessionCall = execaCalls.find(
-        c => c.command === 'tmux' && c.args[0] === 'new-session'
+        (c) => c.command === 'tmux' && c.args[0] === 'new-session'
       );
       expect(newSessionCall?.args).toContain(sessionName);
     });

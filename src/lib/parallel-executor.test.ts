@@ -10,19 +10,18 @@
  * Uses mocks for tmux functions - no real sessions or Claude processes.
  */
 
-import { describe, it, expect } from 'bun:test';
-import type { SubTask } from './task-graph.js';
+import { describe, expect, it } from 'bun:test';
 import type { ExecutionConfig } from '../types.js';
-
 // We need to import the functions we're testing
 // Note: buildClaudeCommand and parseAgentOutput need to be exported from parallel-executor.ts
 import {
-  buildClaudeCommand,
-  parseAgentOutput,
-  calculateParallelism,
   aggregateResults,
+  buildClaudeCommand,
+  calculateParallelism,
   type ExecutionResult,
+  parseAgentOutput,
 } from './parallel-executor.js';
+import type { SubTask } from './task-graph.js';
 
 // Helper to create a mock SubTask
 function createMockSubTask(overrides: Partial<SubTask> = {}): SubTask {
@@ -66,7 +65,9 @@ describe('parallel-executor', () => {
       // Should echo the skill with specific subtask identifier
       expect(command).toContain(`echo '${skill} ${subtaskIdentifier}'`);
       // Should pipe to claude with proper flags
-      expect(command).toContain('claude -p --dangerously-skip-permissions --verbose --output-format stream-json');
+      expect(command).toContain(
+        'claude -p --dangerously-skip-permissions --verbose --output-format stream-json'
+      );
       // Should include model flag
       expect(command).toContain('--model opus');
       // Should pipe through cclean
@@ -158,11 +159,11 @@ More output...
         const result = parseAgentOutput(content, mockTask, startTime, paneId);
 
         expect(result).not.toBeNull();
-        expect(result!.success).toBe(true);
-        expect(result!.status).toBe('SUBTASK_COMPLETE');
-        expect(result!.taskId).toBe(mockTask.id);
-        expect(result!.identifier).toBe(mockTask.identifier);
-        expect(result!.pane).toBe(paneId);
+        expect(result?.success).toBe(true);
+        expect(result?.status).toBe('SUBTASK_COMPLETE');
+        expect(result?.taskId).toBe(mockTask.id);
+        expect(result?.identifier).toBe(mockTask.identifier);
+        expect(result?.pane).toBe(paneId);
       });
 
       it('detects EXECUTION_COMPLETE marker', () => {
@@ -174,8 +175,8 @@ EXECUTION_COMPLETE: MOB-124
         const result = parseAgentOutput(content, mockTask, startTime, paneId);
 
         expect(result).not.toBeNull();
-        expect(result!.success).toBe(true);
-        expect(result!.status).toBe('SUBTASK_COMPLETE');
+        expect(result?.success).toBe(true);
+        expect(result?.status).toBe('SUBTASK_COMPLETE');
       });
 
       it('detects STATUS: ALL_COMPLETE as success', () => {
@@ -187,8 +188,8 @@ STATUS: ALL_COMPLETE
         const result = parseAgentOutput(content, mockTask, startTime, paneId);
 
         expect(result).not.toBeNull();
-        expect(result!.success).toBe(true);
-        expect(result!.status).toBe('SUBTASK_COMPLETE');
+        expect(result?.success).toBe(true);
+        expect(result?.status).toBe('SUBTASK_COMPLETE');
       });
     });
 
@@ -203,8 +204,8 @@ Tests failed.
         const result = parseAgentOutput(content, mockTask, startTime, paneId);
 
         expect(result).not.toBeNull();
-        expect(result!.success).toBe(false);
-        expect(result!.status).toBe('VERIFICATION_FAILED');
+        expect(result?.success).toBe(false);
+        expect(result?.status).toBe('VERIFICATION_FAILED');
       });
 
       it('extracts error details when available', () => {
@@ -217,7 +218,7 @@ Type error in src/components/Button.tsx
         const result = parseAgentOutput(content, mockTask, startTime, paneId);
 
         expect(result).not.toBeNull();
-        expect(result!.error).toBe('Type error in src/components/Button.tsx');
+        expect(result?.error).toBe('Type error in src/components/Button.tsx');
       });
 
       it('uses default error message when no details available', () => {
@@ -226,7 +227,7 @@ Type error in src/components/Button.tsx
         const result = parseAgentOutput(content, mockTask, startTime, paneId);
 
         expect(result).not.toBeNull();
-        expect(result!.error).toBe('Verification failed');
+        expect(result?.error).toBe('Verification failed');
       });
     });
 
@@ -240,9 +241,9 @@ STATUS: ALL_BLOCKED
         const result = parseAgentOutput(content, mockTask, startTime, paneId);
 
         expect(result).not.toBeNull();
-        expect(result!.success).toBe(false);
-        expect(result!.status).toBe('ERROR');
-        expect(result!.error).toBe('No actionable sub-tasks available');
+        expect(result?.success).toBe(false);
+        expect(result?.status).toBe('ERROR');
+        expect(result?.error).toBe('No actionable sub-tasks available');
       });
 
       it('detects STATUS: NO_SUBTASKS as ERROR', () => {
@@ -254,9 +255,9 @@ STATUS: NO_SUBTASKS
         const result = parseAgentOutput(content, mockTask, startTime, paneId);
 
         expect(result).not.toBeNull();
-        expect(result!.success).toBe(false);
-        expect(result!.status).toBe('ERROR');
-        expect(result!.error).toBe('No actionable sub-tasks available');
+        expect(result?.success).toBe(false);
+        expect(result?.status).toBe('ERROR');
+        expect(result?.error).toBe('No actionable sub-tasks available');
       });
     });
 
@@ -298,8 +299,8 @@ Still working...
 
         expect(result).not.toBeNull();
         // Duration should be approximately 10000ms (allow some tolerance)
-        expect(result!.duration).toBeGreaterThanOrEqual(9900);
-        expect(result!.duration).toBeLessThanOrEqual(11000);
+        expect(result?.duration).toBeGreaterThanOrEqual(9900);
+        expect(result?.duration).toBeLessThanOrEqual(11000);
       });
     });
 
@@ -310,7 +311,7 @@ Still working...
 
         const result = parseAgentOutput(content, task, startTime, paneId);
 
-        expect(result!.taskId).toBe('unique-task-id-456');
+        expect(result?.taskId).toBe('unique-task-id-456');
       });
 
       it('includes correct identifier in result', () => {
@@ -319,7 +320,7 @@ Still working...
 
         const result = parseAgentOutput(content, task, startTime, paneId);
 
-        expect(result!.identifier).toBe('PROJ-999');
+        expect(result?.identifier).toBe('PROJ-999');
       });
 
       it('includes correct pane ID in result', () => {
@@ -327,7 +328,7 @@ Still working...
 
         const result = parseAgentOutput(content, mockTask, startTime, '%5');
 
-        expect(result!.pane).toBe('%5');
+        expect(result?.pane).toBe('%5');
       });
     });
   });
@@ -393,8 +394,22 @@ Still working...
   describe('aggregateResults', () => {
     it('aggregates successful results', () => {
       const results: ExecutionResult[] = [
-        { taskId: '1', identifier: 'MOB-1', success: true, status: 'SUBTASK_COMPLETE', duration: 1000, pane: '%0' },
-        { taskId: '2', identifier: 'MOB-2', success: true, status: 'SUBTASK_COMPLETE', duration: 2000, pane: '%1' },
+        {
+          taskId: '1',
+          identifier: 'MOB-1',
+          success: true,
+          status: 'SUBTASK_COMPLETE',
+          duration: 1000,
+          pane: '%0',
+        },
+        {
+          taskId: '2',
+          identifier: 'MOB-2',
+          success: true,
+          status: 'SUBTASK_COMPLETE',
+          duration: 2000,
+          pane: '%1',
+        },
       ];
 
       const agg = aggregateResults(results);
@@ -408,8 +423,24 @@ Still working...
 
     it('aggregates failed results', () => {
       const results: ExecutionResult[] = [
-        { taskId: '1', identifier: 'MOB-1', success: false, status: 'VERIFICATION_FAILED', duration: 1000, error: 'Tests failed', pane: '%0' },
-        { taskId: '2', identifier: 'MOB-2', success: false, status: 'ERROR', duration: 2000, error: 'Timeout', pane: '%1' },
+        {
+          taskId: '1',
+          identifier: 'MOB-1',
+          success: false,
+          status: 'VERIFICATION_FAILED',
+          duration: 1000,
+          error: 'Tests failed',
+          pane: '%0',
+        },
+        {
+          taskId: '2',
+          identifier: 'MOB-2',
+          success: false,
+          status: 'ERROR',
+          duration: 2000,
+          error: 'Timeout',
+          pane: '%1',
+        },
       ];
 
       const agg = aggregateResults(results);
@@ -423,9 +454,31 @@ Still working...
 
     it('aggregates mixed results', () => {
       const results: ExecutionResult[] = [
-        { taskId: '1', identifier: 'MOB-1', success: true, status: 'SUBTASK_COMPLETE', duration: 1000, pane: '%0' },
-        { taskId: '2', identifier: 'MOB-2', success: false, status: 'ERROR', duration: 2000, error: 'Failed', pane: '%1' },
-        { taskId: '3', identifier: 'MOB-3', success: true, status: 'SUBTASK_COMPLETE', duration: 3000, pane: '%2' },
+        {
+          taskId: '1',
+          identifier: 'MOB-1',
+          success: true,
+          status: 'SUBTASK_COMPLETE',
+          duration: 1000,
+          pane: '%0',
+        },
+        {
+          taskId: '2',
+          identifier: 'MOB-2',
+          success: false,
+          status: 'ERROR',
+          duration: 2000,
+          error: 'Failed',
+          pane: '%1',
+        },
+        {
+          taskId: '3',
+          identifier: 'MOB-3',
+          success: true,
+          status: 'SUBTASK_COMPLETE',
+          duration: 3000,
+          pane: '%2',
+        },
       ];
 
       const agg = aggregateResults(results);
@@ -449,7 +502,14 @@ Still working...
 
     it('handles failed task without error message', () => {
       const results: ExecutionResult[] = [
-        { taskId: '1', identifier: 'MOB-1', success: false, status: 'ERROR', duration: 1000, pane: '%0' },
+        {
+          taskId: '1',
+          identifier: 'MOB-1',
+          success: false,
+          status: 'ERROR',
+          duration: 1000,
+          pane: '%0',
+        },
       ];
 
       const agg = aggregateResults(results);
@@ -467,7 +527,7 @@ Still working...
         createMockSubTask({ identifier: 'MOB-102' }),
       ];
 
-      const commands = tasks.map(task =>
+      const commands = tasks.map((task) =>
         buildClaudeCommand(task.identifier, '/execute-issue', '/worktree', config)
       );
 
@@ -489,8 +549,8 @@ Still working...
       const result1 = parseAgentOutput(content, task1, Date.now(), '%0');
       const result2 = parseAgentOutput(content, task2, Date.now(), '%1');
 
-      expect(result1!.identifier).toBe('MOB-200');
-      expect(result2!.identifier).toBe('MOB-201');
+      expect(result1?.identifier).toBe('MOB-200');
+      expect(result2?.identifier).toBe('MOB-201');
     });
   });
 });

@@ -11,17 +11,17 @@
  * Uses temp directories for isolation - no real tmux or Claude processes.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   acquireLock,
-  releaseLock,
-  withLock,
-  isLocked,
   forceReleaseLock,
   getLockInfo,
+  isLocked,
+  releaseLock,
+  withLock,
 } from './git-lock.js';
 
 const LOCK_DIR_NAME = '.git-lock';
@@ -92,10 +92,10 @@ describe('git-lock', () => {
 
       const info = await getLockInfo(tempDir);
       expect(info).not.toBeNull();
-      expect(info!.pid).toBe(process.pid);
-      expect(info!.hostname).toBe(process.env.HOSTNAME ?? 'unknown');
-      expect(info!.acquired.getTime()).toBeGreaterThanOrEqual(beforeAcquire.getTime());
-      expect(info!.acquired.getTime()).toBeLessThanOrEqual(afterAcquire.getTime());
+      expect(info?.pid).toBe(process.pid);
+      expect(info?.hostname).toBe(process.env.HOSTNAME ?? 'unknown');
+      expect(info?.acquired.getTime()).toBeGreaterThanOrEqual(beforeAcquire.getTime());
+      expect(info?.acquired.getTime()).toBeLessThanOrEqual(afterAcquire.getTime());
 
       await releaseLock(handle);
     });
@@ -162,14 +162,14 @@ describe('git-lock', () => {
       let acquisitionOrder = 0;
 
       // 3 agents trying to acquire lock simultaneously
-      const promises = [1, 2, 3].map(async agent => {
+      const promises = [1, 2, 3].map(async (agent) => {
         try {
           const handle = await acquireLock(tempDir, 5000); // 5 second timeout
           const order = ++acquisitionOrder;
           results.push({ agent, acquired: true, order });
 
           // Hold lock briefly to simulate work
-          await new Promise(resolve => setTimeout(resolve, 50));
+          await new Promise((resolve) => setTimeout(resolve, 50));
 
           await releaseLock(handle);
         } catch {
@@ -180,9 +180,9 @@ describe('git-lock', () => {
       await Promise.all(promises);
 
       // All 3 agents should have acquired the lock (sequentially)
-      expect(results.filter(r => r.acquired).length).toBe(3);
+      expect(results.filter((r) => r.acquired).length).toBe(3);
       // Each agent got a unique order
-      const orders = results.filter(r => r.acquired).map(r => r.order);
+      const orders = results.filter((r) => r.acquired).map((r) => r.order);
       expect(new Set(orders).size).toBe(3);
       expect(orders).toContain(1);
       expect(orders).toContain(2);
@@ -192,12 +192,12 @@ describe('git-lock', () => {
     it('handles 5 agents acquiring and releasing locks without deadlock', async () => {
       const completedAgents: number[] = [];
 
-      const promises = [1, 2, 3, 4, 5].map(async agent => {
+      const promises = [1, 2, 3, 4, 5].map(async (agent) => {
         const handle = await acquireLock(tempDir, 10000); // 10 second timeout
         completedAgents.push(agent);
 
         // Simulate varying work times
-        await new Promise(resolve => setTimeout(resolve, Math.random() * 30 + 10));
+        await new Promise((resolve) => setTimeout(resolve, Math.random() * 30 + 10));
 
         await releaseLock(handle);
         return agent;
@@ -215,11 +215,11 @@ describe('git-lock', () => {
     it('serializes concurrent withLock operations', async () => {
       const executionOrder: number[] = [];
 
-      const promises = [1, 2, 3].map(n =>
+      const promises = [1, 2, 3].map((n) =>
         withLock(tempDir, async () => {
           executionOrder.push(n);
           // Hold lock briefly
-          await new Promise(resolve => setTimeout(resolve, 20));
+          await new Promise((resolve) => setTimeout(resolve, 20));
           return n;
         })
       );
@@ -244,7 +244,7 @@ describe('git-lock', () => {
           async () => {
             const current = counter;
             // Small delay to expose race conditions if locking is broken
-            await new Promise(resolve => setTimeout(resolve, 10));
+            await new Promise((resolve) => setTimeout(resolve, 10));
             counter = current + 1;
             return i;
           },
@@ -325,7 +325,7 @@ describe('git-lock', () => {
 
       // Verify metadata was updated
       const info = await getLockInfo(tempDir);
-      expect(info!.pid).toBe(process.pid);
+      expect(info?.pid).toBe(process.pid);
 
       await releaseLock(handle);
     });
@@ -349,7 +349,7 @@ describe('git-lock', () => {
       const handle = await acquireLock(tempDir);
 
       const info = await getLockInfo(tempDir);
-      expect(info!.pid).toBe(process.pid);
+      expect(info?.pid).toBe(process.pid);
 
       await releaseLock(handle);
     });
@@ -360,7 +360,7 @@ describe('git-lock', () => {
       const after = Date.now();
 
       const info = await getLockInfo(tempDir);
-      const acquiredTime = info!.acquired.getTime();
+      const acquiredTime = info?.acquired.getTime();
 
       expect(acquiredTime).toBeGreaterThanOrEqual(before);
       expect(acquiredTime).toBeLessThanOrEqual(after);
@@ -372,7 +372,7 @@ describe('git-lock', () => {
       const handle = await acquireLock(tempDir);
 
       const info = await getLockInfo(tempDir);
-      expect(info!.hostname).toBe(process.env.HOSTNAME ?? 'unknown');
+      expect(info?.hostname).toBe(process.env.HOSTNAME ?? 'unknown');
 
       await releaseLock(handle);
     });
@@ -398,7 +398,9 @@ describe('git-lock', () => {
       const handle = await acquireLock(tempDir);
 
       // Try to acquire again with short timeout
-      await expect(acquireLock(tempDir, 300)).rejects.toThrow(/Failed to acquire git lock after 300ms/);
+      await expect(acquireLock(tempDir, 300)).rejects.toThrow(
+        /Failed to acquire git lock after 300ms/
+      );
 
       await releaseLock(handle);
     });

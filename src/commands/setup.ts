@@ -1,22 +1,22 @@
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { confirm, input, select } from '@inquirer/prompts';
 import chalk from 'chalk';
-import { select, confirm, input } from '@inquirer/prompts';
 import {
-  getPathsForType,
-  getGlobalConfigDir,
-  getBundledSkillsDir,
-  resolvePaths,
-  findLocalConfig,
-} from '../lib/paths.js';
-import {
-  writeConfig,
-  copySkills,
-  copyCommands,
-  copyAgentsTemplate,
   configExists,
+  copyAgentsTemplate,
+  copyCommands,
+  copySkills,
+  writeConfig,
 } from '../lib/config.js';
-import type { LoopConfig, Backend, Model } from '../types.js';
+import {
+  findLocalConfig,
+  getBundledSkillsDir,
+  getGlobalConfigDir,
+  getPathsForType,
+  resolvePaths,
+} from '../lib/paths.js';
+import type { Backend, LoopConfig, Model } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
 
 export interface SetupOptions {
@@ -129,7 +129,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     default: String(DEFAULT_CONFIG.execution.delay_seconds),
     validate: (value) => {
       const num = parseInt(value, 10);
-      if (isNaN(num) || num < 0) {
+      if (Number.isNaN(num) || num < 0) {
         return 'Please enter a non-negative number';
       }
       return true;
@@ -143,7 +143,7 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     default: String(DEFAULT_CONFIG.execution.max_iterations),
     validate: (value) => {
       const num = parseInt(value, 10);
-      if (isNaN(num) || num < 0) {
+      if (Number.isNaN(num) || num < 0) {
         return 'Please enter a non-negative number';
       }
       return true;

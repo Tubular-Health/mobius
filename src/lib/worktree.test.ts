@@ -2,7 +2,7 @@
  * Unit tests for the worktree module
  */
 
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import type { ExecutionConfig } from '../types.js';
 
 describe('worktree module', () => {
@@ -183,7 +183,7 @@ describe('worktree module', () => {
         if (worktrees.length > 0) {
           // Main worktree should be present - check that at least one matches
           const hasMainWorktree = worktrees.some(
-            wt => wt.path === process.cwd() || wt.branch === 'main' || wt.branch === 'master'
+            (wt) => wt.path === process.cwd() || wt.branch === 'main' || wt.branch === 'master'
           );
 
           expect(worktrees.length).toBeGreaterThan(0);
@@ -237,7 +237,7 @@ describe('worktree module', () => {
 
         // Cleanup
         rmSync(worktreePath, { recursive: true });
-      } catch (error) {
+      } catch (_error) {
         // If we can't create the directory, skip this test
         console.log('Skipping createWorktree exists test - cannot create test directory');
       }

@@ -2,8 +2,8 @@
  * Linear API integration for fetching issues and sub-tasks
  */
 
+import { IssueRelationType, LinearClient } from '@linear/sdk';
 import chalk from 'chalk';
-import { LinearClient, IssueRelationType } from '@linear/sdk';
 import type { LinearIssue } from './task-graph.js';
 
 export interface ParentIssue {
@@ -48,7 +48,9 @@ export async function fetchLinearIssue(taskId: string): Promise<ParentIssue | nu
       gitBranchName: issue.branchName || `feature/${taskId.toLowerCase()}`,
     };
   } catch (error) {
-    console.error(chalk.gray(`Failed to fetch issue: ${error instanceof Error ? error.message : String(error)}`));
+    console.error(
+      chalk.gray(`Failed to fetch issue: ${error instanceof Error ? error.message : String(error)}`)
+    );
     return null;
   }
 }
@@ -109,7 +111,11 @@ export async function fetchLinearSubTasks(parentId: string): Promise<LinearIssue
 
     return subTasks;
   } catch (error) {
-    console.error(chalk.gray(`Failed to fetch sub-tasks: ${error instanceof Error ? error.message : String(error)}`));
+    console.error(
+      chalk.gray(
+        `Failed to fetch sub-tasks: ${error instanceof Error ? error.message : String(error)}`
+      )
+    );
     return null;
   }
 }

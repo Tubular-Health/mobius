@@ -40,10 +40,10 @@ export interface SubTaskContext {
  * Metadata about the local context
  */
 export interface ContextMetadata {
-  fetchedAt: string;       // ISO timestamp when context was fetched from backend
-  updatedAt: string;       // ISO timestamp when context was last modified locally
+  fetchedAt: string; // ISO timestamp when context was fetched from backend
+  updatedAt: string; // ISO timestamp when context was last modified locally
   backend: 'linear' | 'jira';
-  syncedAt?: string;       // ISO timestamp of last successful sync
+  syncedAt?: string; // ISO timestamp of last successful sync
 }
 
 /**
@@ -54,10 +54,10 @@ export interface ContextMetadata {
  * Session data is tied to a specific parent issue rather than being global.
  */
 export interface SessionInfo {
-  parentId: string;        // Parent issue identifier (e.g., "MOB-161")
+  parentId: string; // Parent issue identifier (e.g., "MOB-161")
   backend: 'linear' | 'jira';
-  startedAt: string;       // ISO timestamp when session started
-  worktreePath?: string;   // Path to worktree if created
+  startedAt: string; // ISO timestamp when session started
+  worktreePath?: string; // Path to worktree if created
   status: 'active' | 'completed' | 'failed' | 'paused';
 }
 
@@ -66,20 +66,20 @@ export interface SessionInfo {
  * Used for TUI monitoring of parallel execution
  */
 export interface RuntimeActiveTask {
-  id: string;              // Task identifier (e.g., "MOB-126")
-  pid: number;             // Claude process ID
-  pane: string;            // tmux pane identifier (e.g., "%0")
-  startedAt: string;       // ISO timestamp
-  worktree?: string;       // Worktree path if applicable
+  id: string; // Task identifier (e.g., "MOB-126")
+  pid: number; // Claude process ID
+  pane: string; // tmux pane identifier (e.g., "%0")
+  startedAt: string; // ISO timestamp
+  worktree?: string; // Worktree path if applicable
 }
 
 /**
  * Completed or failed task with timing info
  */
 export interface RuntimeCompletedTask {
-  id: string;              // Task identifier (e.g., "MOB-126")
-  completedAt: string;     // ISO timestamp when task finished
-  duration: number;        // Duration in milliseconds
+  id: string; // Task identifier (e.g., "MOB-126")
+  completedAt: string; // ISO timestamp when task finished
+  duration: number; // Duration in milliseconds
 }
 
 /**
@@ -89,19 +89,35 @@ export interface RuntimeCompletedTask {
  * This replaces the old ~/.mobius/state/{parentId}.json file.
  * Runtime state is ephemeral and tied to a specific parent issue context.
  */
+/**
+ * Backend status entry for tracking synced status
+ */
+export interface BackendStatusEntry {
+  identifier: string; // Task identifier (e.g., "MOB-124")
+  status: string; // Backend status (e.g., "Done", "In Progress")
+  syncedAt: string; // ISO timestamp of last successful sync
+}
+
 export interface RuntimeState {
-  parentId: string;        // Parent issue identifier (e.g., "MOB-11")
-  parentTitle: string;     // Parent issue title for display
+  parentId: string; // Parent issue identifier (e.g., "MOB-11")
+  parentTitle: string; // Parent issue title for display
 
   activeTasks: RuntimeActiveTask[];
-  completedTasks: (string | RuntimeCompletedTask)[];  // Supports legacy string format
-  failedTasks: (string | RuntimeCompletedTask)[];     // Supports legacy string format
+  completedTasks: (string | RuntimeCompletedTask)[]; // Supports legacy string format
+  failedTasks: (string | RuntimeCompletedTask)[]; // Supports legacy string format
 
-  startedAt: string;       // ISO timestamp - loop start
-  updatedAt: string;       // ISO timestamp - last update
+  startedAt: string; // ISO timestamp - loop start
+  updatedAt: string; // ISO timestamp - last update
 
-  loopPid?: number;        // PID of the loop process (for cleanup)
-  totalTasks?: number;     // Total number of tasks (for completion detection)
+  loopPid?: number; // PID of the loop process (for cleanup)
+  totalTasks?: number; // Total number of tasks (for completion detection)
+
+  /**
+   * Backend status map - updated when push succeeds
+   * Key is task identifier (e.g., "MOB-124"), value is status entry
+   * TUI watches this to show real-time backend status without re-fetching
+   */
+  backendStatuses?: Record<string, BackendStatusEntry>;
 }
 
 /**
@@ -126,24 +142,24 @@ export interface IssueContext {
  * Status values for skill output discriminated union
  */
 export type SkillOutputStatus =
-  | 'SUBTASK_COMPLETE'   // Sub-task fully implemented and verified
-  | 'SUBTASK_PARTIAL'    // Partial progress, continuing next loop
-  | 'ALL_COMPLETE'       // All sub-tasks done
-  | 'ALL_BLOCKED'        // Remaining sub-tasks are blocked
-  | 'NO_SUBTASKS'        // No sub-tasks exist
+  | 'SUBTASK_COMPLETE' // Sub-task fully implemented and verified
+  | 'SUBTASK_PARTIAL' // Partial progress, continuing next loop
+  | 'ALL_COMPLETE' // All sub-tasks done
+  | 'ALL_BLOCKED' // Remaining sub-tasks are blocked
+  | 'NO_SUBTASKS' // No sub-tasks exist
   | 'VERIFICATION_FAILED' // Tests/typecheck failed after retries
-  | 'NEEDS_WORK'         // Verification found issues needing rework
-  | 'PASS'               // Verification passed
-  | 'FAIL';              // Verification failed definitively
+  | 'NEEDS_WORK' // Verification found issues needing rework
+  | 'PASS' // Verification passed
+  | 'FAIL'; // Verification failed definitively
 
 /**
  * Base fields present in all skill outputs
  */
 interface SkillOutputBase {
   status: SkillOutputStatus;
-  timestamp: string;       // ISO timestamp when output was generated
-  subtaskId?: string;      // Sub-task identifier if applicable
-  parentId?: string;       // Parent issue identifier
+  timestamp: string; // ISO timestamp when output was generated
+  subtaskId?: string; // Sub-task identifier if applicable
+  parentId?: string; // Parent issue identifier
 }
 
 /**
@@ -189,7 +205,7 @@ interface AllBlockedOutput extends SkillOutputBase {
   status: 'ALL_BLOCKED';
   parentId: string;
   blockedCount: number;
-  waitingOn: string[];     // List of blocking issue identifiers
+  waitingOn: string[]; // List of blocking issue identifiers
 }
 
 /**
@@ -213,13 +229,37 @@ interface VerificationFailedOutput extends SkillOutputBase {
 }
 
 /**
- * Output when verification finds issues needing rework
+ * Output when verification finds issues needing rework (execute-issue format)
  */
 interface NeedsWorkOutput extends SkillOutputBase {
   status: 'NEEDS_WORK';
   subtaskId: string;
   issues: string[];
   suggestedFixes: string[];
+}
+
+/**
+ * Output when verification gate finds issues needing rework (verify-issue format)
+ *
+ * This format supports multiple failing subtasks with detailed issue tracking
+ * and feedback comments for the rework loop.
+ */
+interface VerificationNeedsWorkOutput extends SkillOutputBase {
+  status: 'NEEDS_WORK';
+  parentId: string;
+  verificationTaskId: string;
+  criteriaResults?: {
+    met: number;
+    total: number;
+    details: Array<{ criterion: string; status: string; evidence: string }>;
+  };
+  failingSubtasks: Array<{
+    id: string;
+    identifier: string;
+    issues: Array<{ type: string; description: string; file?: string; line?: number }>;
+  }>;
+  reworkIteration: number;
+  feedbackComments: Array<{ subtaskId: string; comment: string }>;
 }
 
 /**
@@ -253,6 +293,7 @@ export interface SkillOutput {
     | NoSubtasksOutput
     | VerificationFailedOutput
     | NeedsWorkOutput
+    | VerificationNeedsWorkOutput
     | PassOutput
     | FailOutput;
 }
@@ -261,12 +302,12 @@ export interface SkillOutput {
  * Types of pending updates that can be synced to the backend
  */
 export type PendingUpdateType =
-  | 'status_change'      // Change issue status (e.g., Backlog -> In Progress -> Done)
-  | 'add_comment'        // Add a comment to an issue
-  | 'create_subtask'     // Create a new sub-task
+  | 'status_change' // Change issue status (e.g., Backlog -> In Progress -> Done)
+  | 'add_comment' // Add a comment to an issue
+  | 'create_subtask' // Create a new sub-task
   | 'update_description' // Update issue description
-  | 'add_label'          // Add label to issue
-  | 'remove_label';      // Remove label from issue
+  | 'add_label' // Add label to issue
+  | 'remove_label'; // Remove label from issue
 
 /**
  * Pending update for status change
@@ -297,7 +338,7 @@ interface CreateSubtaskUpdate {
   parentId: string;
   title: string;
   description: string;
-  blockedBy?: string[];    // Issue IDs that block this task
+  blockedBy?: string[]; // Issue IDs that block this task
 }
 
 /**
@@ -337,10 +378,10 @@ interface RemoveLabelUpdate {
  * Each update is timestamped and given a unique ID for tracking.
  */
 export type PendingUpdate = {
-  id: string;              // Unique ID for this update (UUID)
-  createdAt: string;       // ISO timestamp when update was queued
-  syncedAt?: string;       // ISO timestamp when successfully synced (undefined if pending)
-  error?: string;          // Error message if sync failed
+  id: string; // Unique ID for this update (UUID)
+  createdAt: string; // ISO timestamp when update was queued
+  syncedAt?: string; // ISO timestamp when successfully synced (undefined if pending)
+  error?: string; // Error message if sync failed
 } & (
   | StatusChangeUpdate
   | AddCommentUpdate
@@ -355,21 +396,21 @@ export type PendingUpdate = {
  */
 export interface PendingUpdatesQueue {
   updates: PendingUpdate[];
-  lastSyncAttempt?: string;  // ISO timestamp of last sync attempt
-  lastSyncSuccess?: string;  // ISO timestamp of last successful sync
+  lastSyncAttempt?: string; // ISO timestamp of last sync attempt
+  lastSyncSuccess?: string; // ISO timestamp of last successful sync
 }
 
 /**
  * Entry in the sync log for audit trail
  */
 export interface SyncLogEntry {
-  timestamp: string;         // ISO timestamp of sync
-  updateId: string;          // ID of the update that was synced
-  type: PendingUpdateType;   // Type of update
-  issueIdentifier: string;   // Issue identifier (e.g., "MOB-123")
-  success: boolean;          // Whether sync succeeded
-  error?: string;            // Error message if failed
-  backendResponse?: string;  // Raw response from backend (for debugging)
+  timestamp: string; // ISO timestamp of sync
+  updateId: string; // ID of the update that was synced
+  type: PendingUpdateType; // Type of update
+  issueIdentifier: string; // Issue identifier (e.g., "MOB-123")
+  success: boolean; // Whether sync succeeded
+  error?: string; // Error message if failed
+  backendResponse?: string; // Raw response from backend (for debugging)
 }
 
 /**

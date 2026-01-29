@@ -7,70 +7,83 @@
 
 import chalk from 'chalk';
 import which from 'which';
-import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
-import { BACKEND_ID_PATTERNS } from '../types.js';
-import type { Backend, Model, ExecutionConfig } from '../types.js';
-import { createWorktree, removeWorktree } from '../lib/worktree.js';
-import { fetchLinearIssue, fetchLinearSubTasks, type ParentIssue } from '../lib/linear.js';
+import {
+  addRuntimeActiveTask,
+  clearAllRuntimeActiveTasks,
+  completeRuntimeTask,
+  createSession as createMobiusSession,
+  deleteRuntimeState,
+  endSession as endMobiusSession,
+  failRuntimeTask,
+  generateContext,
+  initializeRuntimeState,
+  queuePendingUpdate,
+  removeRuntimeActiveTask,
+  updateRuntimeTaskPane,
+  writeFullContextFile,
+} from '../lib/context-generator.js';
+import { debugLog, initializeDebugLogger } from '../lib/debug-logger.js';
+import {
+  assignTask,
+  createTracker,
+  getRetryTasks,
+  hasPermamentFailures,
+  processResults,
+} from '../lib/execution-tracker.js';
 import { fetchJiraIssue, fetchJiraSubTasks } from '../lib/jira.js';
+import { fetchLinearIssue, fetchLinearSubTasks, type ParentIssue } from '../lib/linear.js';
+import {
+  extractStatus,
+  isTerminalStatus,
+  parseSkillOutput,
+  SkillOutputParseError,
+} from '../lib/output-parser.js';
+import {
+  calculateParallelism,
+  executeParallel,
+  isPaneStillRunning,
+} from '../lib/parallel-executor.js';
+import { resolvePaths } from '../lib/paths.js';
+import type { SubTask } from '../lib/task-graph.js';
 import {
   buildTaskGraph,
-  getReadyTasks,
   getBlockedTasks,
   getGraphStats,
-  updateTaskStatus,
+  getReadyTasks,
+  getTaskByIdentifier,
   getVerificationTask,
   type TaskGraph,
+  updateTaskStatus,
 } from '../lib/task-graph.js';
-import { renderFullTreeOutput } from '../lib/tree-renderer.js';
 import {
   createSession,
   createStatusPane,
   destroySession,
-  updateStatusPane,
   getSessionName,
-  type TmuxSession,
-  type TmuxPane,
   type LoopStatus,
+  type TmuxPane,
+  type TmuxSession,
+  updateStatusPane,
 } from '../lib/tmux-display.js';
-import {
-  executeParallel,
-  calculateParallelism,
-  isPaneStillRunning,
-} from '../lib/parallel-executor.js';
-import {
-  createTracker,
-  assignTask,
-  processResults,
-  getRetryTasks,
-  hasPermamentFailures,
-} from '../lib/execution-tracker.js';
-import {
-  initializeRuntimeState,
-  addRuntimeActiveTask,
-  completeRuntimeTask,
-  failRuntimeTask,
-  removeRuntimeActiveTask,
-  updateRuntimeTaskPane,
-  clearAllRuntimeActiveTasks,
-  deleteRuntimeState,
-  createSession as createMobiusSession,
-  endSession as endMobiusSession,
-} from '../lib/context-generator.js';
-import {
-  generateContext,
-  writeFullContextFile,
-  queuePendingUpdate,
-} from '../lib/context-generator.js';
-import {
-  parseSkillOutput,
-  extractStatus,
-  isTerminalStatus,
-  SkillOutputParseError,
-} from '../lib/output-parser.js';
-import type { SubTask } from '../lib/task-graph.js';
+import { renderFullTreeOutput } from '../lib/tree-renderer.js';
+import { createWorktree, removeWorktree } from '../lib/worktree.js';
 import type { IssueContext, RuntimeState } from '../types/context.js';
+import type { Backend, ExecutionConfig, Model } from '../types.js';
+import { BACKEND_ID_PATTERNS } from '../types.js';
+import { pushPendingUpdatesForTask } from './push.js';
+
+/**
+ * Type alias for NEEDS_WORK output from execute-issue skill
+ * (has subtaskId, issues, suggestedFixes)
+ */
+type NeedsWorkExecuteOutput = {
+  status: 'NEEDS_WORK';
+  timestamp: string;
+  subtaskId: string;
+  issues: string[];
+  suggestedFixes: string[];
+};
 
 export interface LoopOptions {
   maxIterations?: number;
@@ -80,6 +93,7 @@ export interface LoopOptions {
   parallel?: number; // Override max_parallel_agents
   sequential?: boolean; // Use sequential bash loop instead
   fresh?: boolean; // Clear stale state before starting
+  debug?: boolean | 'minimal' | 'normal' | 'verbose'; // Enable debug logging
 }
 
 /**
@@ -98,11 +112,24 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
     process.exit(1);
   }
 
+  // Initialize debug logger if enabled
+  if (options.debug) {
+    initializeDebugLogger(taskId, options.debug);
+    debugLog('task_state_change', 'loop', taskId, {
+      event: 'loop_start',
+      backend,
+      parallel: options.parallel,
+      maxIterations: options.maxIterations,
+    });
+  }
+
   // Check for tmux availability
   const tmuxAvailable = await checkTmuxAvailable();
   if (!tmuxAvailable) {
     console.error(chalk.red('Error: tmux is required for parallel execution mode'));
-    console.error(chalk.gray('Install with: brew install tmux (macOS) or apt install tmux (Linux)'));
+    console.error(
+      chalk.gray('Install with: brew install tmux (macOS) or apt install tmux (Linux)')
+    );
     console.error(chalk.gray("Alternatively, use '--sequential' flag for sequential execution."));
     process.exit(1);
   }
@@ -145,11 +172,7 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
   console.log(chalk.gray(`Branch: ${parentIssue.gitBranchName}`));
 
   // Create or resume worktree
-  const worktreeInfo = await createWorktree(
-    taskId,
-    parentIssue.gitBranchName,
-    executionConfig
-  );
+  const worktreeInfo = await createWorktree(taskId, parentIssue.gitBranchName, executionConfig);
 
   if (worktreeInfo.created) {
     console.log(chalk.green(`Created worktree at ${worktreeInfo.path}`));
@@ -182,7 +205,7 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
 
   // Generate local context for skills to read
   console.log(chalk.gray('Generating local context for skills...'));
-  let issueContext: IssueContext | null = await generateContext(taskId, {
+  const issueContext: IssueContext | null = await generateContext(taskId, {
     projectPath: worktreeInfo.path,
   });
   if (!issueContext) {
@@ -219,23 +242,16 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
   createMobiusSession(taskId, backend, worktreeInfo.path);
 
   // Initialize TUI runtime state for file-based monitoring
-  let runtimeState: RuntimeState = initializeRuntimeState(
-    taskId,
-    parentIssue.title,
-    {
-      loopPid: process.pid,
-      totalTasks: graph.tasks.size,
-    }
-  );
+  let runtimeState: RuntimeState = initializeRuntimeState(taskId, parentIssue.title, {
+    loopPid: process.pid,
+    totalTasks: graph.tasks.size,
+  });
 
   // Pre-populate completedTasks with tasks already done in Linear
   // This handles the case where we're called on an already-completed task
   for (const task of graph.tasks.values()) {
     if (task.status === 'done') {
-      runtimeState = completeRuntimeTask(
-        runtimeState,
-        task.identifier
-      );
+      runtimeState = completeRuntimeTask(runtimeState, task.identifier);
     }
   }
 
@@ -257,11 +273,11 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       }
 
       // Get ready tasks (combine fresh ready tasks with retry queue)
-      let readyTasks = getReadyTasks(graph);
+      const readyTasks = getReadyTasks(graph);
 
       // Add retry tasks to ready queue if they're not already there
       for (const retryTask of retryQueue) {
-        if (!readyTasks.some(t => t.id === retryTask.id)) {
+        if (!readyTasks.some((t) => t.id === retryTask.id)) {
           readyTasks.push(retryTask);
         }
       }
@@ -280,9 +296,7 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         const blockedTasks = getBlockedTasks(graph);
         if (blockedTasks.length > 0) {
           console.log(chalk.yellow('\nNo tasks ready. All remaining tasks are blocked.'));
-          console.log(
-            chalk.gray(`Blocked: ${blockedTasks.map(t => t.identifier).join(', ')}`)
-          );
+          console.log(chalk.gray(`Blocked: ${blockedTasks.map((t) => t.identifier).join(', ')}`));
         }
         break;
       }
@@ -292,13 +306,9 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       const tasksToExecute = readyTasks.slice(0, parallelCount);
 
       console.log(
-        chalk.blue(
-          `\nIteration ${iteration}: Executing ${parallelCount} task(s) in parallel...`
-        )
+        chalk.blue(`\nIteration ${iteration}: Executing ${parallelCount} task(s) in parallel...`)
       );
-      console.log(
-        chalk.gray(`  Tasks: ${tasksToExecute.map(t => t.identifier).join(', ')}`)
-      );
+      console.log(chalk.gray(`  Tasks: ${tasksToExecute.map((t) => t.identifier).join(', ')}`));
 
       // Assign tasks to tracker before execution
       for (const task of tasksToExecute) {
@@ -308,27 +318,24 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       // Update runtime state with active tasks (for TUI monitoring)
       // Initially set pane to empty string - will be updated with real pane IDs after executeParallel
       for (const task of tasksToExecute) {
-        runtimeState = addRuntimeActiveTask(
-          runtimeState,
-          {
-            id: task.identifier,
-            pid: 0, // Will be updated when process spawns
-            pane: '', // Placeholder until real pane ID is available
-            startedAt: new Date().toISOString(),
-            worktree: worktreeInfo.path,
-          }
-        );
+        runtimeState = addRuntimeActiveTask(runtimeState, {
+          id: task.identifier,
+          pid: 0, // Will be updated when process spawns
+          pane: '', // Placeholder until real pane ID is available
+          startedAt: new Date().toISOString(),
+          worktree: worktreeInfo.path,
+        });
       }
 
       // Update status pane
       const loopStatus: LoopStatus = {
         totalTasks: stats.total,
         completedTasks: stats.done,
-        activeAgents: tasksToExecute.map(t => ({
+        activeAgents: tasksToExecute.map((t) => ({
           taskId: t.id,
           identifier: t.identifier,
         })),
-        blockedTasks: getBlockedTasks(graph).map(t => t.identifier),
+        blockedTasks: getBlockedTasks(graph).map((t) => t.identifier),
         elapsed: Date.now() - startTime,
       };
       await updateStatusPane(statusPane, loopStatus, sessionName);
@@ -346,20 +353,79 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       // Update runtime state with real pane IDs from execution results
       for (const result of results) {
         if (result.pane) {
-          runtimeState = updateRuntimeTaskPane(
-            runtimeState,
-            result.identifier,
-            result.pane
-          );
+          runtimeState = updateRuntimeTaskPane(runtimeState, result.identifier, result.pane);
         }
       }
 
       // Parse skill outputs and queue updates for later sync via `mobius push`
       for (const result of results) {
         if (result.rawOutput) {
-          const skillResult = processSkillOutput(result.rawOutput, backend, taskId);
+          const skillResult = processSkillOutput(
+            result.rawOutput,
+            backend,
+            taskId,
+            result.identifier
+          );
           if (skillResult.processed) {
-            console.log(chalk.gray(`Queued updates for ${result.identifier}: ${skillResult.status}`));
+            console.log(
+              chalk.gray(`Queued updates for ${result.identifier}: ${skillResult.status}`)
+            );
+          }
+
+          // Handle NEEDS_WORK status: reset target task(s) and queue for re-execution
+          if (skillResult.status === 'NEEDS_WORK') {
+            // Parse target subtask(s) from raw output
+            const parsed = parseSkillOutput(result.rawOutput);
+            if (parsed.output.status === 'NEEDS_WORK') {
+              // Collect all target task identifiers from either format
+              const targetIds: string[] = [];
+
+              // Execute-issue format: single subtaskId
+              if ('subtaskId' in parsed.output && parsed.output.subtaskId) {
+                targetIds.push(parsed.output.subtaskId);
+              }
+
+              // Verify-issue format: failingSubtasks array
+              if (
+                'failingSubtasks' in parsed.output &&
+                Array.isArray(parsed.output.failingSubtasks)
+              ) {
+                for (const task of parsed.output.failingSubtasks) {
+                  targetIds.push(task.identifier);
+                }
+              }
+
+              // Fallback: use the current result identifier
+              if (targetIds.length === 0) {
+                targetIds.push(result.identifier);
+              }
+
+              // Find and queue each target task for retry
+              for (const targetId of targetIds) {
+                const targetTask = getTaskByIdentifier(graph, targetId);
+                if (targetTask && !retryQueue.some((t) => t.identifier === targetId)) {
+                  graph = updateTaskStatus(graph, targetTask.id, 'ready');
+                  retryQueue.push(targetTask);
+                  console.log(
+                    chalk.yellow(`  ↻ ${targetId}: NEEDS_WORK detected, queuing for rework`)
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Auto-push queued updates to backend BEFORE verification
+      // This fixes the gap where verification fails because Linear wasn't updated yet
+      const pushResult = await pushPendingUpdatesForTask(taskId, backend);
+      if (pushResult.success > 0 || pushResult.failed > 0) {
+        console.log(
+          chalk.gray(`Pushed updates: ${pushResult.success} succeeded, ${pushResult.failed} failed`)
+        );
+        if (pushResult.errors.length > 0) {
+          for (const error of pushResult.errors) {
+            console.log(chalk.yellow(`  ⚠ ${error}`));
           }
         }
       }
@@ -369,14 +435,14 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       const verifiedResults = await processResults(tracker, results);
 
       // Process verified results and update graph
-      const verified = verifiedResults.filter(r => r.success && r.linearVerified);
+      const verified = verifiedResults.filter((r) => r.success && r.linearVerified);
       const needRetry = getRetryTasks(verifiedResults, tasksToExecute);
-      const permanentFailures = verifiedResults.filter(r => !r.success && !r.shouldRetry);
+      const permanentFailures = verifiedResults.filter((r) => !r.success && !r.shouldRetry);
 
       console.log(
         chalk.gray(
           `Verified: ${verified.length}/${verifiedResults.length} | ` +
-          `Retry: ${needRetry.length} | Failed: ${permanentFailures.length}`
+            `Retry: ${needRetry.length} | Failed: ${permanentFailures.length}`
         )
       );
 
@@ -384,48 +450,46 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       for (const result of verifiedResults) {
         if (result.success && result.linearVerified) {
           graph = updateTaskStatus(graph, result.taskId, 'done');
-          runtimeState = completeRuntimeTask(
-            runtimeState,
-            result.identifier
-          );
+          runtimeState = completeRuntimeTask(runtimeState, result.identifier);
           console.log(chalk.green(`  ✓ ${result.identifier} (Linear: ${result.linearStatus})`));
         } else if (result.shouldRetry) {
           // Remove from active tasks for retry (will be re-added next iteration)
-          runtimeState = removeRuntimeActiveTask(
-            runtimeState,
-            result.identifier
+          runtimeState = removeRuntimeActiveTask(runtimeState, result.identifier);
+          console.log(
+            chalk.yellow(
+              `  ↻ ${result.identifier}: Retrying (${result.error ?? 'verification pending'})`
+            )
           );
-          console.log(chalk.yellow(`  ↻ ${result.identifier}: Retrying (${result.error ?? 'verification pending'})`));
         } else {
           // Check if pane is still running before marking as permanent failure
           // This handles cases where Linear verification times out but the agent is still working
           const paneStillRunning = result.pane ? await isPaneStillRunning(result.pane) : false;
 
           if (paneStillRunning) {
-            // Pane is still active - queue for retry instead of permanent failure
-            const task = tasksToExecute.find(t => t.identifier === result.identifier);
-            if (task && !retryQueue.some(t => t.identifier === result.identifier)) {
+            // Pane is still active - override permanent failure, queue for retry
+            // Mark as retriable so hasPermamentFailures() returns false
+            result.shouldRetry = true;
+            const task = tasksToExecute.find((t) => t.identifier === result.identifier);
+            if (task && !retryQueue.some((t) => t.identifier === result.identifier)) {
               retryQueue.push(task);
             }
             // Remove from active tasks for retry (will be re-added next iteration)
-            runtimeState = removeRuntimeActiveTask(
-              runtimeState,
-              result.identifier
-            );
+            runtimeState = removeRuntimeActiveTask(runtimeState, result.identifier);
             console.log(chalk.yellow(`  ↻ ${result.identifier}: Pane still active, queuing retry`));
           } else {
             // Permanent failure - pane is actually dead
-            runtimeState = failRuntimeTask(
-              runtimeState,
-              result.identifier
-            );
+            runtimeState = failRuntimeTask(runtimeState, result.identifier);
             console.log(chalk.red(`  ✗ ${result.identifier}: ${result.error ?? result.status}`));
           }
         }
       }
 
-      // Queue tasks for retry
-      retryQueue = needRetry;
+      // Queue tasks for retry (merge with pane-still-running additions)
+      for (const task of needRetry) {
+        if (!retryQueue.some((t) => t.id === task.id)) {
+          retryQueue.push(task);
+        }
+      }
 
       // Check for permanent failures
       if (hasPermamentFailures(verifiedResults)) {
@@ -508,10 +572,7 @@ async function checkTmuxAvailable(): Promise<boolean> {
 /**
  * Fetch parent issue from Linear or Jira
  */
-async function fetchParentIssue(
-  taskId: string,
-  backend: Backend
-): Promise<ParentIssue | null> {
+async function fetchParentIssue(taskId: string, backend: Backend): Promise<ParentIssue | null> {
   if (backend === 'linear') {
     return fetchLinearIssue(taskId);
   }
@@ -542,7 +603,11 @@ async function syncGraphFromBackend(
     return buildTaskGraph(parentIssue.id, parentIssue.identifier, subTasks);
   } catch (error) {
     // Graceful degradation: return existing graph on fetch failure
-    console.log(chalk.gray(`Graph sync failed, using cached state: ${error instanceof Error ? error.message : String(error)}`));
+    console.log(
+      chalk.gray(
+        `Graph sync failed, using cached state: ${error instanceof Error ? error.message : String(error)}`
+      )
+    );
     return graph;
   }
 }
@@ -584,7 +649,11 @@ async function buildInitialGraph(
     // Build the graph
     return buildTaskGraph(parentIssue.id, parentIssue.identifier, subTasks);
   } catch (error) {
-    console.error(chalk.gray(`Failed to build task graph: ${error instanceof Error ? error.message : String(error)}`));
+    console.error(
+      chalk.gray(
+        `Failed to build task graph: ${error instanceof Error ? error.message : String(error)}`
+      )
+    );
     return null;
   }
 }
@@ -615,12 +684,14 @@ function formatElapsed(ms: number): string {
  * @param rawOutput - The raw output string from the skill (pane content)
  * @param backend - The backend to use for SDK calls (linear or jira)
  * @param parentId - The parent issue identifier for queuing updates
+ * @param taskIdentifier - The actual task that executed (source of truth for updates)
  * @returns Whether the skill output was successfully processed
  */
 function processSkillOutput(
   rawOutput: string,
   backend: Backend,
-  parentId: string
+  parentId: string,
+  taskIdentifier: string
 ): { processed: boolean; status?: string; error?: string } {
   // Try to extract just the status for quick check
   const status = extractStatus(rawOutput);
@@ -630,7 +701,8 @@ function processSkillOutput(
   }
 
   // Only process terminal statuses that require updates
-  if (!isTerminalStatus(status)) {
+  // NEEDS_WORK is special - not terminal but still needs processing for rework
+  if (!isTerminalStatus(status) && status !== 'NEEDS_WORK') {
     return { processed: true, status };
   }
 
@@ -641,7 +713,7 @@ function processSkillOutput(
 
     // Queue updates for later sync via `mobius push`
     if (backend === 'linear') {
-      queueLinearUpdates(output, parentId);
+      queueLinearUpdates(output, parentId, taskIdentifier);
     }
     // TODO: Add Jira support when needed
 
@@ -663,56 +735,98 @@ function processSkillOutput(
  *
  * Instead of making direct SDK calls, this queues updates to
  * pending-updates.json for batch sync.
+ *
+ * @param output - Parsed skill output
+ * @param parentId - The parent issue identifier for queuing updates
+ * @param taskIdentifier - The actual task that executed (source of truth for which task to update)
  */
 function queueLinearUpdates(
   output: ReturnType<typeof parseSkillOutput>['output'],
-  parentId: string
+  parentId: string,
+  taskIdentifier: string
 ): void {
   switch (output.status) {
     case 'SUBTASK_COMPLETE': {
-      // Queue status change to Done
-      if (output.subtaskId) {
-        queuePendingUpdate(parentId, {
-          type: 'status_change',
-          issueId: output.subtaskId,
-          identifier: output.subtaskId,
-          oldStatus: 'In Progress',
-          newStatus: 'Done',
-        });
-        console.log(chalk.gray(`  Queued: ${output.subtaskId} status -> Done`));
+      // Use taskIdentifier as source of truth, not output.subtaskId
+      // This prevents stale pane content from causing updates to the wrong task
+      queuePendingUpdate(parentId, {
+        type: 'status_change',
+        issueId: taskIdentifier,
+        identifier: taskIdentifier,
+        oldStatus: 'In Progress',
+        newStatus: 'Done',
+      });
+      console.log(chalk.gray(`  Queued: ${taskIdentifier} status -> Done`));
 
-        // Queue completion comment with details
-        const commentBody = buildCompletionComment(output);
-        queuePendingUpdate(parentId, {
-          type: 'add_comment',
-          issueId: output.subtaskId,
-          identifier: output.subtaskId,
-          body: commentBody,
-        });
-        console.log(chalk.gray(`  Queued: ${output.subtaskId} completion comment`));
-      }
+      // Queue completion comment with details
+      const commentBody = buildCompletionComment(output);
+      queuePendingUpdate(parentId, {
+        type: 'add_comment',
+        issueId: taskIdentifier,
+        identifier: taskIdentifier,
+        body: commentBody,
+      });
+      console.log(chalk.gray(`  Queued: ${taskIdentifier} completion comment`));
       break;
     }
 
     case 'VERIFICATION_FAILED': {
       // Queue failure comment (keep subtask in progress)
-      if (output.subtaskId) {
-        const commentBody = buildFailureComment(output);
-        queuePendingUpdate(parentId, {
-          type: 'add_comment',
-          issueId: output.subtaskId,
-          identifier: output.subtaskId,
-          body: commentBody,
-        });
-        console.log(chalk.gray(`  Queued: ${output.subtaskId} failure comment`));
-      }
+      // Use taskIdentifier as source of truth
+      const commentBody = buildFailureComment(output);
+      queuePendingUpdate(parentId, {
+        type: 'add_comment',
+        issueId: taskIdentifier,
+        identifier: taskIdentifier,
+        body: commentBody,
+      });
+      console.log(chalk.gray(`  Queued: ${taskIdentifier} failure comment`));
       break;
     }
 
     case 'NEEDS_WORK': {
-      // Queue rework comment with issues found
-      if (output.subtaskId) {
-        const commentBody = buildNeedsWorkComment(output);
+      // Support both execute-issue format (single subtaskId) and verify-issue format (failingSubtasks array)
+      const failingTasks: Array<{ id: string; identifier: string }> = [];
+
+      // Execute-issue format: single subtaskId
+      if ('subtaskId' in output && output.subtaskId) {
+        failingTasks.push({ id: output.subtaskId, identifier: output.subtaskId });
+      }
+
+      // Verify-issue format: failingSubtasks array
+      if ('failingSubtasks' in output && Array.isArray(output.failingSubtasks)) {
+        for (const task of output.failingSubtasks) {
+          failingTasks.push({ id: task.id, identifier: task.identifier });
+        }
+      }
+
+      // Queue updates for each failing task
+      for (const task of failingTasks) {
+        // Queue status change to reopen the failing task
+        queuePendingUpdate(parentId, {
+          type: 'status_change',
+          issueId: task.id,
+          identifier: task.identifier,
+          oldStatus: 'Done',
+          newStatus: 'Todo',
+        });
+        console.log(chalk.gray(`  Queued: ${task.identifier} status -> Todo (rework)`));
+      }
+
+      // Queue feedback comments (from verify-issue format)
+      if ('feedbackComments' in output && Array.isArray(output.feedbackComments)) {
+        for (const fc of output.feedbackComments) {
+          queuePendingUpdate(parentId, {
+            type: 'add_comment',
+            issueId: fc.subtaskId,
+            identifier: fc.subtaskId,
+            body: fc.comment,
+          });
+          console.log(chalk.gray(`  Queued: ${fc.subtaskId} rework comment`));
+        }
+      } else if ('subtaskId' in output && output.subtaskId && 'issues' in output) {
+        // Fallback: build comment from issues/suggestedFixes (execute-issue format)
+        const commentBody = buildNeedsWorkComment(output as NeedsWorkExecuteOutput);
         queuePendingUpdate(parentId, {
           type: 'add_comment',
           issueId: output.subtaskId,
@@ -743,7 +857,7 @@ function buildCompletionComment(
     `**Commit**: \`${output.commitHash}\``,
     '',
     '### Files Modified',
-    ...output.filesModified.map(f => `- \`${f}\``),
+    ...output.filesModified.map((f) => `- \`${f}\``),
     '',
     '### Verification Results',
     `- Typecheck: ${output.verificationResults.typecheck}`,
@@ -777,10 +891,10 @@ function buildFailureComment(
     '```',
     '',
     '### Attempted Fixes',
-    ...output.attemptedFixes.map(f => `- ${f}`),
+    ...output.attemptedFixes.map((f) => `- ${f}`),
     '',
     '### Uncommitted Files',
-    ...output.uncommittedFiles.map(f => `- \`${f}\``),
+    ...output.uncommittedFiles.map((f) => `- \`${f}\``),
     '',
     '---',
     '*Generated by mobius loop*',
@@ -790,19 +904,17 @@ function buildFailureComment(
 }
 
 /**
- * Build a rework comment when verification finds issues
+ * Build a rework comment when verification finds issues (execute-issue format)
  */
-function buildNeedsWorkComment(
-  output: Extract<ReturnType<typeof parseSkillOutput>['output'], { status: 'NEEDS_WORK' }>
-): string {
+function buildNeedsWorkComment(output: NeedsWorkExecuteOutput): string {
   const lines = [
     '## 🔧 Needs Rework',
     '',
     '### Issues Found',
-    ...output.issues.map(i => `- ${i}`),
+    ...output.issues.map((i: string) => `- ${i}`),
     '',
     '### Suggested Fixes',
-    ...output.suggestedFixes.map(f => `- ${f}`),
+    ...output.suggestedFixes.map((f: string) => `- ${f}`),
     '',
     '---',
     '*Generated by mobius loop*',
