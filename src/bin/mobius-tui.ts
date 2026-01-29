@@ -5,21 +5,21 @@
  * TaskGraph from the configured backend at startup, then starts state file watching.
  */
 
-import { render } from 'ink';
 import chalk from 'chalk';
+import { render } from 'ink';
 import React from 'react';
-import { BACKEND_ID_PATTERNS } from '../types.js';
-import type { Backend, TuiConfig } from '../types.js';
-import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
-import { fetchLinearIssue, fetchLinearSubTasks } from '../lib/linear.js';
-import type { ParentIssue } from '../lib/linear.js';
+import { clearAllRuntimeActiveTasks } from '../lib/context-generator.js';
 import { fetchJiraIssue, fetchJiraSubTasks } from '../lib/jira.js';
-import { buildTaskGraph } from '../lib/task-graph.js';
+import type { ParentIssue } from '../lib/linear.js';
+import { fetchLinearIssue, fetchLinearSubTasks } from '../lib/linear.js';
+import { resolvePaths } from '../lib/paths.js';
 import type { LinearIssue } from '../lib/task-graph.js';
-import { clearAllActiveTasks } from '../lib/execution-state.js';
+import { buildTaskGraph } from '../lib/task-graph.js';
 import { Dashboard } from '../tui/components/Dashboard.js';
-import { tuiEvents, EXIT_REQUEST_EVENT } from '../tui/events.js';
+import { EXIT_REQUEST_EVENT, tuiEvents } from '../tui/events.js';
+import type { Backend, TuiConfig } from '../types.js';
+import { BACKEND_ID_PATTERNS } from '../types.js';
 
 export interface TuiOptions {
   stateDir?: string;
@@ -96,7 +96,11 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
   if (!parentIssue) {
     console.error(chalk.red(`Failed to fetch issue ${taskId} from ${backend}`));
     if (backend === 'jira') {
-      console.error(chalk.gray('Make sure JIRA_HOST, JIRA_EMAIL, and JIRA_API_TOKEN are set and the issue exists.'));
+      console.error(
+        chalk.gray(
+          'Make sure JIRA_HOST, JIRA_EMAIL, and JIRA_API_TOKEN are set and the issue exists.'
+        )
+      );
     } else {
       console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue exists.'));
     }
@@ -110,7 +114,11 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
   if (!subTasks) {
     console.error(chalk.red(`Failed to fetch sub-tasks for ${taskId} from ${backend}`));
     if (backend === 'jira') {
-      console.error(chalk.gray('Make sure JIRA_HOST, JIRA_EMAIL, and JIRA_API_TOKEN are set and the issue has sub-tasks.'));
+      console.error(
+        chalk.gray(
+          'Make sure JIRA_HOST, JIRA_EMAIL, and JIRA_API_TOKEN are set and the issue has sub-tasks.'
+        )
+      );
     } else {
       console.error(chalk.gray('Make sure LINEAR_API_KEY is set and the issue has sub-tasks.'));
     }
@@ -130,16 +138,20 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
 
   // Clear stale active tasks from any previous execution
   // The loop will re-populate this when tasks actually start running
-  clearAllActiveTasks(taskId, tuiConfig.state_dir);
+  clearAllRuntimeActiveTasks(taskId);
 
   console.log(chalk.gray(`Found ${graph.tasks.size} sub-tasks. Starting TUI...`));
   console.log(''); // Empty line before TUI
 
   // 4. Initialize Ink render with Dashboard
+  // Pass the API graph separately so we can show both local execution state
+  // and backend state side-by-side in the TUI
   const { waitUntilExit, unmount } = render(
     React.createElement(Dashboard, {
       parentId: taskId,
       graph: graph,
+      apiGraph: graph, // Unmodified API graph for backend status display
+      backend: backend,
       config: tuiConfig,
     }),
     {

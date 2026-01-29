@@ -5,8 +5,8 @@
  * in real-time during loop execution.
  */
 
+import { unlink, writeFile } from 'node:fs/promises';
 import { execa } from 'execa';
-import { writeFile, unlink } from 'node:fs/promises';
 import type { SubTask } from './task-graph.js';
 
 export interface TmuxSession {
@@ -165,13 +165,7 @@ export async function createStatusPane(session: TmuxSession): Promise<TmuxPane> 
   await execa('tmux', ['select-pane', '-t', paneId, '-T', 'Status']);
 
   // Start watch command to display status file with 0.5s refresh
-  await execa('tmux', [
-    'send-keys',
-    '-t',
-    paneId,
-    `watch -t -n 0.5 cat ${statusFile}`,
-    'Enter',
-  ]);
+  await execa('tmux', ['send-keys', '-t', paneId, `watch -t -n 0.5 cat ${statusFile}`, 'Enter']);
 
   return {
     id: paneId,
@@ -181,12 +175,36 @@ export async function createStatusPane(session: TmuxSession): Promise<TmuxPane> 
 }
 
 /**
+ * Clear the scrollback and visible content of a pane
+ *
+ * This is important before running a new command to ensure old output
+ * (like completion markers from previous runs) doesn't pollute the new run.
+ *
+ * @param pane - The pane to clear
+ */
+export async function clearPane(pane: TmuxPane): Promise<void> {
+  // Clear scrollback buffer and visible content
+  await execa('tmux', ['send-keys', '-t', pane.id, 'C-l']); // Clear screen
+  await execa('tmux', ['clear-history', '-t', pane.id]); // Clear scrollback
+}
+
+/**
  * Execute a command in a specific pane
  *
  * @param pane - The pane to execute in
  * @param command - The command string to execute
+ * @param clearFirst - If true, clear pane content before running (default: false)
  */
-export async function runInPane(pane: TmuxPane, command: string): Promise<void> {
+export async function runInPane(
+  pane: TmuxPane,
+  command: string,
+  clearFirst: boolean = false
+): Promise<void> {
+  if (clearFirst) {
+    await clearPane(pane);
+    // Small delay to ensure clear completes before sending command
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
   await execa('tmux', ['send-keys', '-t', pane.id, command, 'Enter']);
 }
 
@@ -208,12 +226,11 @@ export async function updateStatusPane(
   // Format active agents list
   const agentsList =
     status.activeAgents.length > 0
-      ? status.activeAgents.map(a => a.identifier).join(', ')
+      ? status.activeAgents.map((a) => a.identifier).join(', ')
       : 'none';
 
   // Format blocked tasks list
-  const blockedList =
-    status.blockedTasks.length > 0 ? status.blockedTasks.join(', ') : 'none';
+  const blockedList = status.blockedTasks.length > 0 ? status.blockedTasks.join(', ') : 'none';
 
   // Build status content
   const content = [
@@ -225,7 +242,7 @@ export async function updateStatusPane(
 
   // Write to status file (watch command will auto-refresh)
   const statusFile = getStatusFilePath(sessionName);
-  await writeFile(statusFile, content + '\n');
+  await writeFile(statusFile, `${content}\n`);
 }
 
 /**
@@ -310,17 +327,11 @@ export async function killPane(pane: TmuxPane): Promise<void> {
  */
 export async function listPanes(session: TmuxSession): Promise<string[]> {
   try {
-    const { stdout } = await execa('tmux', [
-      'list-panes',
-      '-t',
-      session.name,
-      '-F',
-      '#{pane_id}',
-    ]);
+    const { stdout } = await execa('tmux', ['list-panes', '-t', session.name, '-F', '#{pane_id}']);
     return stdout
       .trim()
       .split('\n')
-      .filter(id => id.length > 0);
+      .filter((id) => id.length > 0);
   } catch {
     return [];
   }
@@ -443,5 +454,5 @@ function formatElapsed(ms: number): string {
  * Simple sleep utility
  */
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

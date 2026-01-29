@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
-import { execa } from 'execa';
 import chalk from 'chalk';
-import { resolvePaths } from '../lib/paths.js';
+import { execa } from 'execa';
 import { readConfig } from '../lib/config.js';
+import { resolvePaths } from '../lib/paths.js';
 
 interface ConfigOptions {
   edit?: boolean;
@@ -93,9 +93,11 @@ async function editConfig(configPath: string): Promise<void> {
     await execa(editor, [configPath], {
       stdio: 'inherit',
     });
-  } catch (error) {
+  } catch (_error) {
     console.error(chalk.red(`Failed to open editor: ${editor}`));
-    console.error(chalk.gray('Set EDITOR or VISUAL environment variable to your preferred editor.'));
+    console.error(
+      chalk.gray('Set EDITOR or VISUAL environment variable to your preferred editor.')
+    );
     process.exit(1);
   }
 }

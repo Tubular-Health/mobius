@@ -1,6 +1,5 @@
 import { existsSync } from 'node:fs';
-import type { CheckResult } from '../../types.js';
-import type { PathConfig } from '../../types.js';
+import type { CheckResult, PathConfig } from '../../types.js';
 
 export async function checkPath(paths: PathConfig): Promise<CheckResult> {
   const name = 'Script path';

@@ -4,14 +4,14 @@
 
 import chalk from 'chalk';
 import ora from 'ora';
-import { resolvePaths } from '../lib/paths.js';
 import { readConfig } from '../lib/config.js';
-import { BACKEND_ID_PATTERNS } from '../types.js';
-import type { Backend } from '../types.js';
 import { fetchLinearIssue, fetchLinearSubTasks } from '../lib/linear.js';
+import { renderMermaidWithTitle } from '../lib/mermaid-renderer.js';
+import { resolvePaths } from '../lib/paths.js';
 import { buildTaskGraph, getGraphStats } from '../lib/task-graph.js';
 import { renderFullTreeOutput } from '../lib/tree-renderer.js';
-import { renderMermaidWithTitle } from '../lib/mermaid-renderer.js';
+import type { Backend } from '../types.js';
+import { BACKEND_ID_PATTERNS } from '../types.js';
 
 export interface TreeOptions {
   backend?: Backend;

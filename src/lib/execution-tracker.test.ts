@@ -2,18 +2,21 @@
  * Unit tests for the execution-tracker module
  */
 
-import { describe, it, expect } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import {
-  createTracker,
-  assignTask,
-  getRetryTasks,
-  getPermanentlyFailedTasks,
   allSucceeded,
-  hasPermamentFailures,
+  assignTask,
+  createTracker,
+  getPermanentlyFailedTasks,
+  getRetryTasks,
   getTrackerStats,
+  hasPermamentFailures,
+  processResults,
   resetTracker,
   type VerifiedResult,
+  verifyLinearCompletion,
 } from './execution-tracker.js';
+import type { ExecutionResult } from './parallel-executor.js';
 import type { SubTask } from './task-graph.js';
 
 // Helper to create mock subtasks
@@ -128,13 +131,9 @@ describe('getRetryTasks', () => {
   });
 
   it('returns empty array when no retries needed', () => {
-    const allTasks: SubTask[] = [
-      createMockSubTask('id-1', 'MOB-101'),
-    ];
+    const allTasks: SubTask[] = [createMockSubTask('id-1', 'MOB-101')];
 
-    const results: VerifiedResult[] = [
-      createVerifiedResult('id-1', 'MOB-101', true, true, false),
-    ];
+    const results: VerifiedResult[] = [createVerifiedResult('id-1', 'MOB-101', true, true, false)];
 
     const retryTasks = getRetryTasks(results, allTasks);
     expect(retryTasks.length).toBe(0);
@@ -201,9 +200,7 @@ describe('allSucceeded', () => {
   });
 
   it('returns false when result succeeded but not verified', () => {
-    const results: VerifiedResult[] = [
-      createVerifiedResult('id-1', 'MOB-101', true, false, false),
-    ];
+    const results: VerifiedResult[] = [createVerifiedResult('id-1', 'MOB-101', true, false, false)];
 
     expect(allSucceeded(results)).toBe(false);
   });
@@ -233,9 +230,7 @@ describe('hasPermamentFailures', () => {
   });
 
   it('returns false when all succeeded', () => {
-    const results: VerifiedResult[] = [
-      createVerifiedResult('id-1', 'MOB-101', true, true, false),
-    ];
+    const results: VerifiedResult[] = [createVerifiedResult('id-1', 'MOB-101', true, true, false)];
 
     expect(hasPermamentFailures(results)).toBe(false);
   });
@@ -383,23 +378,17 @@ describe('integration: retry flow simulation', () => {
 
     // First attempt: fails
     assignTask(tracker, task);
-    let result: VerifiedResult[] = [
-      createVerifiedResult('id-1', 'MOB-101', false, false, true),
-    ];
+    let result: VerifiedResult[] = [createVerifiedResult('id-1', 'MOB-101', false, false, true)];
     expect(getRetryTasks(result, [task]).length).toBe(1);
 
     // Second attempt: fails
     assignTask(tracker, task);
-    result = [
-      createVerifiedResult('id-1', 'MOB-101', false, false, true),
-    ];
+    result = [createVerifiedResult('id-1', 'MOB-101', false, false, true)];
     expect(getRetryTasks(result, [task]).length).toBe(1);
 
     // Third attempt: succeeds
     assignTask(tracker, task);
-    result = [
-      createVerifiedResult('id-1', 'MOB-101', true, true, false),
-    ];
+    result = [createVerifiedResult('id-1', 'MOB-101', true, true, false)];
     expect(getRetryTasks(result, [task]).length).toBe(0);
     expect(allSucceeded(result)).toBe(true);
 
@@ -407,5 +396,219 @@ describe('integration: retry flow simulation', () => {
     expect(stats.totalAssigned).toBe(1);
     expect(stats.retriedTasks).toBe(1);
     expect(stats.maxAttemptsReached).toBe(1); // 3 attempts = max
+  });
+});
+
+describe('verifyLinearCompletion', () => {
+  const originalEnv = process.env.LINEAR_API_KEY;
+
+  afterEach(() => {
+    // Restore original env
+    if (originalEnv !== undefined) {
+      process.env.LINEAR_API_KEY = originalEnv;
+    } else {
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  it('returns error when LINEAR_API_KEY not set', async () => {
+    delete process.env.LINEAR_API_KEY;
+
+    const result = await verifyLinearCompletion('MOB-123');
+
+    expect(result.verified).toBe(false);
+    expect(result.error).toBe('LINEAR_API_KEY not set');
+  });
+
+  it('respects timeout parameter', async () => {
+    // Set a fake API key to test timeout behavior
+    process.env.LINEAR_API_KEY = 'fake-key-for-timeout-test';
+
+    const startTime = Date.now();
+    const result = await verifyLinearCompletion('MOB-123', 100);
+    const elapsed = Date.now() - startTime;
+
+    // Should fail relatively quickly due to short timeout or network error
+    expect(result.verified).toBe(false);
+    expect(result.error).toBeDefined();
+    // Timeout should be reasonably enforced (give some buffer for test execution)
+    expect(elapsed).toBeLessThan(5000);
+  });
+
+  it('handles API errors gracefully', async () => {
+    process.env.LINEAR_API_KEY = 'invalid-api-key';
+
+    const result = await verifyLinearCompletion('NONEXISTENT-ISSUE', 1000);
+
+    expect(result.verified).toBe(false);
+    expect(result.error).toBeDefined();
+  });
+});
+
+describe('processResults', () => {
+  const originalEnv = process.env.LINEAR_API_KEY;
+
+  afterEach(() => {
+    if (originalEnv !== undefined) {
+      process.env.LINEAR_API_KEY = originalEnv;
+    } else {
+      delete process.env.LINEAR_API_KEY;
+    }
+  });
+
+  it('handles failed results with retry logic', async () => {
+    const tracker = createTracker(2);
+    const task = createMockSubTask('id-1', 'MOB-101');
+    assignTask(tracker, task);
+
+    const results: ExecutionResult[] = [
+      {
+        taskId: 'id-1',
+        identifier: 'MOB-101',
+        success: false,
+        status: 'ERROR',
+        duration: 1000,
+        error: 'Task failed',
+      },
+    ];
+
+    const verified = await processResults(tracker, results);
+
+    expect(verified.length).toBe(1);
+    expect(verified[0].success).toBe(false);
+    expect(verified[0].linearVerified).toBe(false);
+    expect(verified[0].shouldRetry).toBe(true); // attempts(1) <= maxRetries(2)
+  });
+
+  it('sets shouldRetry=false when max retries exceeded', async () => {
+    const tracker = createTracker(1); // Only 1 retry allowed
+    const task = createMockSubTask('id-1', 'MOB-101');
+
+    // First attempt
+    assignTask(tracker, task);
+    // Second attempt (exceeds max)
+    assignTask(tracker, task);
+
+    const results: ExecutionResult[] = [
+      {
+        taskId: 'id-1',
+        identifier: 'MOB-101',
+        success: false,
+        status: 'ERROR',
+        duration: 1000,
+        error: 'Task failed again',
+      },
+    ];
+
+    const verified = await processResults(tracker, results);
+
+    expect(verified[0].shouldRetry).toBe(false); // attempts(2) > maxRetries(1)
+  });
+
+  it('stores result in assignment', async () => {
+    const tracker = createTracker(2);
+    const task = createMockSubTask('id-1', 'MOB-101');
+    assignTask(tracker, task);
+
+    const results: ExecutionResult[] = [
+      {
+        taskId: 'id-1',
+        identifier: 'MOB-101',
+        success: false,
+        status: 'ERROR',
+        duration: 500,
+        error: 'Test error',
+      },
+    ];
+
+    await processResults(tracker, results);
+
+    const assignment = tracker.assignments.get('id-1');
+    expect(assignment?.lastResult).toBeDefined();
+    expect(assignment?.lastResult?.error).toBe('Test error');
+  });
+
+  it('handles successful result with verification failure', async () => {
+    // When LINEAR_API_KEY is not set, verification will fail
+    delete process.env.LINEAR_API_KEY;
+
+    const tracker = createTracker(2);
+    const task = createMockSubTask('id-1', 'MOB-101');
+    assignTask(tracker, task);
+
+    const results: ExecutionResult[] = [
+      {
+        taskId: 'id-1',
+        identifier: 'MOB-101',
+        success: true,
+        status: 'SUBTASK_COMPLETE',
+        duration: 1000,
+      },
+    ];
+
+    const verified = await processResults(tracker, results);
+
+    expect(verified[0].success).toBe(false); // Overridden to false
+    expect(verified[0].linearVerified).toBe(false);
+    expect(verified[0].shouldRetry).toBe(true);
+    expect(verified[0].error).toBeDefined();
+  });
+
+  it('processes multiple results', async () => {
+    delete process.env.LINEAR_API_KEY;
+
+    const tracker = createTracker(2);
+    const task1 = createMockSubTask('id-1', 'MOB-101');
+    const task2 = createMockSubTask('id-2', 'MOB-102');
+    assignTask(tracker, task1);
+    assignTask(tracker, task2);
+
+    const results: ExecutionResult[] = [
+      {
+        taskId: 'id-1',
+        identifier: 'MOB-101',
+        success: true,
+        status: 'SUBTASK_COMPLETE',
+        duration: 1000,
+      },
+      {
+        taskId: 'id-2',
+        identifier: 'MOB-102',
+        success: false,
+        status: 'ERROR',
+        duration: 500,
+        error: 'Failed',
+      },
+    ];
+
+    const verified = await processResults(tracker, results);
+
+    expect(verified.length).toBe(2);
+    expect(verified[0].identifier).toBe('MOB-101');
+    expect(verified[1].identifier).toBe('MOB-102');
+  });
+
+  it('handles unassigned task gracefully', async () => {
+    delete process.env.LINEAR_API_KEY;
+
+    const tracker = createTracker(2);
+    // Don't assign the task
+
+    const results: ExecutionResult[] = [
+      {
+        taskId: 'unassigned-id',
+        identifier: 'MOB-999',
+        success: false,
+        status: 'ERROR',
+        duration: 100,
+        error: 'Failed',
+      },
+    ];
+
+    const verified = await processResults(tracker, results);
+
+    // Should still process with default attempt count of 1
+    expect(verified.length).toBe(1);
+    expect(verified[0].shouldRetry).toBe(true); // 1 <= 2
   });
 });

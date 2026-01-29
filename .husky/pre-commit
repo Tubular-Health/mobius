@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Run Biome on staged files
+npx biome check --staged --no-errors-on-unmatched
+
 # Check if package.json is staged for commit
 if git diff --cached --name-only | grep -q "^package\.json$"; then
   # Verify package-lock.json is in sync

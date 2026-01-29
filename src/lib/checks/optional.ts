@@ -60,7 +60,8 @@ export async function checkJq(): Promise<CheckResult> {
       status: 'warn',
       message: 'Not found',
       required: false,
-      details: 'jq is used for state file operations. Install: brew install jq (macOS) or apt install jq (Linux)',
+      details:
+        'jq is used for state file operations. Install: brew install jq (macOS) or apt install jq (Linux)',
     };
   }
 }

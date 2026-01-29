@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import type { CheckResult, Backend } from '../../types.js';
+import type { Backend, CheckResult } from '../../types.js';
 
 export async function checkJiraMcp(backend: Backend): Promise<CheckResult> {
   const name = 'Jira MCP';

@@ -17,18 +17,11 @@ Default to 'linear' if not specified.
 backend: linear  # or 'jira'
 ```
 
-The backend determines which MCP tools to use for issue operations.
+The backend determines the output format for issue specifications.
 </backend_detection>
 
 <backend_context>
 <linear>
-**Linear MCP Tools**:
-- `mcp__plugin_linear_linear__create_issue` - Create issues
-- `mcp__plugin_linear_linear__list_issues` - Search existing issues
-- `mcp__plugin_linear_linear__get_issue` - Get issue details
-- `mcp__plugin_linear_linear__list_teams` - List available teams
-- `mcp__plugin_linear_linear__list_issue_labels` - List available labels
-
 **Linear Concepts**:
 - **States**: Backlog, Todo, In Progress, Done, Canceled, Duplicate
 - **Labels**: Bug, Feature, Improvement (and custom labels)
@@ -38,12 +31,6 @@ The backend determines which MCP tools to use for issue operations.
 </linear>
 
 <jira>
-**Jira MCP Tools**:
-- `mcp_plugin_atlassian_jira__create_issue` - Create issues
-- `mcp_plugin_atlassian_jira__list_issues` - Search existing issues
-- `mcp_plugin_atlassian_jira__get_issue` - Get issue details
-- `mcp_plugin_atlassian_jira__list_projects` - List available projects
-
 **Jira Configuration**:
 Requires `project_key` from jira config section:
 
@@ -64,6 +51,54 @@ jira:
 </jira>
 </backend_context>
 
+<context_input>
+**Optional context for available teams and labels.**
+
+The skill may receive workspace metadata via the `MOBIUS_CONTEXT_FILE` environment variable to help with team/label selection. This context is optional - the skill can function without it by asking the user directly.
+
+**Context file structure** (at `MOBIUS_CONTEXT_FILE` path):
+
+```json
+{
+  "workspace": {
+    "teams": [
+      {"id": "uuid", "name": "Engineering", "key": "ENG"},
+      {"id": "uuid", "name": "Design", "key": "DES"}
+    ],
+    "labels": [
+      {"id": "uuid", "name": "Bug", "color": "#ff0000"},
+      {"id": "uuid", "name": "Feature", "color": "#00ff00"}
+    ],
+    "projects": [
+      {"id": "uuid", "name": "Web App", "key": "WEB"}
+    ]
+  },
+  "metadata": {
+    "fetchedAt": "2026-01-28T12:00:00Z",
+    "backend": "linear"
+  }
+}
+```
+
+**Reading context** (optional):
+```bash
+# Context file path from environment (if available)
+if [ -n "$MOBIUS_CONTEXT_FILE" ]; then
+  cat "$MOBIUS_CONTEXT_FILE"
+fi
+```
+
+**When context is available**:
+- Use team names from context when presenting options
+- Use label names from context for validation
+- Use project names from context for Jira projects
+
+**When context is not available**:
+- Ask user for team/project name directly
+- Ask user for labels to apply
+- Skill functions normally without pre-fetched metadata
+</context_input>
+
 <quick_start>
 <initial_gate>
 **CRITICAL - Run this BEFORE investigation**
@@ -81,14 +116,14 @@ Options:
 
 <workflow>
 1. **Determine issue type** - Bug, feature, task, or improvement
-2. **Identify team/project** - Use `list_teams` (Linear) or `list_projects` (Jira)
+2. **Identify team/project** - From context or ask user directly
 3. **Gather core information** - Title, description, affected areas
 4. **Investigate with Socratic questions** - Ask until no ambiguities remain
 5. **Define acceptance criteria** - Verifiable outcomes
 6. **Identify relationships** - What blocks this? What does this block?
 7. **Set priority and metadata** - Priority, labels/issue type, project
 8. **Present for approval** - Show complete issue before creating
-9. **Create with MCP tool** - Execute the appropriate create_issue tool
+9. **Output issue specification** - Output structured data for CLI to create
 </workflow>
 </quick_start>
 
@@ -328,53 +363,27 @@ The agent executing dependent tasks should read the checkpoint's decision before
 </checkpoint_issues>
 
 <context_gathering>
-<linear_context>
-Before creating an issue with Linear backend:
+<gathering_approach>
+When context is available via `MOBIUS_CONTEXT_FILE`, use the pre-fetched workspace data.
+When context is not available, ask the user directly for team/project and labels.
 
-```
-# List existing issues that might be related
-mcp__plugin_linear_linear__list_issues with query parameter
-
-# Get issue details including relationships
-mcp__plugin_linear_linear__get_issue with includeRelations: true
-
-# List available teams
-mcp__plugin_linear_linear__list_teams
-
-# List available labels
-mcp__plugin_linear_linear__list_issue_labels
-```
-</linear_context>
-
-<jira_context>
-Before creating an issue with Jira backend:
-
-```
-# Search for related issues
-mcp_plugin_atlassian_jira__list_issues with JQL query
-
-# Get issue details
-mcp_plugin_atlassian_jira__get_issue
-
-# List available projects
-mcp_plugin_atlassian_jira__list_projects
-```
-</jira_context>
+**For related issues**: Ask the user if they know of related issues. The CLI can search for related issues if needed before this skill runs.
+</gathering_approach>
 
 <relationship_discovery>
-Ask about relationships using context from the backend:
+Ask about relationships:
 
-- "I found these related open issues: [list]. Does this new issue depend on any of them?"
+- "Do you know of any existing issues this is related to?"
 - "Should any existing issues be blocked by this work?"
-- "Is this related to an existing issue?"
+- "Is this a duplicate of an existing issue?"
 
-**Linear relationships** (at creation time):
+**Linear relationships** (included in output):
 - `blocks`: Issues this one blocks
 - `blockedBy`: Issues blocking this one
 - `relatedTo`: Related issues
 - `duplicateOf`: If this duplicates another issue
 
-**Jira links** (at creation or via separate call):
+**Jira links** (included in output):
 - blocks / is blocked by
 - relates to
 - duplicates / is duplicated by
@@ -406,7 +415,7 @@ Options:
 </priority_guidelines>
 
 <approval_workflow>
-<before_creating>
+<before_output>
 Present the complete issue in chat:
 
 "Here is the issue I'll create:
@@ -429,44 +438,23 @@ Use AskUserQuestion:
 - **Make changes** - I need to modify something
 - **Add more context** - I have additional information
 - **Cancel** - Don't create this issue
-</before_creating>
+</before_output>
 
-<create_command>
-After approval, use the appropriate MCP tool based on backend:
+<output_specification>
+After approval, output the issue specification for the CLI to create.
 
-**Linear**:
-```
-mcp__plugin_linear_linear__create_issue
-  team: "Team Name"
-  title: "Issue title"
-  description: "Full markdown description"
-  labels: ["Bug"] or ["Feature"] or ["Improvement"]
-  priority: 1-4
-  state: "Backlog" or "Todo"
-  blocks: ["ISSUE-123"]  # optional
-  blockedBy: ["ISSUE-456"]  # optional
-  relatedTo: ["ISSUE-789"]  # optional
-```
+See `<structured_output>` section for the complete output format.
+</output_specification>
 
-**Jira**:
-```
-mcp_plugin_atlassian_jira__create_issue
-  project: "PROJECT_KEY"
-  summary: "Issue title"
-  description: "Full markdown description"
-  issuetype: "Bug" or "Story" or "Task"
-  priority: "High" or "Medium" or "Low"
-```
-</create_command>
+<after_output>
+After outputting the issue specification:
 
-<after_creation>
-Confirm: "Created issue [ID]: [title]
+"The issue specification has been output. The mobius CLI will create this issue.
 
 Would you like to:
-- Create related issues
-- Set up additional relationships
+- Define related issues
 - Add this to a project/epic"
-</after_creation>
+</after_output>
 </approval_workflow>
 
 <examples>
@@ -479,47 +467,48 @@ Response flow:
 3. "Does this affect all users or specific scenarios?"
 4. "What error message do you see?"
 
-**Linear** resulting issue:
-```
-mcp__plugin_linear_linear__create_issue
-  team: "Engineering"
+**Resulting issue specification** (output at end of response):
+
+```yaml
+---
+status: ISSUE_DEFINED
+timestamp: "2026-01-28T12:00:00Z"
+backend: linear  # or jira
+
+issue:
   title: "Schedule deactivation throws 500 error"
-  description: "## Summary
-Users receive HTTP 500 error when deactivating schedules.
+  team: "Engineering"  # Linear: team name, Jira: project key
+  type: "Bug"  # Linear: label, Jira: issuetype
+  priority: 1  # Linear: 1-4, Jira: Highest/High/Medium/Low/Lowest
+  state: "Todo"  # Initial state
+  description: |
+    ## Summary
+    Users receive HTTP 500 error when deactivating schedules.
 
-## Current Behavior
-Clicking 'Deactivate' shows error toast and schedule remains active.
+    ## Current Behavior
+    Clicking 'Deactivate' shows error toast and schedule remains active.
 
-## Expected Behavior
-Schedule deactivates successfully with confirmation message.
+    ## Expected Behavior
+    Schedule deactivates successfully with confirmation message.
 
-## Reproduction Steps
-1. Navigate to Schedule Settings
-2. Click 'Deactivate Schedule'
-3. Observe 500 error in toast
+    ## Reproduction Steps
+    1. Navigate to Schedule Settings
+    2. Click 'Deactivate Schedule'
+    3. Observe 500 error in toast
 
-## Acceptance Criteria
-- [ ] User can deactivate schedule without error
-  - **Verification**: Manual test - click Deactivate, observe success toast
-- [ ] Schedule status updates to 'inactive'
-  - **Verification**: `npm test -- --grep 'schedule deactivation'`
-- [ ] Team members see schedule status change
-  - **Verification**: Manual test - check team view after deactivation
-- [ ] Error logs capture root cause for monitoring
-  - **Verification**: Observable - check logs after fix deployment"
-  labels: ["Bug"]
-  priority: 1
-  state: "Todo"
-```
-
-**Jira** resulting issue:
-```
-mcp_plugin_atlassian_jira__create_issue
-  project: "PROJ"
-  summary: "Schedule deactivation throws 500 error"
-  description: "...same description..."
-  issuetype: "Bug"
-  priority: "Highest"
+    ## Acceptance Criteria
+    - [ ] User can deactivate schedule without error
+      - **Verification**: Manual test - click Deactivate, observe success toast
+    - [ ] Schedule status updates to 'inactive'
+      - **Verification**: `npm test -- --grep 'schedule deactivation'`
+    - [ ] Team members see schedule status change
+      - **Verification**: Manual test - check team view after deactivation
+    - [ ] Error logs capture root cause for monitoring
+      - **Verification**: Observable - check logs after fix deployment
+  labels:
+    - "Bug"
+  relationships: {}  # Optional: blocks, blockedBy, relatedTo, duplicateOf
+---
 ```
 </bug_example>
 
@@ -532,31 +521,165 @@ Response flow:
 3. "Which screens/components need dark mode support?"
 4. "How will we know this feature is successful?"
 
-Resulting issue (backend-agnostic description):
-```
-Title: "Add dark mode theme support"
-Description: "## Summary
-Add dark mode support with system preference detection and manual toggle.
+**Resulting issue specification** (output at end of response):
 
-## Expected Behavior
-- App detects system dark mode preference on launch
-- User can manually toggle between light/dark/system
-- All screens render correctly in both modes
+```yaml
+---
+status: ISSUE_DEFINED
+timestamp: "2026-01-28T12:00:00Z"
+backend: linear
 
-## Acceptance Criteria
-- [ ] Theme follows system preference by default
-  - **Verification**: `npm test -- --grep 'theme system preference'`
-- [ ] Settings screen has theme toggle (Light/Dark/System)
-  - **Verification**: Manual test - navigate to Settings, verify toggle exists
-- [ ] All text maintains 4.5:1 contrast ratio in both modes
-  - **Verification**: `npm run test:a11y` or Lighthouse accessibility audit
-- [ ] Theme preference persists across app restarts
-  - **Verification**: Manual test - set theme, restart app, verify theme persists
-- [ ] No flash of wrong theme on app launch
-  - **Verification**: Observable - launch app in dark mode, no white flash"
+issue:
+  title: "Add dark mode theme support"
+  team: "Engineering"
+  type: "Feature"
+  priority: 3  # Normal
+  state: "Backlog"
+  description: |
+    ## Summary
+    Add dark mode support with system preference detection and manual toggle.
+
+    ## Expected Behavior
+    - App detects system dark mode preference on launch
+    - User can manually toggle between light/dark/system
+    - All screens render correctly in both modes
+
+    ## Acceptance Criteria
+    - [ ] Theme follows system preference by default
+      - **Verification**: `npm test -- --grep 'theme system preference'`
+    - [ ] Settings screen has theme toggle (Light/Dark/System)
+      - **Verification**: Manual test - navigate to Settings, verify toggle exists
+    - [ ] All text maintains 4.5:1 contrast ratio in both modes
+      - **Verification**: `npm run test:a11y` or Lighthouse accessibility audit
+    - [ ] Theme preference persists across app restarts
+      - **Verification**: Manual test - set theme, restart app, verify theme persists
+    - [ ] No flash of wrong theme on app launch
+      - **Verification**: Observable - launch app in dark mode, no white flash
+  labels:
+    - "Feature"
+  relationships: {}
+---
 ```
 </feature_example>
 </examples>
+
+<structured_output>
+**This skill MUST output structured data for the mobius CLI to parse and create issues.**
+
+At the END of your response, output a YAML or JSON block with the issue specification. The mobius CLI parses this to create issues via SDK.
+
+**Output format** (YAML preferred for readability):
+
+```yaml
+---
+status: ISSUE_DEFINED  # Required: indicates successful issue definition
+timestamp: "2026-01-28T12:00:00Z"  # Required: ISO-8601 timestamp
+backend: linear  # Required: "linear" or "jira"
+
+issue:
+  # Required fields
+  title: "Issue title"
+  team: "Team Name"  # Linear: team name, Jira: project key
+  description: |
+    ## Summary
+    [description content]
+
+    ## Acceptance Criteria
+    - [ ] Criterion 1
+      - **Verification**: test command or manual step
+
+  # Type/label fields (backend-specific)
+  type: "Bug"  # Linear: maps to label, Jira: maps to issuetype
+  labels:  # Optional additional labels
+    - "Bug"
+    - "Frontend"
+
+  # Priority (backend-specific mapping)
+  priority: 2  # Linear: 0-4, Jira: converts to Highest/High/Medium/Low/Lowest
+
+  # Initial state
+  state: "Backlog"  # Linear: Backlog/Todo, Jira: To Do
+
+  # Optional fields
+  assignee: "user@example.com"  # Optional: user email or ID
+  dueDate: "2026-02-15"  # Optional: ISO date
+  parentId: "MOB-100"  # Optional: parent issue for sub-issues
+
+  # Relationships (optional)
+  relationships:
+    blocks:
+      - "MOB-123"
+    blockedBy:
+      - "MOB-456"
+    relatedTo:
+      - "MOB-789"
+    duplicateOf: null  # or "MOB-999" if duplicate
+---
+```
+
+**Valid status values**:
+| Status | When to use |
+|--------|-------------|
+| `ISSUE_DEFINED` | Issue specification complete and approved |
+| `CANCELLED` | User cancelled issue creation |
+| `NEEDS_INFO` | More information needed from user |
+
+**Backend-specific field mappings**:
+
+| Field | Linear | Jira |
+|-------|--------|------|
+| `team` | Team name (e.g., "Engineering") | Project key (e.g., "PROJ") |
+| `type` | Becomes primary label | `issuetype` (Bug/Story/Task/Epic) |
+| `priority` | 0=None, 1=Urgent, 2=High, 3=Normal, 4=Low | Highest/High/Medium/Low/Lowest |
+| `state` | Backlog, Todo, In Progress, Done | To Do, In Progress, Done |
+| `relationships` | `blocks`, `blockedBy`, `relatedTo`, `duplicateOf` | Link types: blocks, relates to, duplicates |
+
+**Jira-specific output example**:
+
+```yaml
+---
+status: ISSUE_DEFINED
+timestamp: "2026-01-28T12:00:00Z"
+backend: jira
+
+issue:
+  title: "Schedule deactivation throws 500 error"
+  team: "PROJ"  # Project key for Jira
+  type: "Bug"  # issuetype for Jira
+  priority: "High"  # Jira uses string priorities
+  state: "To Do"
+  description: |
+    ## Summary
+    Users receive HTTP 500 error when deactivating schedules.
+
+    ## Acceptance Criteria
+    - [ ] User can deactivate schedule without error
+  labels:
+    - "backend"
+    - "p1"
+  relationships:
+    blocks:
+      - "PROJ-456"
+---
+```
+
+**Critical requirements**:
+1. Output MUST be valid YAML or JSON
+2. Output MUST appear at the END of your response
+3. Output MUST include `status`, `timestamp`, and `backend` fields
+4. For `ISSUE_DEFINED` status, `issue` object is required with all required fields
+5. `description` should include acceptance criteria with verification methods
+
+**Example cancelled output**:
+
+```yaml
+---
+status: CANCELLED
+timestamp: "2026-01-28T12:00:00Z"
+reason: "User chose not to create issue"
+---
+```
+</structured_output>
 
 <anti_patterns>
 **Don't accept vague requirements**:
@@ -596,6 +719,7 @@ An issue is ready when:
 - [ ] Each criterion is verifiable
 - [ ] Priority reflects actual urgency/impact
 - [ ] Relationships are identified and linked
-- [ ] Project is set (if applicable)
-- [ ] User has approved before creation
+- [ ] Project/team is set
+- [ ] User has approved before outputting specification
+- [ ] Structured output is valid YAML/JSON with all required fields
 </success_criteria>

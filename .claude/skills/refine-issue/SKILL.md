@@ -20,15 +20,19 @@ Sub-tasks are designed for autonomous execution - each should be completable wit
 </context>
 
 <backend_detection>
-Read the backend from mobius config (`~/.config/mobius/config.yaml`). The `backend` field specifies which issue tracker to use.
+**FIRST**: Detect the backend from context file metadata.
 
-**Supported backends**:
-- `linear` (default) - Linear issue tracker
-- `jira` - Atlassian Jira
+Read the `metadata.backend` field from the context file:
 
-If no backend is specified in config, default to `linear`.
+```bash
+cat "$MOBIUS_CONTEXT_FILE" | jq '.metadata.backend'
+```
 
-The backend determines which MCP tools to use for issue operations. All workflow logic remains the same regardless of backend.
+**Values**: `linear` or `jira`
+
+**Default**: If no backend is specified in metadata, default to `linear`.
+
+The backend information is included in the structured output so the mobius loop knows which SDK to use for issue creation. All workflow logic remains the same regardless of backend.
 </backend_detection>
 
 <input_validation>
@@ -45,83 +49,187 @@ Did you mean to use a different backend, or is this a valid issue ID?
 ```
 </input_validation>
 
-<backend_context>
-<linear>
-**MCP Tools for Linear backend**:
+<context_input>
+**The mobius loop provides parent issue context via environment variable and local files.**
 
-- `mcp__plugin_linear_linear__get_issue` - Fetch issue details with relations
-- `mcp__plugin_linear_linear__create_issue` - Create sub-tasks with `parentId` parameter
-- `mcp__plugin_linear_linear__update_issue` - Set blocking relationships via `blockedBy` array
-- `mcp__plugin_linear_linear__create_comment` - Post Mermaid dependency diagram
+The skill receives context through:
+1. `MOBIUS_CONTEXT_FILE` environment variable - path to the context JSON file
+2. Local files at `~/.mobius/issues/{parentId}/`
 
-**Issue ID format**: `MOB-123`, `VRZ-456` (team prefix + number)
+**Context file structure** (at `MOBIUS_CONTEXT_FILE` path):
 
-**Creating sub-tasks**:
-```
-mcp__plugin_linear_linear__create_issue
-  team: "{same team as parent}"
-  title: "[{parent-id}] {sub-task title}"
-  description: "{full sub-task description with acceptance criteria}"
-  parentId: "{parent issue id}"
-  labels: ["{inherited from parent}"]
-  priority: {inherited from parent}
-  state: "Backlog"
-  blockedBy: ["{ids of blocking sub-tasks}"]
-```
-</linear>
-
-<jira>
-**MCP Tools for Jira backend**:
-
-- `mcp_plugin_atlassian_jira__get_issue` - Fetch issue details with relations
-- `mcp_plugin_atlassian_jira__create_issue` - Create sub-tasks with parent link
-- `mcp_plugin_atlassian_jira__add_comment` - Post Mermaid dependency diagram
-
-**Issue ID format**: `PROJ-123` (project key + number)
-
-**Two-phase creation process**:
-
-Unlike Linear (which supports `blockedBy` at creation time), Jira requires a two-phase process:
-1. **Phase 1**: Create all sub-tasks (without blocking relationships)
-2. **Phase 2**: Create issue links to establish blocking relationships
-
-This is because Jira's MCP `update_issue` with `issuelinks` field silently fails. Use the `createJiraIssueLink()` function from `src/lib/jira.ts` instead.
-
-**Phase 1 - Creating sub-tasks**:
-```
-mcp_plugin_atlassian_jira__create_issue
-  project: "{same project as parent}"
-  summary: "[{parent-id}] {sub-task title}"
-  description: "{full sub-task description with acceptance criteria}"
-  parent: "{parent issue key}"
-  issuetype: "Sub-task"
-  labels: ["{inherited from parent}"]
-  priority: {inherited from parent}
+```json
+{
+  "parent": {
+    "id": "uuid",
+    "identifier": "MOB-161",
+    "title": "Parent issue title",
+    "description": "Full description with acceptance criteria",
+    "gitBranchName": "branch-name",
+    "status": "Backlog",
+    "labels": ["Feature"],
+    "priority": { "value": 1, "name": "Urgent" },
+    "team": "Mobius",
+    "teamId": "uuid",
+    "url": "https://linear.app/..."
+  },
+  "subTasks": [],
+  "metadata": {
+    "fetchedAt": "2026-01-28T12:00:00Z",
+    "updatedAt": "2026-01-28T12:00:00Z",
+    "backend": "linear"
+  }
+}
 ```
 
-**Phase 2 - Creating blocking relationships**:
+**Reading context**:
+```bash
+# Context file path from environment
+CONTEXT_FILE="$MOBIUS_CONTEXT_FILE"
 
-After all sub-tasks are created, use the `createJiraIssueLink()` function:
-
-```typescript
-import { createJiraIssueLink, createJiraIssueLinks } from 'src/lib/jira';
-
-// Single link: blockerKey blocks blockedKey
-await createJiraIssueLink('PROJ-124', 'PROJ-125');
-
-// Batch creation for multiple links
-const links = [
-  { blocker: 'PROJ-124', blocked: 'PROJ-125' },
-  { blocker: 'PROJ-124', blocked: 'PROJ-126' },
-  { blocker: 'PROJ-125', blocked: 'PROJ-127' },
-];
-const result = await createJiraIssueLinks(links);
-// result: { success: 3, failed: 0 }
+# Or read directly from local storage
+cat ~/.mobius/issues/MOB-161/parent.json
 ```
 
-**Important**: The Atlassian MCP server does NOT support creating issue links via `update_issue`. You must use the `createJiraIssueLink()` utility function which calls the Jira REST API directly via the jira.js SDK.
-</jira>
-</backend_context>
+**Backend detection**: The `metadata.backend` field indicates whether the issue is from Linear or Jira. This affects how the mobius loop creates sub-tasks, but the skill outputs a uniform structure regardless of backend.
+</context_input>
+
+<structured_output>
+**This skill MUST output structured data for the mobius loop to parse.**
+
+At the END of your response, output a YAML or JSON block with the sub-task specifications. The mobius loop parses this to create sub-tasks via SDK.
+
+**Output format** (YAML preferred for readability):
+
+```yaml
+---
+status: BREAKDOWN_APPROVED  # Required: one of the valid status values
+timestamp: "2026-01-28T12:00:00Z"  # Required: ISO-8601 timestamp
+parentId: "MOB-161"  # Required: parent issue identifier
+backend: "linear"  # Required: backend from context metadata
+
+subTasks:
+  - title: "[MOB-161] Define TypeScript types for feature"
+    description: |
+      ## Summary
+      Create type definitions for the feature.
+
+      ## Target File(s)
+      `src/types/feature.ts` (Create)
+
+      ## Acceptance Criteria
+      - [ ] Type exported with proper definition
+      - [ ] File compiles without errors
+
+      ## Verify Command
+      ```bash
+      grep -q "export type Feature" src/types/feature.ts && echo "PASS"
+      ```
+    targetFile: "src/types/feature.ts"
+    changeType: "create"
+    blockedBy: []  # Empty for first task
+    order: 1
+
+  - title: "[MOB-161] Implement feature service"
+    description: |
+      ## Summary
+      Implement the feature service.
+
+      ## Target File(s)
+      `src/lib/feature.ts` (Create)
+
+      ## Acceptance Criteria
+      - [ ] Service function implemented
+      - [ ] Tests pass
+
+      ## Verify Command
+      ```bash
+      grep -q "export function" src/lib/feature.ts && echo "PASS"
+      ```
+    targetFile: "src/lib/feature.ts"
+    changeType: "create"
+    blockedBy: [1]  # Blocked by order 1
+    order: 2
+
+  - title: "[MOB-161] Verification Gate"
+    description: |
+      Runs verify-issue to validate implementation meets acceptance criteria.
+    targetFile: null
+    changeType: "verification"
+    blockedBy: [1, 2]  # Blocked by ALL implementation tasks
+    order: 3
+    isVerificationGate: true
+
+dependencyGraph: |
+  ```mermaid
+  graph TD
+    A[1: Define types] --> B[2: Implement service]
+    B --> C[3: Verification Gate]
+  ```
+
+summary:
+  totalSubTasks: 3
+  implementationTasks: 2
+  verificationGate: 1
+  parallelGroups:
+    - [1]
+    - [2]
+    - [3]
+  readyToStart: [1]
+---
+```
+
+**Valid status values**:
+| Status | When to use |
+|--------|-------------|
+| `BREAKDOWN_APPROVED` | User approved breakdown, create sub-tasks |
+| `BREAKDOWN_REVISED` | User requested changes, presenting revised plan |
+| `NEEDS_CLARIFICATION` | Ambiguous requirements, asking user questions |
+| `NO_BREAKDOWN_NEEDED` | Issue is already small enough, no sub-tasks required |
+
+**Critical requirements**:
+1. Output MUST be valid YAML or JSON
+2. Output MUST appear at the END of your response
+3. Output MUST include `status`, `timestamp`, `parentId`, `backend` fields
+4. Each sub-task MUST include `title`, `description`, `blockedBy`, `order` fields
+5. The `blockedBy` array contains order numbers (not identifiers) of blocking tasks
+6. Verification Gate MUST be the final task, blocked by ALL implementation tasks
+7. The mobius loop will create the actual issues using the appropriate SDK
+
+**Sub-task description format**:
+Each sub-task description should follow this template:
+```markdown
+## Summary
+{Brief description of what this task accomplishes}
+
+## Context
+Part of {parent-id}: {parent title}
+
+## Target File(s)
+`{file-path}` ({Create/Modify})
+
+## Action
+{Specific implementation guidance}
+
+## Avoid
+- Do NOT {anti-pattern} because {reason}
+
+## Acceptance Criteria
+- [ ] {Criterion 1}
+  * **Verification**: {how to verify}
+- [ ] {Criterion 2}
+
+## Verify Command
+```bash
+{executable verification command}
+```
+
+**Blocked by**: {order numbers or "None"}
+**Enables**: {order numbers this unblocks}
+```
+
+**Important**: The mobius loop handles all issue creation via SDK. This skill only outputs the specification - it does NOT create issues directly.
+</structured_output>
 
 <quick_start>
 <invocation>
@@ -140,32 +248,37 @@ Args: MOB-123
 </invocation>
 
 <workflow>
-1. **Detect backend** - Read backend from mobius config (default: linear)
-2. **Fetch issue** - Get full issue details including description and acceptance criteria
+1. **Read context** - Load parent issue from `MOBIUS_CONTEXT_FILE` or local files
+2. **Detect backend** - Read backend from context metadata (default: linear)
 3. **Deep exploration** - Use Explore agent to thoroughly analyze related code, patterns, and dependencies
 4. **Identify work units** - Break down into single-file-focused tasks
 5. **Determine blocking order** - Analyze functional dependencies between tasks
 6. **Include verification gate** - Add a final "Verification Gate" sub-task blocked by ALL implementation sub-tasks
 7. **Present breakdown** - Show complete plan with all sub-tasks including verification gate
 8. **Gather feedback** - Use AskUserQuestion for refinement
-9. **Batch create** - Create all approved sub-tasks with blocking relationships (including verification gate)
+9. **Output specification** - Output structured YAML with approved sub-task specifications
 </workflow>
 </quick_start>
 
 <research_phase>
-<fetch_issue>
-Retrieve issue details using the backend-appropriate get_issue tool (see `<backend_context>` for tool names):
+<load_parent_context>
+Read the parent issue from the context file:
 
-- Linear: `mcp__plugin_linear_linear__get_issue` with `includeRelations: true`
-- Jira: `mcp_plugin_atlassian_jira__get_issue`
+```bash
+# Read from context file
+cat "$MOBIUS_CONTEXT_FILE" | jq '.parent'
 
-**Extract from response**:
-- Title and description
-- Acceptance criteria
-- Existing relationships
-- Project context
-- Labels and priority
-</fetch_issue>
+# Or read directly from local storage
+cat ~/.mobius/issues/{parentId}/parent.json
+```
+
+**Extract from parent**:
+- **Title and description**: What needs to be implemented
+- **Acceptance criteria**: Checklist of requirements (look for checkbox patterns)
+- **Labels**: Bug/Feature/Improvement for context
+- **Priority**: Urgency level for task ordering
+- **Team/Project**: For sub-task inheritance
+</load_parent_context>
 
 <deep_exploration>
 Use the Task tool with Explore agent to thoroughly analyze the codebase:
@@ -318,31 +431,19 @@ This task triggers the verify-issue skill to validate all implementation sub-tas
 **Enables**: Parent issue completion
 ```
 
-**Linear creation**:
-```
-mcp__plugin_linear_linear__create_issue
-  team: {team_id}
-  title: "[{parent-id}] Verification Gate"
-  description: "Runs verify-issue to validate implementation meets acceptance criteria."
-  parentId: {parent_issue_id}
-  blockedBy: [{all implementation sub-task IDs}]
-  labels: ["verification"]
-  state: "Backlog"
+**Structured output specification**:
+```yaml
+- title: "[{parent-id}] Verification Gate"
+  description: |
+    Runs verify-issue to validate implementation meets acceptance criteria.
+  targetFile: null
+  changeType: "verification"
+  blockedBy: [{all implementation task order numbers}]
+  order: {final order number}
+  isVerificationGate: true
 ```
 
-**Jira creation** (two-phase):
-```
-Phase 1: Create sub-task
-mcp_plugin_atlassian_jira__create_issue
-  project: {project_key}
-  summary: "[{parent-id}] Verification Gate"
-  description: "Runs verify-issue to validate implementation meets acceptance criteria."
-  parent: {parent_issue_key}
-  issuetype: "Sub-task"
-  labels: ["verification"]
-
-Phase 2: Create blocking links (same pattern as implementation sub-tasks)
-```
+The mobius loop handles creation via the appropriate SDK (Linear or Jira) based on the `backend` field in the structured output.
 </verification_gate>
 
 <sizing_guidelines>
@@ -467,187 +568,139 @@ Loop back to presentation after each refinement until user approves.
 </iterative_refinement>
 </presentation_phase>
 
-<creation_phase>
-<batch_creation>
-After approval, create all sub-tasks using the appropriate backend tools.
+<output_phase>
+<structured_output_generation>
+After user approval, generate the structured YAML output with all sub-task specifications.
 
-**Backend-specific creation flows**:
+**Output the specification** at the END of your response:
 
-<linear_creation_flow>
-**Linear**: Single-phase creation with `blockedBy` parameter
+```yaml
+---
+status: BREAKDOWN_APPROVED
+timestamp: "{current ISO-8601 timestamp}"
+parentId: "{parent issue identifier}"
+backend: "{backend from context metadata}"
 
-1. Create in reverse dependency order (leaf tasks first)
-2. Store created issue IDs
-3. Use `blockedBy` parameter to reference already-created tasks
+subTasks:
+  - title: "[{parent-id}] {sub-task title}"
+    description: |
+      {full description with acceptance criteria and verify command}
+    targetFile: "{file path or null for verification}"
+    changeType: "{create|modify|delete|verification}"
+    blockedBy: [{order numbers of blocking tasks}]
+    order: 1
 
-```
-mcp__plugin_linear_linear__create_issue
-  ...
-  blockedBy: ["{ids of blocking sub-tasks}"]
-```
+  # ... additional sub-tasks ...
 
-Linear handles blocking relationships atomically at creation time.
-</linear_creation_flow>
+  - title: "[{parent-id}] Verification Gate"
+    description: |
+      Runs verify-issue to validate implementation meets acceptance criteria.
+    targetFile: null
+    changeType: "verification"
+    blockedBy: [{all implementation task order numbers}]
+    order: {final order number}
+    isVerificationGate: true
 
-<jira_creation_flow>
-**Jira**: Two-phase creation (sub-tasks first, then links)
+dependencyGraph: |
+  {mermaid diagram showing dependencies}
 
-**Phase 1**: Create all sub-tasks (order doesn't matter)
-- Create all sub-tasks without blocking relationships
-- Store the created issue keys (e.g., PROJ-124, PROJ-125)
-
-**Phase 2**: Create blocking relationships via `createJiraIssueLink()`
-- After ALL sub-tasks exist, create the links
-- Use `createJiraIssueLinks()` for batch processing
-- Handle partial failures gracefully (see `<link_creation_failure>`)
-
-```typescript
-// After all sub-tasks created, establish blocking relationships
-import { createJiraIssueLinks } from 'src/lib/jira';
-
-const links = [
-  { blocker: 'PROJ-124', blocked: 'PROJ-125' },
-  { blocker: 'PROJ-124', blocked: 'PROJ-126' },
-  { blocker: 'PROJ-125', blocked: 'PROJ-127' },
-  { blocker: 'PROJ-126', blocked: 'PROJ-127' },
-];
-
-const result = await createJiraIssueLinks(links);
-console.log(`Links created: ${result.success}, failed: ${result.failed}`);
+summary:
+  totalSubTasks: {count}
+  implementationTasks: {count}
+  verificationGate: 1
+  parallelGroups: {list of parallel groups}
+  readyToStart: [{order numbers of tasks with no blockers}]
+---
 ```
 
-**Why two phases?** The Atlassian MCP server's `update_issue` silently ignores `issuelinks` field. The `createJiraIssueLink()` function uses the jira.js SDK to call the Jira REST API directly, which is the only reliable way to create issue links.
-</jira_creation_flow>
-</batch_creation>
+**Important**: The mobius loop handles all issue creation via SDK. This skill outputs the specification - it does NOT create issues directly.
+</structured_output_generation>
 
-<creation_order>
-**For Linear**:
-1. Identify leaf tasks (blocked by nothing or only by already-created tasks)
-2. Create leaf tasks first
-3. Work up the dependency tree
-4. Store created issue IDs to reference in blockedBy for later tasks
-
-**For Jira**:
-1. Create ALL sub-tasks in any order (Phase 1)
-2. Collect all created issue keys
-3. Build link array from dependency graph
-4. Call `createJiraIssueLinks()` with all relationships (Phase 2)
-5. Report success/failure counts
-</creation_order>
-
-<post_creation>
-After all sub-tasks created, add a comment to the parent issue with the Mermaid dependency diagram:
+<creation_delegation>
+The mobius loop parses the structured output and creates sub-tasks via SDK:
 
 **For Linear**:
-```
-mcp__plugin_linear_linear__create_comment
-  issueId: "{parent-issue-id}"
-  body: |
-    ## Sub-task Dependency Graph
-
-    ```mermaid
-    graph TD
-      A[MOB-124: Define types] --> B[MOB-125: Implement service]
-      B --> C[MOB-126: Add hook]
-      C --> D[MOB-127: Update component]
-    ```
-
-    **Ready to start**: MOB-124
-```
+- Uses SDK to create issues with `parentId` and `blockedBy` fields
+- Handles creation order automatically (leaf tasks first)
+- Stores created issue IDs to reference in blockedBy for later tasks
 
 **For Jira**:
-```
-mcp_plugin_atlassian_jira__add_comment
-  issueIdOrKey: "{parent-issue-key}"
-  body: |
-    ## Sub-task Dependency Graph
+- Uses SDK for two-phase creation (sub-tasks first, then links)
+- Phase 1: Create all sub-tasks
+- Phase 2: Create blocking relationships via `createJiraIssueLinks()`
+- Reports success/failure counts
 
-    {code:mermaid}
-    graph TD
-      A[PROJ-124: Define types] --> B[PROJ-125: Implement service]
-      B --> C[PROJ-126: Add hook]
-      C --> D[PROJ-127: Update component]
-    {code}
+This delegation ensures:
+- Reliable issue creation via tested SDK code
+- Proper error handling and retry logic
+- Consistent behavior across backends
+</creation_delegation>
 
-    *Ready to start*: PROJ-124
-```
-
-Then confirm with summary:
+<completion_summary>
+After outputting the structured specification, provide a summary for the user:
 
 ```markdown
-Created {count} sub-tasks for {parent issue ID}:
+## Breakdown Complete: {parent issue ID}
 
-| ID | Title | Blocked By | Status |
-|----|-------|------------|--------|
-| XXX-124 | Define types | - | Ready |
-| XXX-125 | Implement service | XXX-124 | Blocked |
-| XXX-126 | Add hook | XXX-124 | Blocked |
-| XXX-127 | Update component | XXX-125, XXX-126 | Blocked |
+**Status**: BREAKDOWN_APPROVED
+**Sub-tasks specified**: {count}
+**Verification gate**: Included
 
-**Ready to start**: XXX-124
-**Parallel opportunities**: After XXX-124, can work XXX-125 and XXX-126 simultaneously
+| Order | Title | Blocked By | Ready |
+|-------|-------|------------|-------|
+| 1 | Define types | - | Yes |
+| 2 | Implement service | 1 | No |
+| 3 | Add hook | 1 | No |
+| 4 | Verification Gate | 1, 2, 3 | No |
+
+**Ready to start**: Task 1
+**Parallel opportunities**: After task 1, tasks 2 and 3 can run simultaneously
+
+The mobius loop will create these sub-tasks in {backend}.
 ```
-</post_creation>
-</creation_phase>
+
+**Note**: The mobius loop handles:
+- Creating sub-tasks via SDK
+- Posting the dependency diagram as a comment
+- Reporting creation success/failure
+</completion_summary>
+</output_phase>
 
 <error_handling>
-<fetch_failure>
-If issue fetch fails:
-1. Verify issue ID format matches backend pattern (see `<input_validation>`)
-2. Check MCP tool availability for the detected backend
-3. Report error with suggested action:
-   - "Issue not found" - Verify issue ID exists in your tracker
+<context_load_failure>
+If context file cannot be loaded:
+1. Check `MOBIUS_CONTEXT_FILE` environment variable is set
+2. Verify the file exists at the specified path
+3. Try reading from local storage: `~/.mobius/issues/{parentId}/parent.json`
+4. Report error with suggested action:
+   - "Context file not found" - Run `mobius loop {issue-id}` to generate context
+   - "Invalid JSON" - Context file may be corrupted, re-run mobius loop
+</context_load_failure>
+
+<output_format_errors>
+If structured output is malformed:
+1. Ensure YAML is valid (proper indentation, correct syntax)
+2. Verify all required fields are present:
+   - `status`, `timestamp`, `parentId`, `backend`
+   - Each sub-task has `title`, `description`, `blockedBy`, `order`
+3. Validate `blockedBy` arrays contain valid order numbers
+4. Confirm Verification Gate is marked with `isVerificationGate: true`
+
+The mobius loop will report parsing errors - fix the output format and re-run.
+</output_format_errors>
+
+<creation_failure_handling>
+**Note**: Sub-task creation is handled by the mobius loop, not this skill.
+
+If the loop reports creation failures:
+1. Check the loop's error output for specific failures
+2. Common issues:
+   - "Issue not found" - Verify parent issue ID exists
    - "Permission denied" - Check API token permissions
-   - "MCP tool unavailable" - Verify Linear/Jira plugin is configured
-</fetch_failure>
-
-<creation_failure>
-If sub-task creation fails:
-1. Do NOT retry failed tasks automatically
-2. Report which tasks succeeded and which failed with IDs
-3. Provide manual recovery:
-   - Successfully created: List IDs for reference
-   - Failed tasks: Re-run with just the failed sub-tasks
-   - Blocking relationships: May need manual update if partial success
-</creation_failure>
-
-<link_creation_failure>
-**Jira-specific**: If issue link creation fails (Phase 2):
-
-The `createJiraIssueLinks()` function continues processing even when individual links fail, returning `{ success: number; failed: number }`.
-
-**Handling partial failures**:
-
-1. **Check the result** after calling `createJiraIssueLinks()`:
-   ```typescript
-   const result = await createJiraIssueLinks(links);
-   if (result.failed > 0) {
-     console.log(`Warning: ${result.failed} of ${links.length} links failed to create`);
-   }
-   ```
-
-2. **Report in completion summary**:
-   ```markdown
-   **Link creation**: {success} succeeded, {failed} failed
-
-   Failed links may indicate:
-   - Issue keys don't exist
-   - Permission issues (403)
-   - "Blocks" link type not available in project
-   ```
-
-3. **Manual recovery for failed links**:
-   - Links can be manually created in Jira UI: Issue → Link → "is blocked by"
-   - Or retry the specific failed links after investigating the cause
-
-4. **Common link creation errors**:
-   - `401 Unauthorized`: API token expired or invalid
-   - `403 Forbidden`: User lacks permission to create links
-   - `404 Not Found`: Issue key doesn't exist
-   - `400 Bad Request`: "Blocks" link type not configured in project
-
-**Important**: Partial link failure does NOT roll back created sub-tasks. The sub-tasks remain valid; only the blocking relationships are incomplete. The execute-issue skill can still work with sub-tasks that have missing links (they just won't be properly blocked).
-</link_creation_failure>
+   - "Link type not available" (Jira) - "Blocks" link type may need configuration
+3. Partial failures are reported by the loop - successfully created sub-tasks remain valid
+4. Re-run `/refine` after fixing issues to regenerate the specification
+</creation_failure_handling>
 </error_handling>
 
 <examples>
@@ -819,28 +872,48 @@ This task triggers the verify-issue skill to validate all implementation sub-tas
 <success_criteria>
 A successful refinement produces:
 
+- [ ] Parent issue context loaded from `MOBIUS_CONTEXT_FILE` or local files
+- [ ] Backend detected from context metadata
 - [ ] All affected files identified through deep exploration
 - [ ] Each sub-task targets exactly one file (or source + test pair)
 - [ ] Every sub-task has clear, verifiable acceptance criteria
-- [ ] Blocking relationships are logically sound
+- [ ] Blocking relationships are logically sound (using order numbers)
 - [ ] No circular dependencies exist
 - [ ] Parallel opportunities are maximized
-- [ ] Sub-tasks created as children of parent issue
 - [ ] Ready tasks (no blockers) are clearly identified
-- [ ] **Verification Gate sub-task created as final task** (title contains "Verification Gate")
+- [ ] **Verification Gate included as final task** (with `isVerificationGate: true`)
 - [ ] Verification Gate blocked by ALL implementation sub-tasks
-- [ ] User approved breakdown before creation
-- [ ] Mermaid dependency diagram posted to parent issue
+- [ ] User approved breakdown before output
+- [ ] Structured YAML output with all sub-task specifications
+- [ ] Output includes `status`, `timestamp`, `parentId`, `backend` fields
+- [ ] Each sub-task has `title`, `description`, `blockedBy`, `order` fields
+- [ ] Dependency graph included in output
 </success_criteria>
 
 <testing>
 **Manual integration testing** for verifying the refine-issue skill works end-to-end.
 
 <verification_steps>
-After running `/refine {issue-id}` and creating sub-tasks, verify the blocking relationships were created correctly.
+After running `/refine {issue-id}` and having mobius loop create sub-tasks, verify the results.
+
+<output_verification>
+**Structured output verification**:
+
+1. **Check YAML validity**: The output should be parseable YAML
+2. **Verify required fields**:
+   - `status`: Should be `BREAKDOWN_APPROVED`
+   - `timestamp`: Valid ISO-8601 timestamp
+   - `parentId`: Matches input issue ID
+   - `backend`: `linear` or `jira`
+3. **Verify sub-tasks**:
+   - Each has `title`, `description`, `blockedBy`, `order`
+   - `blockedBy` arrays contain valid order numbers
+   - Last sub-task has `isVerificationGate: true`
+4. **Verify dependency graph**: Mermaid diagram matches blocking relationships
+</output_verification>
 
 <linear_verification>
-**Linear verification steps**:
+**Linear verification steps** (after mobius loop creates sub-tasks):
 
 1. **Open parent issue** in Linear web UI
 2. **Check sub-tasks list**: All created sub-tasks should appear as children
@@ -851,16 +924,10 @@ After running `/refine {issue-id}` and creating sub-tasks, verify the blocking r
 - Sub-tasks appear nested under parent issue
 - "Blocked by" relationships visible on each sub-task
 - Dependency graph in parent comment matches actual relationships
-
-**Quick verification command**:
-```bash
-# Fetch issue and check blockedBy relations exist
-claude mcp linear__get_issue --id "{subtask-id}" --includeRelations true | grep -q "blockedBy"
-```
 </linear_verification>
 
 <jira_verification>
-**Jira verification steps**:
+**Jira verification steps** (after mobius loop creates sub-tasks):
 
 1. **Open parent issue** in Jira web UI
 2. **Check sub-tasks section**: All created sub-tasks should appear linked to parent
@@ -875,156 +942,83 @@ claude mcp linear__get_issue --id "{subtask-id}" --includeRelations true | grep 
 - Each sub-task's "Issue Links" section shows "is blocked by: PROJ-XXX"
 - Blocker issues show "blocks: PROJ-YYY" in their links section
 - Dependency graph in parent comment matches actual link relationships
-
-**Jira UI navigation**:
-```
-Issue Detail → Scroll to "Issue Links" section → Look for:
-  - "is blocked by" (this issue is blocked)
-  - "blocks" (this issue blocks others)
-```
-
-**Quick verification via API**:
-```bash
-# Fetch issue and check issuelinks field contains blocking relationships
-curl -s -u "$JIRA_EMAIL:$JIRA_API_TOKEN" \
-  "https://$JIRA_HOST/rest/api/3/issue/{subtask-key}?fields=issuelinks" \
-  | jq '.fields.issuelinks[] | select(.type.name == "Blocks")'
-```
 </jira_verification>
 </verification_steps>
 
 <troubleshooting>
 **Common errors and solutions**:
 
-<error_401>
-**401 Unauthorized**
+<context_not_found>
+**Context file not found**
 ```
-Error: Request failed with status 401
+Error: MOBIUS_CONTEXT_FILE not set or file not found
 ```
 
-**Cause**: API token is invalid, expired, or not configured.
+**Cause**: The mobius loop hasn't generated context yet.
 
 **Solution**:
-1. Verify `JIRA_API_TOKEN` environment variable is set
-2. Generate a new API token at: https://id.atlassian.com/manage-profile/security/api-tokens
-3. Ensure `JIRA_EMAIL` matches the account that created the token
-4. Check token hasn't been revoked in Atlassian account settings
-</error_401>
+1. Run `mobius loop {issue-id}` to generate context files
+2. Check that `~/.mobius/issues/{parentId}/` directory exists
+3. Verify `MOBIUS_CONTEXT_FILE` environment variable is set correctly
+</context_not_found>
 
-<error_403>
-**403 Forbidden**
+<invalid_yaml>
+**Invalid YAML output**
 ```
-Error: Request failed with status 403
+Error: Failed to parse skill output
 ```
 
-**Cause**: User lacks permission to create issue links.
+**Cause**: The structured output has YAML syntax errors.
 
 **Solution**:
-1. Verify user has "Link Issues" permission in the Jira project
-2. Check project permission scheme: Project Settings → Permissions → "Link Issues"
-3. Contact Jira admin to grant the permission if missing
-4. Ensure the API token's user has the same permissions as the web UI user
-</error_403>
+1. Check for proper indentation (YAML is sensitive to spaces)
+2. Ensure all strings with special characters are quoted
+3. Verify all arrays use consistent formatting
+4. Use a YAML validator to check syntax
+</invalid_yaml>
 
-<error_404>
-**404 Not Found**
+<missing_fields>
+**Missing required fields**
 ```
-Error: Issue PROJ-XXX not found
+Error: Output missing required field: blockedBy
 ```
 
-**Cause**: Issue key doesn't exist or user can't access it.
+**Cause**: Sub-task specification is incomplete.
 
 **Solution**:
-1. Verify the issue key is correct (check for typos)
-2. Ensure the issue hasn't been deleted
-3. Verify user has "Browse Projects" permission for the project
-4. Check if the issue is in a restricted security level
-</error_404>
-
-<error_link_type>
-**Link type "Blocks" not found**
-```
-Error: Issue link type 'Blocks' not found
-```
-
-**Cause**: The "Blocks" link type isn't configured in the Jira instance.
-
-**Solution**:
-1. Check available link types: Jira Settings → Issues → Issue Linking
-2. The "Blocks" type should have:
-   - Outward: "blocks"
-   - Inward: "is blocked by"
-3. If missing, ask Jira admin to create it:
-   - Name: "Blocks"
-   - Outward Description: "blocks"
-   - Inward Description: "is blocked by"
-4. Alternative: Use a different link type name by modifying `createJiraIssueLink()` in `src/lib/jira.ts`
-</error_link_type>
-
-<partial_link_failure>
-**Partial link creation failure**
-```
-Warning: 2 of 5 links failed to create
-```
-
-**Cause**: Some issue links couldn't be created while others succeeded.
-
-**Diagnosis**:
-1. Check the console output for specific error codes (401, 403, 404)
-2. Verify all referenced issue keys exist
-3. Check if any issues are in different projects with different permissions
-
-**Recovery**:
-1. Note which links failed from the output
-2. Create missing links manually in Jira UI:
-   - Open the blocked issue
-   - Click "Link" button
-   - Select "is blocked by"
-   - Enter the blocker issue key
-3. Or re-run just the failed links programmatically
-</partial_link_failure>
+1. Ensure each sub-task has all required fields:
+   - `title`, `description`, `targetFile`, `changeType`
+   - `blockedBy` (array of order numbers, can be empty `[]`)
+   - `order` (sequential integer)
+2. Ensure Verification Gate has `isVerificationGate: true`
+</missing_fields>
 </troubleshooting>
-
-<acceptance_criteria_reference>
-**From MOB-132 (parent issue)**:
-
-The refine-issue skill correctly implements Jira link creation when these criteria are met:
-
-- [ ] When `/refine-issue` creates sub-tasks for Jira, blocking relationships are created as proper Jira issue links (not just description text)
-  * **Verification**: After refining an issue, check Jira UI shows "is blocked by" links on sub-tasks
-
-- [ ] `extractBlockedByRelations()` correctly parses blockers from `issuelinks` field
-  * **Verification**: `bun test -- --grep 'extractBlockedByRelations'` passes with Jira link data
-
-- [ ] Task executor correctly marks tasks as blocked when Jira links exist
-  * **Verification**: Run `mobius loop` on a Jira issue with linked sub-tasks; blocked tasks show "blocked" status
-
-- [ ] Tasks execute in correct dependency order during parallel execution
-  * **Verification**: `mobius loop` does not start blocked tasks before their blockers complete
-</acceptance_criteria_reference>
 
 <end_to_end_test>
 **Complete end-to-end verification checklist**:
 
 1. **Setup**:
-   - [ ] Jira credentials configured (`JIRA_HOST`, `JIRA_EMAIL`, `JIRA_API_TOKEN`)
-   - [ ] Backend set to `jira` in `mobius.config.yaml`
-   - [ ] Test project has "Blocks" link type available
+   - [ ] Mobius configured with Linear or Jira backend
+   - [ ] Context generated for test parent issue
+   - [ ] `MOBIUS_CONTEXT_FILE` environment variable set
 
 2. **Run refine**:
    - [ ] Execute `/refine {test-issue-id}` on a test issue
+   - [ ] Review the breakdown presentation
    - [ ] Approve the breakdown when prompted
-   - [ ] Note the created sub-task IDs
+   - [ ] Verify structured YAML output is valid
 
-3. **Verify in Jira UI**:
-   - [ ] All sub-tasks appear under parent issue
-   - [ ] Each sub-task shows correct "is blocked by" links
-   - [ ] Blocker issues show corresponding "blocks" links
-   - [ ] Mermaid diagram in parent comment matches actual links
+3. **Verify output structure**:
+   - [ ] `status: BREAKDOWN_APPROVED` in output
+   - [ ] All sub-tasks have required fields
+   - [ ] Verification Gate is last task with `isVerificationGate: true`
+   - [ ] `blockedBy` arrays contain valid order references
+   - [ ] Dependency graph mermaid matches blocking relationships
 
-4. **Verify via API**:
-   - [ ] `extractBlockedByRelations()` returns correct blocker IDs
-   - [ ] Task graph builds correctly with proper blocking order
+4. **Verify mobius loop creation** (after loop processes output):
+   - [ ] All sub-tasks created in issue tracker
+   - [ ] Blocking relationships established correctly
+   - [ ] Dependency diagram comment posted to parent
 
 5. **Verify execution**:
    - [ ] `mobius loop {parent-id}` respects dependency order

@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { PathConfig } from '../types.js';
 

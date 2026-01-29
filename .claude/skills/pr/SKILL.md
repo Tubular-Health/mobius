@@ -32,6 +32,96 @@ If pre-flight checks fail (no commits, branch not pushed, PR exists), report the
 and exit gracefully - do not prompt for user action.
 </autonomous_mode>
 
+<structured_output>
+**This skill outputs structured data for the mobius loop to parse.**
+
+At the END of your response, output a YAML block with the PR creation result. The mobius loop parses this to execute issue linking via SDK.
+
+**Output format** (YAML):
+
+```yaml
+---
+status: PR_CREATED  # or PR_EXISTS, PR_FAILED, NO_CHANGES
+timestamp: "2026-01-28T12:00:00Z"  # ISO-8601 timestamp
+
+# For PR_CREATED:
+prUrl: "https://github.com/owner/repo/pull/123"
+prNumber: 123
+prTitle: "feat(scope): description"
+prBase: "main"
+prHead: "feature-branch"
+isDraft: false
+
+# Issue linking data (for mobius loop to process):
+linkedIssues:
+  - identifier: "MOB-72"
+    validated: true  # true if validated from local context
+    title: "Issue title if known"
+backend: linear  # or jira
+
+# For PR_EXISTS:
+existingPrUrl: "https://github.com/owner/repo/pull/100"
+existingPrNumber: 100
+
+# For PR_FAILED:
+errorType: "no_commits"  # no_commits | not_pushed | auth_failed | gh_error
+errorMessage: "No commits between main and current branch"
+
+# For NO_CHANGES:
+# (no additional fields needed)
+---
+```
+
+**Valid status values**:
+| Status | When to use |
+|--------|-------------|
+| `PR_CREATED` | PR successfully created with `gh pr create` |
+| `PR_EXISTS` | PR already exists for this branch |
+| `PR_FAILED` | PR creation failed (auth, no commits, etc.) |
+| `NO_CHANGES` | No changes detected between branches |
+
+**Critical requirements**:
+1. Output MUST be valid YAML
+2. Output MUST appear at the END of your response
+3. Output MUST include `status` and `timestamp` fields
+4. Include `linkedIssues` array for all detected issue IDs (even unvalidated ones)
+
+**Example complete output for successful PR**:
+
+```yaml
+---
+status: PR_CREATED
+timestamp: "2026-01-28T16:45:00Z"
+prUrl: "https://github.com/verz/mobius/pull/456"
+prNumber: 456
+prTitle: "feat(skills): add PR creation skill"
+prBase: "main"
+prHead: "drverzal/mob-72-add-pr-skill"
+isDraft: false
+linkedIssues:
+  - identifier: "MOB-72"
+    validated: true
+    title: "Add PR skill for structured pull request creation"
+backend: linear
+---
+```
+
+**Example output when PR already exists**:
+
+```yaml
+---
+status: PR_EXISTS
+timestamp: "2026-01-28T16:45:00Z"
+existingPrUrl: "https://github.com/verz/mobius/pull/400"
+existingPrNumber: 400
+linkedIssues:
+  - identifier: "MOB-72"
+    validated: false
+backend: linear
+---
+```
+</structured_output>
+
 <quick_start>
 <invocation>
 ```
@@ -45,13 +135,13 @@ and exit gracefully - do not prompt for user action.
 1. **Pre-flight checks** - Verify commits exist, branch pushed, no existing PR
 2. **Detect current state** - Get branch name, base branch, changed files
 3. **Parse issue references** - Extract from branch name and commit messages
-4. **Validate issues** - If issues detected, validate they exist via backend MCP tools
+4. **Validate issues** - If local context available, validate issues from context file
 5. **Gather changes** - Get file list and diff statistics
 6. **Infer PR type** - Autonomously determine feat/fix/refactor from changes
 7. **Generate PR content** - Title, summary, changes, test plan, agent context
 8. **Execute creation** - Run `gh pr create` with formatted body (no confirmation)
-9. **Link to issues** - Add PR link and comment to detected issues
-10. **Report result** - Show PR URL, issue links, and next steps
+9. **Output structured data** - Include issue linking data for mobius loop
+10. **Report result** - Show PR URL, detected issues, and next steps
 </workflow>
 </quick_start>
 
@@ -66,12 +156,12 @@ backend: linear  # or 'jira'
 
 **Default**: If no backend is specified, default to `linear`.
 
-The detected backend determines which MCP tools to use for issue linking. See `<backend_context>` for available tools per backend.
+The detected backend determines the issue ID format and linking output. See `<backend_context>` for details per backend.
 
 **When backend detection is needed**:
 - Issue references are detected from branch name or commits
 - User wants to link PR back to issue tracker
-- Validating issue existence before creating PR
+- Generating structured output for issue linking
 
 **When backend detection can be skipped**:
 - No issue references found
@@ -80,49 +170,45 @@ The detected backend determines which MCP tools to use for issue linking. See `<
 
 <backend_context>
 <linear>
-**MCP Tools for Linear Issue Linking**:
+**Linear Issue Context**:
 
-- **Validate issue exists**: `mcp__plugin_linear_linear__get_issue`
-  - Parameters: `id` (issue identifier, e.g., "MOB-123")
-  - Returns: Issue details including title, description, status
-  - Use before PR creation to validate issue reference is valid
-
-- **Add PR link to issue**: `mcp__plugin_linear_linear__update_issue`
-  - Parameters: `id` (issue identifier), `links` (array of link objects)
-  - Link object format: `{ "url": "https://github.com/...", "title": "PR: Title here" }`
-  - Attaches PR URL as an external link on the Linear issue
-
-- **Add comment to issue**: `mcp__plugin_linear_linear__create_comment`
-  - Parameters: `issueId`, `body` (markdown content)
-  - Use to document that a PR was created for this issue
-  - Example body: `"🔗 **PR Created**: [#123 - feat(auth): add OAuth login](https://github.com/...)"`
-
-**Linear issue ID formats**:
+**Issue ID formats**:
 - `MOB-123`, `PROJ-456`, `ABC-789` (uppercase prefix + number)
 - Regex: `/^[A-Z]{2,10}-\d+$/`
+
+**Validation via local context** (optional):
+If the `MOBIUS_CONTEXT_FILE` environment variable is set or local context exists at `~/.mobius/issues/{parentId}/`, read issue details from local files instead of making API calls.
+
+```bash
+# Check if context file exists
+if [ -n "$MOBIUS_CONTEXT_FILE" ] && [ -f "$MOBIUS_CONTEXT_FILE" ]; then
+  # Read issue details from local context
+  cat "$MOBIUS_CONTEXT_FILE" | jq '.parent'
+fi
+```
+
+**Linking output**: PR-issue linking is handled via structured output (see `<structured_output>` section).
 </linear>
 
 <jira>
-**MCP Tools for Jira Issue Linking**:
+**Jira Issue Context**:
 
-- **Validate issue exists**: `mcp_plugin_atlassian_jira__get_issue`
-  - Parameters: `issueIdOrKey` (e.g., "PROJ-123")
-  - Returns: Issue details including summary, description, status
-  - Use before PR creation to validate issue reference is valid
-
-- **Add PR link to issue**: `mcp_plugin_atlassian_jira__add_link`
-  - Parameters: `issueIdOrKey`, `url`, `title`
-  - Adds the PR as a remote link (web link) on the Jira issue
-  - Title format: `"PR #123: feat(auth): add OAuth login"`
-
-- **Add comment to issue**: `mcp_plugin_atlassian_jira__add_comment`
-  - Parameters: `issueIdOrKey`, `body` (Jira wiki markup or markdown)
-  - Use to document that a PR was created for this issue
-  - Example body: `"🔗 *PR Created*: [#123 - feat(auth): add OAuth login|https://github.com/...]"`
-
-**Jira issue ID formats**:
+**Issue ID formats**:
 - `PROJ-123`, `JIRA-456`, `KEY-789` (uppercase prefix + number)
 - Regex: `/^[A-Z]{2,10}-\d+$/`
+
+**Validation via local context** (optional):
+If the `MOBIUS_CONTEXT_FILE` environment variable is set or local context exists at `~/.mobius/issues/{parentId}/`, read issue details from local files instead of making API calls.
+
+```bash
+# Check if context file exists
+if [ -n "$MOBIUS_CONTEXT_FILE" ] && [ -f "$MOBIUS_CONTEXT_FILE" ]; then
+  # Read issue details from local context
+  cat "$MOBIUS_CONTEXT_FILE" | jq '.parent'
+fi
+```
+
+**Linking output**: PR-issue linking is handled via structured output (see `<structured_output>` section).
 </jira>
 </backend_context>
 
@@ -136,104 +222,65 @@ Link PR back to issue tracker when:
 **Do NOT attempt to link when**:
 - No issue references detected
 - Issue validation fails (invalid ID)
-- Backend MCP tools are not available
 </when_to_link>
 
 <validation_step>
 **Before creating PR**, validate that detected issue IDs exist:
 
-```
-For each detected issue ID:
-1. Call backend-appropriate get_issue tool
-2. If successful: Confirm issue exists, capture title for context
-3. If failed: Warn user but continue with PR creation
+**Option 1: Local context validation (preferred)**
+
+If `MOBIUS_CONTEXT_FILE` is set or local context exists:
+
+```bash
+# Read from local context
+if [ -n "$MOBIUS_CONTEXT_FILE" ] && [ -f "$MOBIUS_CONTEXT_FILE" ]; then
+  ISSUE_TITLE=$(cat "$MOBIUS_CONTEXT_FILE" | jq -r '.parent.title')
+  ISSUE_ID=$(cat "$MOBIUS_CONTEXT_FILE" | jq -r '.parent.identifier')
+  echo "Validated: $ISSUE_ID - $ISSUE_TITLE"
+fi
 ```
 
-**Linear validation**:
-```
-mcp__plugin_linear_linear__get_issue(id: "MOB-123")
-```
+**Option 2: No validation available**
 
-**Jira validation**:
-```
-mcp_plugin_atlassian_jira__get_issue(issueIdOrKey: "PROJ-123")
-```
+If no local context exists:
+- Warn user: "Could not validate issue MOB-123 - no local context available"
+- Continue with PR creation (do NOT block)
+- Include issue reference in PR body anyway (GitHub/Linear may auto-link)
 
-If validation fails:
-- Issue may not exist or may be private
-- Warn user: "Could not validate issue MOB-123 - continuing without issue link"
-- Do NOT block PR creation for validation failures
+**Important**: This skill does NOT call MCP tools directly. Issue linking is deferred to structured output for the mobius loop to handle.
 </validation_step>
 
 <linking_workflow>
-**After successful PR creation**, link back to issue tracker:
+**After successful PR creation**, output structured data for issue linking.
 
-**Step 1: Add PR as link attachment**
+The mobius loop will parse the structured output and execute the linking via SDK. This skill does NOT directly call issue tracker APIs.
 
-For **Linear**:
-```
-mcp__plugin_linear_linear__update_issue(
-  id: "MOB-123",
-  links: [{
-    url: "https://github.com/owner/repo/pull/456",
-    title: "PR #456: feat(scope): description"
-  }]
-)
-```
-
-For **Jira**:
-```
-mcp_plugin_atlassian_jira__add_link(
-  issueIdOrKey: "PROJ-123",
-  url: "https://github.com/owner/repo/pull/456",
-  title: "PR #456: feat(scope): description"
-)
-```
-
-**Step 2: Add comment documenting PR creation**
-
-For **Linear**:
-```
-mcp__plugin_linear_linear__create_comment(
-  issueId: "MOB-123",
-  body: "🔗 **Pull Request Created**\n\n[#456 - feat(scope): description](https://github.com/owner/repo/pull/456)\n\nReady for review."
-)
-```
-
-For **Jira**:
-```
-mcp_plugin_atlassian_jira__add_comment(
-  issueIdOrKey: "PROJ-123",
-  body: "🔗 *Pull Request Created*\n\n[#456 - feat(scope): description|https://github.com/owner/repo/pull/456]\n\nReady for review."
-)
-```
+**See `<structured_output>` section** for the output format that enables linking.
 </linking_workflow>
 
 <linking_errors>
-**Handle linking failures gracefully**:
+**Handle linking via structured output**:
 
-If linking fails after PR is created:
-- PR creation was successful - do NOT attempt to delete/undo
-- Report the error to user
-- Provide manual linking instructions
+Since this skill outputs structured data for the mobius loop to process, linking errors are handled by the loop, not this skill.
 
-**Example error output**:
+If no local context is available for validation:
+- Warn in output: "Issue validation skipped (no local context)"
+- Include detected issue IDs in structured output anyway
+- The loop will attempt linking and report any errors
+
+**Example warning output**:
 ```markdown
 ## PR Created Successfully
 URL: https://github.com/owner/repo/pull/456
 
-⚠️ **Issue Linking Failed**
-Could not link PR to MOB-123: [error message]
+ℹ️ **Issue Linking Deferred**
+Detected issues: MOB-123
+Linking will be handled by the mobius loop via structured output.
 
-**Manual linking**:
+If running standalone, manually link:
 1. Open https://linear.app/team/issue/MOB-123
 2. Add link: https://github.com/owner/repo/pull/456
 ```
-
-**Common linking errors**:
-- Issue not found (deleted or wrong ID)
-- Permission denied (private issue)
-- MCP tool unavailable (backend not configured)
 </linking_errors>
 </issue_linking>
 
@@ -514,27 +561,38 @@ Build reference string:
 </step_2_detect_issues>
 
 <step_2b_validate_issues>
-If issue references were detected, validate they exist before proceeding.
+If issue references were detected, attempt to validate them before proceeding.
 
-**For each detected issue ID**:
+**Validation via local context (preferred)**:
 
-1. Read backend from `mobius.config.yaml` or `~/.config/mobius/config.yaml`
-2. Call appropriate validation tool:
-   - **Linear**: `mcp__plugin_linear_linear__get_issue(id: "MOB-123")`
-   - **Jira**: `mcp_plugin_atlassian_jira__get_issue(issueIdOrKey: "PROJ-123")`
-3. On success: Store issue title for enhanced PR context
-4. On failure: Warn but continue - don't block PR creation
+1. Check if `MOBIUS_CONTEXT_FILE` environment variable is set
+2. If set, read issue details from local context file
+3. Extract issue title and status for enhanced PR context
+
+```bash
+# Check for local context
+if [ -n "$MOBIUS_CONTEXT_FILE" ] && [ -f "$MOBIUS_CONTEXT_FILE" ]; then
+  ISSUE_ID=$(cat "$MOBIUS_CONTEXT_FILE" | jq -r '.parent.identifier')
+  ISSUE_TITLE=$(cat "$MOBIUS_CONTEXT_FILE" | jq -r '.parent.title')
+  echo "Validated from context: $ISSUE_ID - $ISSUE_TITLE"
+fi
+```
+
+**If no local context available**:
+- Warn: "Could not validate issue MOB-123 - no local context"
+- Continue with PR creation (do NOT block)
+- Include issue ID in `Refs:` section anyway
 
 **Example validation output**:
 ```markdown
 Detected issues:
-- MOB-72: "Add PR skill for structured pull request creation" ✓
-- MOB-123: Could not validate (issue may not exist) ⚠️
+- MOB-72: "Add PR skill for structured pull request creation" ✓ (from context)
+- MOB-123: Could not validate (no local context) ⚠️
 ```
 
 **Store validated issues** for use in:
-- PR body `Refs:` section (confirmed references)
-- Post-creation linking (only link confirmed issues)
+- PR body `Refs:` section (all detected references)
+- Structured output for post-creation linking
 </step_2b_validate_issues>
 
 <step_3_infer_type_scope>
@@ -612,57 +670,44 @@ gh pr create --draft ...
 ```
 </step_6_create_pr>
 
-<step_6b_link_to_issues>
-After successful PR creation, link the PR back to validated issues.
+<step_6b_output_linking_data>
+After successful PR creation, output structured data for issue linking.
 
-**For each validated issue from step 2b**:
+**This skill does NOT directly call issue tracker APIs.** Instead, it outputs structured data that the mobius loop parses and executes via SDK.
 
-1. **Add PR as link attachment** (connects PR to issue in tracker):
+**See `<structured_output>` section** for the complete output format.
 
-   For **Linear**:
-   ```
-   mcp__plugin_linear_linear__update_issue(
-     id: "MOB-72",
-     links: [{
-       url: "https://github.com/owner/repo/pull/123",
-       title: "PR #123: feat(skills): add PR creation skill"
-     }]
-   )
-   ```
+The structured output includes:
+- `prUrl`: The URL of the created PR
+- `prNumber`: The PR number
+- `prTitle`: The PR title (conventional commit format)
+- `linkedIssues`: Array of issue IDs to link
+- `backend`: The detected backend (linear/jira)
 
-   For **Jira**:
-   ```
-   mcp_plugin_atlassian_jira__add_link(
-     issueIdOrKey: "PROJ-123",
-     url: "https://github.com/owner/repo/pull/123",
-     title: "PR #123: feat(skills): add PR creation skill"
-   )
-   ```
+**Example output** (included at end of response):
+```yaml
+---
+status: PR_CREATED
+timestamp: "2026-01-28T12:00:00Z"
+prUrl: "https://github.com/owner/repo/pull/123"
+prNumber: 123
+prTitle: "feat(skills): add PR creation skill"
+linkedIssues:
+  - "MOB-72"
+backend: linear
+---
+```
 
-2. **Add comment to issue** (documents PR creation):
+The mobius loop will:
+1. Parse this structured output
+2. Add PR as link attachment to each issue via SDK
+3. Add comment documenting PR creation via SDK
+4. Report success/failure back to user
 
-   For **Linear**:
-   ```
-   mcp__plugin_linear_linear__create_comment(
-     issueId: "MOB-72",
-     body: "🔗 **Pull Request Created**\n\n[#123 - feat(skills): add PR creation skill](https://github.com/owner/repo/pull/123)"
-   )
-   ```
-
-   For **Jira**:
-   ```
-   mcp_plugin_atlassian_jira__add_comment(
-     issueIdOrKey: "PROJ-123",
-     body: "🔗 *Pull Request Created*\n\n[#123 - feat(skills): add PR creation skill|https://github.com/owner/repo/pull/123]"
-   )
-   ```
-
-**Error handling**:
-- If linking fails, PR was still created successfully
-- Report the linking error to user
-- Provide manual linking instructions
-- Do NOT attempt to delete or rollback the PR
-</step_6b_link_to_issues>
+**If running standalone** (not via mobius loop):
+- Linking will not occur automatically
+- Provide manual linking instructions in the report
+</step_6b_output_linking_data>
 
 <step_7_report>
 After successful creation:
@@ -972,8 +1017,8 @@ A successful autonomous PR creation achieves:
 **Issue detection**:
 - [ ] Issue references detected from branch/commits (case-insensitive)
 - [ ] Lowercase issue IDs normalized to uppercase
-- [ ] Multiple issues handled correctly (deduplicated, all validated)
-- [ ] Detected issues validated via backend MCP tools (if available)
+- [ ] Multiple issues handled correctly (deduplicated)
+- [ ] Issues validated from local context file (if MOBIUS_CONTEXT_FILE set)
 - [ ] Graceful handling when no issues detected (PR created without linking)
 
 **PR content** (all generated autonomously):
@@ -989,7 +1034,7 @@ A successful autonomous PR creation achieves:
 **Execution** (fully autonomous):
 - [ ] NO user confirmation requested
 - [ ] PR created directly with `gh pr create`
-- [ ] PR linked to validated issues via backend MCP tools
-- [ ] Comment added to linked issues documenting PR creation
-- [ ] PR URL and issue link status reported to user
+- [ ] Structured output includes issue linking data
+- [ ] PR URL and detected issues reported to user
+- [ ] YAML status block output at end of response
 </success_criteria>

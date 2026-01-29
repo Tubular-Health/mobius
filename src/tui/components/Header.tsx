@@ -36,13 +36,15 @@ export const Header = memo(function Header({ parentId, elapsedMs }: HeaderProps)
   return (
     <Box flexDirection="column" alignItems="center" marginBottom={1}>
       {LOGO_LINES.map((line, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: static logo lines never reorder
         <Text key={index} color={FROST.nord8}>
           {line}
         </Text>
       ))}
       {parentId && (
         <Text color={FROST.nord9} dimColor>
-          Task Tree for {parentId}{runtimeDisplay}
+          Task Tree for {parentId}
+          {runtimeDisplay}
         </Text>
       )}
     </Box>

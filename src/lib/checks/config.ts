@@ -1,7 +1,6 @@
 import { existsSync } from 'node:fs';
-import type { CheckResult, LoopConfig } from '../../types.js';
+import type { CheckResult, LoopConfig, PathConfig } from '../../types.js';
 import { readConfig, validateConfig } from '../config.js';
-import type { PathConfig } from '../../types.js';
 
 export async function checkConfig(paths: PathConfig): Promise<CheckResult> {
   const name = 'Configuration';

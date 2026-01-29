@@ -2,7 +2,7 @@
  * Unit tests for mobius-tui module
  */
 
-import { describe, it, expect } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import { validateTaskId } from './mobius-tui.js';
 
 describe('validateTaskId', () => {

@@ -10,20 +10,17 @@
  * Does NOT test actual git push operations.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, rmSync, existsSync, mkdirSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execa } from 'execa';
-import { getWorktreePath } from './worktree.js';
-import { acquireLock, releaseLock, isLocked, withLock } from './git-lock.js';
 import type { ExecutionConfig } from '../types.js';
+import { acquireLock, isLocked, releaseLock, withLock } from './git-lock.js';
+import { getWorktreePath } from './worktree.js';
 
 // Helper to create a working git repo with a branch
-async function createWorkingGitRepo(
-  path: string,
-  branchName: string = 'main'
-): Promise<void> {
+async function createWorkingGitRepo(path: string, branchName: string = 'main'): Promise<void> {
   mkdirSync(path, { recursive: true });
   await execa('git', ['init'], { cwd: path });
   await execa('git', ['config', 'user.email', 'test@example.com'], { cwd: path });
@@ -47,10 +44,7 @@ async function createWorktreeFromRepo(
 }
 
 // Helper to remove a worktree
-async function removeWorktreeFromRepo(
-  mainRepoPath: string,
-  worktreePath: string
-): Promise<void> {
+async function removeWorktreeFromRepo(mainRepoPath: string, worktreePath: string): Promise<void> {
   try {
     await execa('git', ['worktree', 'remove', worktreePath, '--force'], {
       cwd: mainRepoPath,
@@ -134,7 +128,7 @@ describe('worktree-isolation e2e', () => {
       };
 
       const taskIds = ['MOB-123', 'JIRA-456', 'ABC-1', 'TEST-9999'];
-      const paths = await Promise.all(taskIds.map(id => getWorktreePath(id, config)));
+      const paths = await Promise.all(taskIds.map((id) => getWorktreePath(id, config)));
 
       // All paths should be unique
       const uniquePaths = new Set(paths);
@@ -180,7 +174,7 @@ describe('worktree-isolation e2e', () => {
 
     it('parallel worktree creation succeeds without interference', async () => {
       const tasks = ['TASK-1', 'TASK-2', 'TASK-3'];
-      const worktrees = tasks.map(id => ({
+      const worktrees = tasks.map((id) => ({
         id,
         path: join(worktreeBasePath, id),
         branch: `feature/${id}`,
@@ -188,7 +182,7 @@ describe('worktree-isolation e2e', () => {
 
       // Create all worktrees in parallel
       await Promise.all(
-        worktrees.map(wt => createWorktreeFromRepo(mainRepoPath, wt.path, wt.branch))
+        worktrees.map((wt) => createWorktreeFromRepo(mainRepoPath, wt.path, wt.branch))
       );
 
       // Verify all worktrees were created successfully
@@ -268,7 +262,7 @@ describe('worktree-isolation e2e', () => {
       }
 
       // All agents try to acquire locks simultaneously
-      const lockPromises = worktreePaths.map(async path => {
+      const lockPromises = worktreePaths.map(async (path) => {
         const start = Date.now();
         const handle = await acquireLock(path, 2000);
         const elapsed = Date.now() - start;
@@ -324,14 +318,14 @@ describe('worktree-isolation e2e', () => {
       // Both operations should run concurrently, not serialized
       const operationA = withLock(worktreeA, async () => {
         executionOrder.push('A-start');
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
         executionOrder.push('A-end');
         return 'A';
       });
 
       const operationB = withLock(worktreeB, async () => {
         executionOrder.push('B-start');
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise((resolve) => setTimeout(resolve, 100));
         executionOrder.push('B-end');
         return 'B';
       });
@@ -394,7 +388,7 @@ describe('worktree-isolation e2e', () => {
       }
 
       // Remove all worktrees in parallel
-      await Promise.all(worktreePaths.map(path => removeWorktreeFromRepo(mainRepoPath, path)));
+      await Promise.all(worktreePaths.map((path) => removeWorktreeFromRepo(mainRepoPath, path)));
 
       // All should be removed
       for (const path of worktreePaths) {
@@ -507,8 +501,8 @@ describe('worktree-isolation e2e', () => {
 
       // Phase 2: Simulate parallel work with locks
       const results = await Promise.all(
-        tasks.map(async task => {
-          const path = worktrees.get(task)!;
+        tasks.map(async (task) => {
+          const path = worktrees.get(task) ?? '';
 
           // Acquire lock for git operations
           return await withLock(path, async () => {
@@ -533,7 +527,7 @@ describe('worktree-isolation e2e', () => {
       expect(results.length).toBe(3);
 
       // All commit hashes should be unique
-      const hashes = results.map(r => r.commitHash);
+      const hashes = results.map((r) => r.commitHash);
       expect(new Set(hashes).size).toBe(3);
 
       // Verify each worktree has only its own changes
@@ -544,7 +538,7 @@ describe('worktree-isolation e2e', () => {
         expect(log).toContain(`feat: implement ${result.task}`);
 
         // Should not contain other loop's commits
-        const otherTasks = tasks.filter(t => t !== result.task);
+        const otherTasks = tasks.filter((t) => t !== result.task);
         for (const other of otherTasks) {
           expect(log).not.toContain(`feat: implement ${other}`);
         }

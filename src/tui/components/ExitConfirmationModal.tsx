@@ -7,9 +7,9 @@
 
 import { Box, Text, useInput } from 'ink';
 import { memo } from 'react';
-import type { ExecutionSummary } from '../../lib/execution-state.js';
-import { formatDuration } from '../utils/formatDuration.js';
+import type { ExecutionSummary } from '../../lib/context-generator.js';
 import { AURORA, STRUCTURE_COLORS } from '../theme.js';
+import { formatDuration } from '../utils/formatDuration.js';
 
 export interface ExitConfirmationModalProps {
   /** The tmux session name (e.g., "mobius-MOB-123") */
@@ -79,9 +79,7 @@ function ExitConfirmationModalImpl({
 
       {/* Warning message */}
       <Box flexDirection="column" marginBottom={1}>
-        <Text color={STRUCTURE_COLORS.text}>
-          This will kill tmux session [{sessionName}]
-        </Text>
+        <Text color={STRUCTURE_COLORS.text}>This will kill tmux session [{sessionName}]</Text>
         <Text color={STRUCTURE_COLORS.text}>
           and stop {activeAgentCount} running {agentText}.
         </Text>
@@ -91,23 +89,23 @@ function ExitConfirmationModalImpl({
       <Box flexDirection="column" marginBottom={1}>
         <Text color={STRUCTURE_COLORS.muted}>
           Progress: {summary.completed}/{summary.total} completed
-          {summary.failed > 0 && (
-            <Text color={AURORA.red}>, {summary.failed} failed</Text>
-          )}
+          {summary.failed > 0 && <Text color={AURORA.red}>, {summary.failed} failed</Text>}
         </Text>
-        <Text color={STRUCTURE_COLORS.muted}>
-          Runtime: {formatDuration(summary.elapsedMs)}
-        </Text>
+        <Text color={STRUCTURE_COLORS.muted}>Runtime: {formatDuration(summary.elapsedMs)}</Text>
       </Box>
 
       {/* Action buttons */}
       <Box justifyContent="center" gap={2}>
         <Text>
-          <Text color={AURORA.green} bold>[Y]</Text>
+          <Text color={AURORA.green} bold>
+            [Y]
+          </Text>
           <Text color={STRUCTURE_COLORS.text}>es</Text>
         </Text>
         <Text>
-          <Text color={AURORA.red} bold>[N]</Text>
+          <Text color={AURORA.red} bold>
+            [N]
+          </Text>
           <Text color={STRUCTURE_COLORS.text}>o</Text>
         </Text>
       </Box>

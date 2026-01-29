@@ -5,8 +5,8 @@
  * share a worktree. Uses mkdir-based atomic locking with stale lock detection.
  */
 
-import { mkdir, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export interface LockHandle {
@@ -222,7 +222,7 @@ export async function acquireLock(
     }
 
     // Wait before retrying
-    await new Promise(resolve => setTimeout(resolve, RETRY_INTERVAL_MS));
+    await new Promise((resolve) => setTimeout(resolve, RETRY_INTERVAL_MS));
   }
 }
 
