@@ -21,6 +21,7 @@ import {
   getSyncLogPath,
   readPendingUpdates,
   writePendingUpdates,
+  updateBackendStatus,
 } from '../lib/context-generator.js';
 import type {
   PendingUpdate,
@@ -166,6 +167,58 @@ export async function push(parentId: string | undefined, options: PushOptions): 
     console.log(chalk.gray('Fix the issues and run push again'));
     process.exit(1);
   }
+}
+
+/**
+ * Push pending updates for a specific task (programmatic API for loop.ts)
+ *
+ * Unlike the CLI `push` command, this function:
+ * - Doesn't exit the process on errors
+ * - Returns results for the caller to handle
+ * - Is designed for auto-push after queueing updates
+ *
+ * @param parentId - The parent issue identifier
+ * @param backend - The backend to push to (linear or jira)
+ * @returns Push results with success/failure counts
+ */
+export async function pushPendingUpdatesForTask(
+  parentId: string,
+  backend: Backend
+): Promise<{ success: number; failed: number; errors: string[] }> {
+  const queue = readPendingUpdates(parentId);
+  const pending = queue.updates.filter((u) => !u.syncedAt && !u.error);
+
+  if (pending.length === 0) {
+    return { success: 0, failed: 0, errors: [] };
+  }
+
+  let success = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const update of pending) {
+    const result = await pushUpdate(update, backend);
+
+    if (result.success) {
+      success++;
+      markUpdateSynced(parentId, update.id);
+
+      // Update backend status in runtime state for TUI to display
+      // This enables real-time status updates without re-fetching the graph
+      if (update.type === 'status_change') {
+        updateBackendStatus(parentId, update.identifier, update.newStatus);
+      }
+    } else {
+      failed++;
+      const errorMsg = result.error || 'Unknown error';
+      errors.push(`${result.issueIdentifier}: ${errorMsg}`);
+      markUpdateFailed(parentId, update.id, errorMsg);
+    }
+
+    logPushResult(parentId, result);
+  }
+
+  return { success, failed, errors };
 }
 
 /**

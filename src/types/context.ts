@@ -89,6 +89,15 @@ export interface RuntimeCompletedTask {
  * This replaces the old ~/.mobius/state/{parentId}.json file.
  * Runtime state is ephemeral and tied to a specific parent issue context.
  */
+/**
+ * Backend status entry for tracking synced status
+ */
+export interface BackendStatusEntry {
+  identifier: string;      // Task identifier (e.g., "MOB-124")
+  status: string;          // Backend status (e.g., "Done", "In Progress")
+  syncedAt: string;        // ISO timestamp of last successful sync
+}
+
 export interface RuntimeState {
   parentId: string;        // Parent issue identifier (e.g., "MOB-11")
   parentTitle: string;     // Parent issue title for display
@@ -102,6 +111,13 @@ export interface RuntimeState {
 
   loopPid?: number;        // PID of the loop process (for cleanup)
   totalTasks?: number;     // Total number of tasks (for completion detection)
+
+  /**
+   * Backend status map - updated when push succeeds
+   * Key is task identifier (e.g., "MOB-124"), value is status entry
+   * TUI watches this to show real-time backend status without re-fetching
+   */
+  backendStatuses?: Record<string, BackendStatusEntry>;
 }
 
 /**

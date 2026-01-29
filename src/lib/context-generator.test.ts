@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import type {
@@ -24,6 +24,10 @@ import {
   getPendingUpdatesPath,
   getSyncLogPath,
   getFullContextPath,
+  getExecutionPath,
+  getSessionPath,
+  getRuntimePath,
+  getCurrentSessionPointerPath,
   writeFullContextFile,
   readContext,
   contextExists,
@@ -33,8 +37,39 @@ import {
   readPendingUpdates,
   writePendingUpdates,
   queuePendingUpdate,
+  // Session management
+  createSession,
+  readSession,
+  writeSession,
+  updateSession,
+  endSession,
+  deleteSession,
+  setCurrentSessionPointer,
+  getCurrentSessionParentId,
+  clearCurrentSessionPointer,
+  resolveTaskId,
+  resolveTaskContext,
+  // Runtime state management
+  initializeRuntimeState,
+  readRuntimeState,
+  writeRuntimeState,
+  addRuntimeActiveTask,
+  completeRuntimeTask,
+  failRuntimeTask,
+  removeRuntimeActiveTask,
+  updateRuntimeTaskPane,
+  clearAllRuntimeActiveTasks,
+  deleteRuntimeState,
+  updateBackendStatus,
+  getProgressSummary,
+  getModalSummary,
   type PendingUpdateInput,
 } from './context-generator.js';
+import type {
+  SessionInfo,
+  RuntimeState,
+  RuntimeActiveTask,
+} from '../types/context.js';
 
 describe('context-generator module', () => {
   let tempDir: string;
@@ -864,6 +899,257 @@ describe('context-generator module', () => {
         // Cleanup
         cleanupContext('QUEUE-7');
       });
+
+      it('skips duplicate status_change updates', () => {
+        const parentContext: IssueContext = {
+          parent: {
+            id: 'dup-parent',
+            identifier: 'DUP-1',
+            title: 'Duplicate Test',
+            description: '',
+            gitBranchName: 'feature/dup',
+            status: 'Backlog',
+            labels: [],
+            url: '',
+          },
+          subTasks: [],
+          metadata: {
+            fetchedAt: '2024-01-15T10:00:00Z',
+            updatedAt: '2024-01-15T10:00:00Z',
+            backend: 'linear',
+          },
+        };
+        writeFullContextFile('DUP-1', parentContext);
+
+        const update = {
+          type: 'status_change' as const,
+          issueId: 'task-uuid',
+          identifier: 'DUP-1-TASK',
+          oldStatus: 'pending',
+          newStatus: 'in_progress',
+        };
+
+        // Queue first update
+        queuePendingUpdate('DUP-1', update);
+
+        // Queue identical update - should be skipped
+        queuePendingUpdate('DUP-1', update);
+
+        const queue = readPendingUpdates('DUP-1');
+        expect(queue.updates).toHaveLength(1);
+
+        // Cleanup
+        cleanupContext('DUP-1');
+      });
+
+      it('skips duplicate add_comment updates', () => {
+        const parentContext: IssueContext = {
+          parent: {
+            id: 'dup-parent-2',
+            identifier: 'DUP-2',
+            title: 'Duplicate Comment Test',
+            description: '',
+            gitBranchName: 'feature/dup2',
+            status: 'Backlog',
+            labels: [],
+            url: '',
+          },
+          subTasks: [],
+          metadata: {
+            fetchedAt: '2024-01-15T10:00:00Z',
+            updatedAt: '2024-01-15T10:00:00Z',
+            backend: 'linear',
+          },
+        };
+        writeFullContextFile('DUP-2', parentContext);
+
+        const update = {
+          type: 'add_comment' as const,
+          issueId: 'task-uuid',
+          identifier: 'DUP-2-TASK',
+          body: 'Task completed successfully',
+        };
+
+        // Queue same comment multiple times
+        queuePendingUpdate('DUP-2', update);
+        queuePendingUpdate('DUP-2', update);
+        queuePendingUpdate('DUP-2', update);
+
+        const queue = readPendingUpdates('DUP-2');
+        expect(queue.updates).toHaveLength(1);
+        expect(queue.updates[0].type).toBe('add_comment');
+
+        // Cleanup
+        cleanupContext('DUP-2');
+      });
+
+      it('allows different updates of same type', () => {
+        const parentContext: IssueContext = {
+          parent: {
+            id: 'dup-parent-3',
+            identifier: 'DUP-3',
+            title: 'Different Updates Test',
+            description: '',
+            gitBranchName: 'feature/dup3',
+            status: 'Backlog',
+            labels: [],
+            url: '',
+          },
+          subTasks: [],
+          metadata: {
+            fetchedAt: '2024-01-15T10:00:00Z',
+            updatedAt: '2024-01-15T10:00:00Z',
+            backend: 'linear',
+          },
+        };
+        writeFullContextFile('DUP-3', parentContext);
+
+        // Queue two different status changes
+        queuePendingUpdate('DUP-3', {
+          type: 'status_change',
+          issueId: 'task-uuid',
+          identifier: 'DUP-3-TASK',
+          oldStatus: 'pending',
+          newStatus: 'in_progress',
+        });
+
+        queuePendingUpdate('DUP-3', {
+          type: 'status_change',
+          issueId: 'task-uuid',
+          identifier: 'DUP-3-TASK',
+          oldStatus: 'in_progress',
+          newStatus: 'done',
+        });
+
+        const queue = readPendingUpdates('DUP-3');
+        expect(queue.updates).toHaveLength(2);
+
+        // Cleanup
+        cleanupContext('DUP-3');
+      });
+
+      it('skips duplicate even after previous was synced', () => {
+        const parentContext: IssueContext = {
+          parent: {
+            id: 'dup-parent-4',
+            identifier: 'DUP-4',
+            title: 'Synced Update Test',
+            description: '',
+            gitBranchName: 'feature/dup4',
+            status: 'Backlog',
+            labels: [],
+            url: '',
+          },
+          subTasks: [],
+          metadata: {
+            fetchedAt: '2024-01-15T10:00:00Z',
+            updatedAt: '2024-01-15T10:00:00Z',
+            backend: 'linear',
+          },
+        };
+        writeFullContextFile('DUP-4', parentContext);
+
+        const update = {
+          type: 'add_comment' as const,
+          issueId: 'task-uuid',
+          identifier: 'DUP-4-TASK',
+          body: 'Same comment twice',
+        };
+
+        // Queue first update
+        queuePendingUpdate('DUP-4', update);
+
+        // Mark it as synced
+        const queue = readPendingUpdates('DUP-4');
+        queue.updates[0].syncedAt = new Date().toISOString();
+        writePendingUpdates('DUP-4', queue);
+
+        // Queue same update again - should be skipped (same content = duplicate)
+        queuePendingUpdate('DUP-4', update);
+
+        const finalQueue = readPendingUpdates('DUP-4');
+        expect(finalQueue.updates).toHaveLength(1);
+        expect(finalQueue.updates[0].syncedAt).toBeDefined();
+
+        // Cleanup
+        cleanupContext('DUP-4');
+      });
+
+      it('skips duplicate create_subtask updates', () => {
+        const parentContext: IssueContext = {
+          parent: {
+            id: 'dup-parent-5',
+            identifier: 'DUP-5',
+            title: 'Duplicate Subtask Test',
+            description: '',
+            gitBranchName: 'feature/dup5',
+            status: 'Backlog',
+            labels: [],
+            url: '',
+          },
+          subTasks: [],
+          metadata: {
+            fetchedAt: '2024-01-15T10:00:00Z',
+            updatedAt: '2024-01-15T10:00:00Z',
+            backend: 'linear',
+          },
+        };
+        writeFullContextFile('DUP-5', parentContext);
+
+        const update = {
+          type: 'create_subtask' as const,
+          parentId: 'parent-uuid',
+          title: 'New subtask',
+          description: 'Do something',
+        };
+
+        queuePendingUpdate('DUP-5', update);
+        queuePendingUpdate('DUP-5', update);
+
+        const queue = readPendingUpdates('DUP-5');
+        expect(queue.updates).toHaveLength(1);
+
+        // Cleanup
+        cleanupContext('DUP-5');
+      });
+
+      it('skips duplicate add_label updates', () => {
+        const parentContext: IssueContext = {
+          parent: {
+            id: 'dup-parent-6',
+            identifier: 'DUP-6',
+            title: 'Duplicate Label Test',
+            description: '',
+            gitBranchName: 'feature/dup6',
+            status: 'Backlog',
+            labels: [],
+            url: '',
+          },
+          subTasks: [],
+          metadata: {
+            fetchedAt: '2024-01-15T10:00:00Z',
+            updatedAt: '2024-01-15T10:00:00Z',
+            backend: 'linear',
+          },
+        };
+        writeFullContextFile('DUP-6', parentContext);
+
+        const update = {
+          type: 'add_label' as const,
+          issueId: 'task-uuid',
+          identifier: 'DUP-6-TASK',
+          label: 'urgent',
+        };
+
+        queuePendingUpdate('DUP-6', update);
+        queuePendingUpdate('DUP-6', update);
+
+        const queue = readPendingUpdates('DUP-6');
+        expect(queue.updates).toHaveLength(1);
+
+        // Cleanup
+        cleanupContext('DUP-6');
+      });
     });
   });
 
@@ -1016,6 +1302,757 @@ describe('context-generator module', () => {
 
       // Cleanup
       cleanupContext('OLD-1');
+    });
+  });
+
+  describe('Runtime State Management', () => {
+    const testParentId = 'RUNTIME-TEST';
+
+    afterEach(() => {
+      // Clean up runtime state files
+      cleanupContext(testParentId);
+      cleanupContext('RUNTIME-TEST-2');
+      cleanupContext('RUNTIME-CLEAR');
+    });
+
+    describe('initializeRuntimeState', () => {
+      it('creates state with correct structure', () => {
+        const state = initializeRuntimeState(testParentId, 'Test Parent Issue');
+
+        expect(state.parentId).toBe(testParentId);
+        expect(state.parentTitle).toBe('Test Parent Issue');
+        expect(state.activeTasks).toEqual([]);
+        expect(state.completedTasks).toEqual([]);
+        expect(state.failedTasks).toEqual([]);
+        expect(state.startedAt).toBeDefined();
+        expect(state.updatedAt).toBeDefined();
+        expect(state.loopPid).toBeUndefined();
+        expect(state.totalTasks).toBeUndefined();
+      });
+
+      it('sets loopPid and totalTasks from options', () => {
+        const state = initializeRuntimeState(testParentId, 'Test Issue', {
+          loopPid: 12345,
+          totalTasks: 5,
+        });
+
+        expect(state.loopPid).toBe(12345);
+        expect(state.totalTasks).toBe(5);
+      });
+
+      it('writes state to runtime.json file', () => {
+        initializeRuntimeState(testParentId, 'Test Issue');
+
+        const runtimePath = getRuntimePath(testParentId);
+        expect(existsSync(runtimePath)).toBe(true);
+
+        const written = JSON.parse(readFileSync(runtimePath, 'utf-8'));
+        expect(written.parentId).toBe(testParentId);
+      });
+    });
+
+    describe('readRuntimeState', () => {
+      it('reads state from file', () => {
+        const original = initializeRuntimeState(testParentId, 'Test Issue', {
+          loopPid: 999,
+        });
+
+        const read = readRuntimeState(testParentId);
+
+        expect(read).not.toBeNull();
+        expect(read?.parentId).toBe(testParentId);
+        expect(read?.loopPid).toBe(999);
+      });
+
+      it('returns null when file does not exist', () => {
+        const result = readRuntimeState('NONEXISTENT-RUNTIME');
+        expect(result).toBeNull();
+      });
+
+      it('returns null for invalid JSON', () => {
+        const executionPath = getExecutionPath(testParentId);
+        mkdirSync(executionPath, { recursive: true });
+        writeFileSync(getRuntimePath(testParentId), 'not valid json', 'utf-8');
+
+        const result = readRuntimeState(testParentId);
+        expect(result).toBeNull();
+      });
+
+      it('returns null for invalid state structure', () => {
+        const executionPath = getExecutionPath(testParentId);
+        mkdirSync(executionPath, { recursive: true });
+        writeFileSync(
+          getRuntimePath(testParentId),
+          JSON.stringify({ invalid: 'structure' }),
+          'utf-8'
+        );
+
+        const result = readRuntimeState(testParentId);
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('writeRuntimeState', () => {
+      it('writes state to runtime.json', () => {
+        const state: RuntimeState = {
+          parentId: testParentId,
+          parentTitle: 'Write Test',
+          activeTasks: [],
+          completedTasks: [],
+          failedTasks: [],
+          startedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+
+        writeRuntimeState(state);
+
+        const runtimePath = getRuntimePath(testParentId);
+        expect(existsSync(runtimePath)).toBe(true);
+
+        const written = JSON.parse(readFileSync(runtimePath, 'utf-8'));
+        expect(written.parentTitle).toBe('Write Test');
+      });
+
+      it('updates the updatedAt timestamp', () => {
+        const oldTimestamp = '2020-01-01T00:00:00Z';
+        const state: RuntimeState = {
+          parentId: testParentId,
+          parentTitle: 'Timestamp Test',
+          activeTasks: [],
+          completedTasks: [],
+          failedTasks: [],
+          startedAt: oldTimestamp,
+          updatedAt: oldTimestamp,
+        };
+
+        writeRuntimeState(state);
+
+        const written = JSON.parse(readFileSync(getRuntimePath(testParentId), 'utf-8'));
+        expect(written.updatedAt).not.toBe(oldTimestamp);
+      });
+    });
+
+    describe('deleteRuntimeState', () => {
+      it('removes runtime.json file', () => {
+        initializeRuntimeState(testParentId, 'To Delete');
+        expect(existsSync(getRuntimePath(testParentId))).toBe(true);
+
+        const result = deleteRuntimeState(testParentId);
+
+        expect(result).toBe(true);
+        expect(existsSync(getRuntimePath(testParentId))).toBe(false);
+      });
+
+      it('returns false when file does not exist', () => {
+        const result = deleteRuntimeState('NONEXISTENT-DELETE');
+        expect(result).toBe(false);
+      });
+    });
+
+    describe('updateBackendStatus', () => {
+      it('adds backend status to runtime state', () => {
+        initializeRuntimeState(testParentId, 'Backend Status Test');
+
+        updateBackendStatus(testParentId, 'MOB-124', 'Done');
+
+        const state = readRuntimeState(testParentId);
+        expect(state?.backendStatuses).toBeDefined();
+        expect(state?.backendStatuses?.['MOB-124']).toBeDefined();
+        expect(state?.backendStatuses?.['MOB-124'].status).toBe('Done');
+        expect(state?.backendStatuses?.['MOB-124'].identifier).toBe('MOB-124');
+        expect(state?.backendStatuses?.['MOB-124'].syncedAt).toBeDefined();
+      });
+
+      it('updates existing backend status', () => {
+        initializeRuntimeState(testParentId, 'Backend Status Update Test');
+
+        updateBackendStatus(testParentId, 'MOB-125', 'In Progress');
+        updateBackendStatus(testParentId, 'MOB-125', 'Done');
+
+        const state = readRuntimeState(testParentId);
+        expect(state?.backendStatuses?.['MOB-125'].status).toBe('Done');
+      });
+
+      it('preserves other backend statuses when updating one', () => {
+        initializeRuntimeState(testParentId, 'Backend Status Preserve Test');
+
+        updateBackendStatus(testParentId, 'MOB-126', 'Done');
+        updateBackendStatus(testParentId, 'MOB-127', 'In Progress');
+        updateBackendStatus(testParentId, 'MOB-126', 'Reopened');
+
+        const state = readRuntimeState(testParentId);
+        expect(state?.backendStatuses?.['MOB-126'].status).toBe('Reopened');
+        expect(state?.backendStatuses?.['MOB-127'].status).toBe('In Progress');
+      });
+
+      it('does nothing if runtime state does not exist', () => {
+        // Should not throw
+        updateBackendStatus('NONEXISTENT-BACKEND', 'MOB-999', 'Done');
+
+        const state = readRuntimeState('NONEXISTENT-BACKEND');
+        expect(state).toBeNull();
+      });
+    });
+
+    describe('addRuntimeActiveTask', () => {
+      it('adds task to activeTasks', () => {
+        const state = initializeRuntimeState(testParentId, 'Add Task Test');
+
+        const task: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1234,
+          pane: '%0',
+          startedAt: new Date().toISOString(),
+        };
+
+        const updated = addRuntimeActiveTask(state, task);
+
+        expect(updated.activeTasks).toHaveLength(1);
+        expect(updated.activeTasks[0].id).toBe('TASK-1');
+        expect(updated.activeTasks[0].pid).toBe(1234);
+      });
+
+      it('preserves existing active tasks', () => {
+        const state = initializeRuntimeState(testParentId, 'Preserve Test');
+
+        const task1: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1111,
+          pane: '%0',
+          startedAt: new Date().toISOString(),
+        };
+
+        const task2: RuntimeActiveTask = {
+          id: 'TASK-2',
+          pid: 2222,
+          pane: '%1',
+          startedAt: new Date().toISOString(),
+        };
+
+        let updated = addRuntimeActiveTask(state, task1);
+        updated = addRuntimeActiveTask(updated, task2);
+
+        expect(updated.activeTasks).toHaveLength(2);
+        expect(updated.activeTasks[0].id).toBe('TASK-1');
+        expect(updated.activeTasks[1].id).toBe('TASK-2');
+      });
+    });
+
+    describe('completeRuntimeTask', () => {
+      it('moves task to completedTasks with duration', () => {
+        const state = initializeRuntimeState(testParentId, 'Complete Test');
+
+        const task: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1234,
+          pane: '%0',
+          startedAt: new Date(Date.now() - 5000).toISOString(), // 5 seconds ago
+        };
+
+        let updated = addRuntimeActiveTask(state, task);
+        updated = completeRuntimeTask(updated, 'TASK-1');
+
+        expect(updated.activeTasks).toHaveLength(0);
+        expect(updated.completedTasks).toHaveLength(1);
+
+        const completed = updated.completedTasks[0];
+        expect(typeof completed).toBe('object');
+        if (typeof completed === 'object') {
+          expect(completed.id).toBe('TASK-1');
+          expect(completed.duration).toBeGreaterThanOrEqual(0);
+          expect(completed.completedAt).toBeDefined();
+        }
+      });
+
+      it('removes task from activeTasks', () => {
+        const state = initializeRuntimeState(testParentId, 'Remove Test');
+
+        const task1: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1111,
+          pane: '%0',
+          startedAt: new Date().toISOString(),
+        };
+
+        const task2: RuntimeActiveTask = {
+          id: 'TASK-2',
+          pid: 2222,
+          pane: '%1',
+          startedAt: new Date().toISOString(),
+        };
+
+        let updated = addRuntimeActiveTask(state, task1);
+        updated = addRuntimeActiveTask(updated, task2);
+        updated = completeRuntimeTask(updated, 'TASK-1');
+
+        expect(updated.activeTasks).toHaveLength(1);
+        expect(updated.activeTasks[0].id).toBe('TASK-2');
+      });
+    });
+
+    describe('failRuntimeTask', () => {
+      it('moves task to failedTasks', () => {
+        const state = initializeRuntimeState(testParentId, 'Fail Test');
+
+        const task: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1234,
+          pane: '%0',
+          startedAt: new Date(Date.now() - 3000).toISOString(),
+        };
+
+        let updated = addRuntimeActiveTask(state, task);
+        updated = failRuntimeTask(updated, 'TASK-1');
+
+        expect(updated.activeTasks).toHaveLength(0);
+        expect(updated.failedTasks).toHaveLength(1);
+
+        const failed = updated.failedTasks[0];
+        expect(typeof failed).toBe('object');
+        if (typeof failed === 'object') {
+          expect(failed.id).toBe('TASK-1');
+          expect(failed.duration).toBeGreaterThanOrEqual(0);
+        }
+      });
+    });
+
+    describe('removeRuntimeActiveTask', () => {
+      it('removes without marking complete/failed', () => {
+        const state = initializeRuntimeState(testParentId, 'Remove Only Test');
+
+        const task: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1234,
+          pane: '%0',
+          startedAt: new Date().toISOString(),
+        };
+
+        let updated = addRuntimeActiveTask(state, task);
+        updated = removeRuntimeActiveTask(updated, 'TASK-1');
+
+        expect(updated.activeTasks).toHaveLength(0);
+        expect(updated.completedTasks).toHaveLength(0);
+        expect(updated.failedTasks).toHaveLength(0);
+      });
+    });
+
+    describe('updateRuntimeTaskPane', () => {
+      it('updates pane ID for active task', () => {
+        const state = initializeRuntimeState(testParentId, 'Pane Update Test');
+
+        const task: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1234,
+          pane: '%0',
+          startedAt: new Date().toISOString(),
+        };
+
+        let updated = addRuntimeActiveTask(state, task);
+        updated = updateRuntimeTaskPane(updated, 'TASK-1', '%5');
+
+        expect(updated.activeTasks[0].pane).toBe('%5');
+      });
+
+      it('does not affect other tasks', () => {
+        const state = initializeRuntimeState(testParentId, 'Other Tasks Test');
+
+        const task1: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1111,
+          pane: '%0',
+          startedAt: new Date().toISOString(),
+        };
+
+        const task2: RuntimeActiveTask = {
+          id: 'TASK-2',
+          pid: 2222,
+          pane: '%1',
+          startedAt: new Date().toISOString(),
+        };
+
+        let updated = addRuntimeActiveTask(state, task1);
+        updated = addRuntimeActiveTask(updated, task2);
+        updated = updateRuntimeTaskPane(updated, 'TASK-1', '%10');
+
+        expect(updated.activeTasks[0].pane).toBe('%10');
+        expect(updated.activeTasks[1].pane).toBe('%1');
+      });
+    });
+
+    describe('clearAllRuntimeActiveTasks', () => {
+      it('removes all active tasks', () => {
+        const parentId = 'RUNTIME-CLEAR';
+        const state = initializeRuntimeState(parentId, 'Clear Test');
+
+        const task1: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1111,
+          pane: '%0',
+          startedAt: new Date().toISOString(),
+        };
+
+        const task2: RuntimeActiveTask = {
+          id: 'TASK-2',
+          pid: 2222,
+          pane: '%1',
+          startedAt: new Date().toISOString(),
+        };
+
+        addRuntimeActiveTask(state, task1);
+        addRuntimeActiveTask(state, task2);
+
+        const cleared = clearAllRuntimeActiveTasks(parentId);
+
+        expect(cleared).not.toBeNull();
+        expect(cleared?.activeTasks).toHaveLength(0);
+      });
+
+      it('returns null when no state exists', () => {
+        const result = clearAllRuntimeActiveTasks('NONEXISTENT-CLEAR');
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('getProgressSummary', () => {
+      it('returns correct metrics', () => {
+        const state = initializeRuntimeState(testParentId, 'Progress Test');
+
+        const task1: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1111,
+          pane: '%0',
+          startedAt: new Date().toISOString(),
+        };
+
+        let updated = addRuntimeActiveTask(state, task1);
+        updated = completeRuntimeTask(updated, 'TASK-1');
+
+        const task2: RuntimeActiveTask = {
+          id: 'TASK-2',
+          pid: 2222,
+          pane: '%1',
+          startedAt: new Date().toISOString(),
+        };
+
+        updated = addRuntimeActiveTask(updated, task2);
+
+        const summary = getProgressSummary(updated);
+
+        expect(summary.completed).toBe(1);
+        expect(summary.active).toBe(1);
+        expect(summary.failed).toBe(0);
+        expect(summary.total).toBe(2);
+        expect(summary.isComplete).toBe(false);
+      });
+
+      it('returns zeros for null state', () => {
+        const summary = getProgressSummary(null);
+
+        expect(summary.completed).toBe(0);
+        expect(summary.failed).toBe(0);
+        expect(summary.active).toBe(0);
+        expect(summary.total).toBe(0);
+        expect(summary.isComplete).toBe(false);
+      });
+
+      it('isComplete is true when no active tasks and some completed', () => {
+        const state = initializeRuntimeState(testParentId, 'Complete Check');
+
+        const task: RuntimeActiveTask = {
+          id: 'TASK-1',
+          pid: 1111,
+          pane: '%0',
+          startedAt: new Date().toISOString(),
+        };
+
+        let updated = addRuntimeActiveTask(state, task);
+        updated = completeRuntimeTask(updated, 'TASK-1');
+
+        const summary = getProgressSummary(updated);
+        expect(summary.isComplete).toBe(true);
+      });
+    });
+
+    describe('getModalSummary', () => {
+      it('returns formatted summary with elapsed time', () => {
+        const state = initializeRuntimeState(testParentId, 'Modal Test');
+
+        const summary = getModalSummary(state, 5000);
+
+        expect(summary.elapsedMs).toBe(5000);
+        expect(summary.completed).toBe(0);
+        expect(summary.active).toBe(0);
+        expect(summary.failed).toBe(0);
+      });
+    });
+  });
+
+  describe('Session Management', () => {
+    const testParentId = 'SESSION-TEST';
+
+    afterEach(() => {
+      // Clean up session files
+      cleanupContext(testParentId);
+      cleanupContext('SESSION-TEST-2');
+      cleanupContext('SESSION-RESOLVE');
+
+      // Clean up current session pointer
+      const pointerPath = getCurrentSessionPointerPath();
+      if (existsSync(pointerPath)) {
+        try {
+          unlinkSync(pointerPath);
+        } catch {
+          // Ignore errors
+        }
+      }
+    });
+
+    describe('createSession', () => {
+      it('creates new session file', () => {
+        const session = createSession(testParentId, 'linear', '/path/to/worktree');
+
+        expect(session.parentId).toBe(testParentId);
+        expect(session.backend).toBe('linear');
+        expect(session.worktreePath).toBe('/path/to/worktree');
+        expect(session.status).toBe('active');
+        expect(session.startedAt).toBeDefined();
+
+        // Verify file was created
+        expect(existsSync(getSessionPath(testParentId))).toBe(true);
+      });
+
+      it('sets current session pointer', () => {
+        createSession(testParentId, 'jira');
+
+        const currentId = getCurrentSessionParentId();
+        expect(currentId).toBe(testParentId);
+      });
+    });
+
+    describe('readSession', () => {
+      it('returns session data', () => {
+        createSession(testParentId, 'linear');
+
+        const session = readSession(testParentId);
+
+        expect(session).not.toBeNull();
+        expect(session?.parentId).toBe(testParentId);
+        expect(session?.backend).toBe('linear');
+      });
+
+      it('returns null when file does not exist', () => {
+        const session = readSession('NONEXISTENT-SESSION');
+        expect(session).toBeNull();
+      });
+
+      it('returns null for invalid JSON', () => {
+        const executionPath = getExecutionPath(testParentId);
+        mkdirSync(executionPath, { recursive: true });
+        writeFileSync(getSessionPath(testParentId), 'invalid json', 'utf-8');
+
+        const session = readSession(testParentId);
+        expect(session).toBeNull();
+      });
+    });
+
+    describe('writeSession', () => {
+      it('writes session to file', () => {
+        const session: SessionInfo = {
+          parentId: testParentId,
+          backend: 'jira',
+          startedAt: new Date().toISOString(),
+          status: 'active',
+        };
+
+        writeSession(testParentId, session);
+
+        const read = readSession(testParentId);
+        expect(read).not.toBeNull();
+        expect(read?.backend).toBe('jira');
+      });
+    });
+
+    describe('updateSession', () => {
+      it('modifies existing session', () => {
+        createSession(testParentId, 'linear');
+
+        const updated = updateSession(testParentId, {
+          worktreePath: '/new/worktree',
+          status: 'paused',
+        });
+
+        expect(updated).not.toBeNull();
+        expect(updated?.worktreePath).toBe('/new/worktree');
+        expect(updated?.status).toBe('paused');
+        expect(updated?.backend).toBe('linear'); // Preserved
+      });
+
+      it('returns null when session does not exist', () => {
+        const result = updateSession('NONEXISTENT-UPDATE', { status: 'completed' });
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('endSession', () => {
+      it('sets status to completed', () => {
+        createSession(testParentId, 'linear');
+
+        endSession(testParentId, 'completed');
+
+        const session = readSession(testParentId);
+        expect(session?.status).toBe('completed');
+      });
+
+      it('sets status to failed', () => {
+        createSession(testParentId, 'linear');
+
+        endSession(testParentId, 'failed');
+
+        const session = readSession(testParentId);
+        expect(session?.status).toBe('failed');
+      });
+
+      it('clears current session pointer', () => {
+        createSession(testParentId, 'linear');
+        expect(getCurrentSessionParentId()).toBe(testParentId);
+
+        endSession(testParentId, 'completed');
+
+        expect(getCurrentSessionParentId()).toBeNull();
+      });
+    });
+
+    describe('deleteSession', () => {
+      it('removes session file', () => {
+        createSession(testParentId, 'linear');
+        expect(existsSync(getSessionPath(testParentId))).toBe(true);
+
+        deleteSession(testParentId);
+
+        expect(existsSync(getSessionPath(testParentId))).toBe(false);
+      });
+
+      it('clears current session pointer', () => {
+        createSession(testParentId, 'linear');
+
+        deleteSession(testParentId);
+
+        expect(getCurrentSessionParentId()).toBeNull();
+      });
+
+      it('handles non-existent session gracefully', () => {
+        expect(() => deleteSession('NONEXISTENT-DELETE')).not.toThrow();
+      });
+    });
+
+    describe('setCurrentSessionPointer', () => {
+      it('writes pointer file', () => {
+        setCurrentSessionPointer(testParentId);
+
+        const pointerPath = getCurrentSessionPointerPath();
+        expect(existsSync(pointerPath)).toBe(true);
+
+        const content = readFileSync(pointerPath, 'utf-8');
+        expect(content).toBe(testParentId);
+      });
+    });
+
+    describe('getCurrentSessionParentId', () => {
+      it('reads from pointer', () => {
+        createSession(testParentId, 'linear');
+        setCurrentSessionPointer(testParentId);
+
+        const result = getCurrentSessionParentId();
+        expect(result).toBe(testParentId);
+      });
+
+      it('returns null when no pointer exists', () => {
+        const pointerPath = getCurrentSessionPointerPath();
+        if (existsSync(pointerPath)) {
+          unlinkSync(pointerPath);
+        }
+
+        const result = getCurrentSessionParentId();
+        expect(result).toBeNull();
+      });
+
+      it('returns null when pointed session does not exist', () => {
+        setCurrentSessionPointer('GHOST-SESSION');
+
+        const result = getCurrentSessionParentId();
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('clearCurrentSessionPointer', () => {
+      it('removes pointer file when matching', () => {
+        createSession(testParentId, 'linear');
+
+        clearCurrentSessionPointer(testParentId);
+
+        expect(getCurrentSessionParentId()).toBeNull();
+      });
+
+      it('does not remove pointer for different session', () => {
+        createSession(testParentId, 'linear');
+        createSession('SESSION-TEST-2', 'jira');
+        setCurrentSessionPointer('SESSION-TEST-2');
+
+        clearCurrentSessionPointer(testParentId);
+
+        // Pointer should still point to SESSION-TEST-2
+        expect(getCurrentSessionParentId()).toBe('SESSION-TEST-2');
+      });
+    });
+
+    describe('resolveTaskId', () => {
+      it('returns provided taskId when given', () => {
+        const result = resolveTaskId('PROVIDED-ID');
+        expect(result).toBe('PROVIDED-ID');
+      });
+
+      it('falls back to current session', () => {
+        createSession(testParentId, 'linear');
+
+        const result = resolveTaskId();
+        expect(result).toBe(testParentId);
+      });
+
+      it('returns null when no taskId and no session', () => {
+        const pointerPath = getCurrentSessionPointerPath();
+        if (existsSync(pointerPath)) {
+          unlinkSync(pointerPath);
+        }
+
+        const result = resolveTaskId();
+        expect(result).toBeNull();
+      });
+    });
+
+    describe('resolveTaskContext', () => {
+      it('returns taskId and provided backend', () => {
+        const result = resolveTaskContext('TASK-123', 'jira');
+
+        expect(result.taskId).toBe('TASK-123');
+        expect(result.backend).toBe('jira');
+      });
+
+      it('gets backend from session when not provided', () => {
+        const parentId = 'SESSION-RESOLVE';
+        createSession(parentId, 'linear');
+
+        const result = resolveTaskContext(parentId);
+
+        expect(result.taskId).toBe(parentId);
+        expect(result.backend).toBe('linear');
+      });
+
+      it('returns undefined backend when no session', () => {
+        const result = resolveTaskContext('TASK-NO-SESSION');
+
+        expect(result.taskId).toBe('TASK-NO-SESSION');
+        expect(result.backend).toBeUndefined();
+      });
     });
   });
 });

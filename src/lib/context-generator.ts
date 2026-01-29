@@ -525,10 +525,62 @@ export type PendingUpdateInput =
   | { type: 'remove_label'; issueId: string; identifier: string; label: string };
 
 /**
+ * Check if two updates are equivalent (same type and content)
+ *
+ * Used to prevent duplicate updates from being queued when the same
+ * change is detected multiple times (e.g., during polling or retries).
+ */
+function isDuplicateUpdate(
+  existing: PendingUpdate,
+  incoming: PendingUpdateInput
+): boolean {
+  if (existing.type !== incoming.type) return false;
+
+  switch (existing.type) {
+    case 'status_change': {
+      const inc = incoming as typeof existing;
+      return (
+        existing.issueId === inc.issueId &&
+        existing.oldStatus === inc.oldStatus &&
+        existing.newStatus === inc.newStatus
+      );
+    }
+    case 'add_comment': {
+      const inc = incoming as typeof existing;
+      return existing.issueId === inc.issueId && existing.body === inc.body;
+    }
+    case 'create_subtask': {
+      const inc = incoming as typeof existing;
+      return (
+        existing.parentId === inc.parentId &&
+        existing.title === inc.title &&
+        existing.description === inc.description
+      );
+    }
+    case 'update_description': {
+      const inc = incoming as typeof existing;
+      return existing.issueId === inc.issueId && existing.description === inc.description;
+    }
+    case 'add_label': {
+      const inc = incoming as typeof existing;
+      return existing.issueId === inc.issueId && existing.label === inc.label;
+    }
+    case 'remove_label': {
+      const inc = incoming as typeof existing;
+      return existing.issueId === inc.issueId && existing.label === inc.label;
+    }
+    default:
+      return false;
+  }
+}
+
+/**
  * Queue a pending update for later sync via `mobius push`
  *
  * Adds an update to the pending-updates.json queue. Updates are
- * automatically assigned a unique ID and timestamp.
+ * automatically assigned a unique ID and timestamp. Duplicate updates
+ * (same type and content as any existing update) are skipped to prevent
+ * the same change from being synced multiple times.
  *
  * @param parentIdentifier - The parent issue identifier (e.g., "MOB-161")
  * @param update - The update to queue (without id and createdAt fields)
@@ -538,6 +590,17 @@ export function queuePendingUpdate(
   update: PendingUpdateInput
 ): void {
   const queue = readPendingUpdates(parentIdentifier);
+
+  // Check for duplicate updates (both synced and unsynced)
+  // A status change like "In Progress → Done" should only be queued once
+  const isDuplicate = queue.updates.some(
+    existing => isDuplicateUpdate(existing, update)
+  );
+
+  if (isDuplicate) {
+    return;
+  }
+
   const newUpdate: PendingUpdate = {
     ...update,
     id: crypto.randomUUID(),
@@ -1200,6 +1263,43 @@ export function deleteRuntimeState(parentId: string): boolean {
 }
 
 /**
+ * Update backend status for a task after successful push
+ *
+ * This is called by the loop after push succeeds, allowing the TUI
+ * to show real-time backend status without re-fetching the entire graph.
+ *
+ * @param parentId - The parent task identifier
+ * @param taskIdentifier - The task identifier (e.g., "MOB-124")
+ * @param status - The new backend status (e.g., "Done")
+ */
+export function updateBackendStatus(
+  parentId: string,
+  taskIdentifier: string,
+  status: string
+): void {
+  const currentState = readRuntimeState(parentId);
+  if (!currentState) {
+    return;
+  }
+
+  withRuntimeStateSync(parentId, (state) => {
+    const baseState = state ?? currentState;
+    const backendStatuses = { ...(baseState.backendStatuses ?? {}) };
+
+    backendStatuses[taskIdentifier] = {
+      identifier: taskIdentifier,
+      status,
+      syncedAt: new Date().toISOString(),
+    };
+
+    return {
+      ...baseState,
+      backendStatuses,
+    };
+  });
+}
+
+/**
  * Normalize a completed task entry to RuntimeCompletedTask format
  * For backward compatibility with legacy string format
  */
@@ -1265,6 +1365,31 @@ function completedTasksEqual(
 }
 
 /**
+ * Check if backend statuses have changed
+ */
+function backendStatusesEqual(
+  oldStatuses: RuntimeState['backendStatuses'],
+  newStatuses: RuntimeState['backendStatuses']
+): boolean {
+  if (!oldStatuses && !newStatuses) return true;
+  if (!oldStatuses || !newStatuses) return false;
+
+  const oldKeys = Object.keys(oldStatuses);
+  const newKeys = Object.keys(newStatuses);
+
+  if (oldKeys.length !== newKeys.length) return false;
+
+  for (const key of oldKeys) {
+    const oldEntry = oldStatuses[key];
+    const newEntry = newStatuses[key];
+    if (!newEntry) return false;
+    if (oldEntry.status !== newEntry.status) return false;
+  }
+
+  return true;
+}
+
+/**
  * Check if runtime state content has actually changed
  * Ignores updatedAt timestamp to prevent unnecessary re-renders
  */
@@ -1279,6 +1404,7 @@ function hasContentChanged(
   if (!completedTasksEqual(oldState.completedTasks, newState.completedTasks)) return true;
   if (!completedTasksEqual(oldState.failedTasks, newState.failedTasks)) return true;
   if (oldState.loopPid !== newState.loopPid) return true;
+  if (!backendStatusesEqual(oldState.backendStatuses, newState.backendStatuses)) return true;
 
   return false;
 }

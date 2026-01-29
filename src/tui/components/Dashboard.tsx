@@ -9,7 +9,9 @@ import { Box, Text, useApp, useInput } from 'ink';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { TaskGraph } from '../../lib/task-graph.js';
 import { getGraphStats } from '../../lib/task-graph.js';
-import type { TuiConfig } from '../../types.js';
+import type { TuiConfig, Backend } from '../../types.js';
+import { BackendStatusBox } from './BackendStatusBox.js';
+import type { BackendTask } from './BackendStatusBox.js';
 import type { RuntimeState } from '../../types/context.js';
 import { readRuntimeState, watchRuntimeState, getModalSummary } from '../../lib/context-generator.js';
 import { getSessionName } from '../../lib/tmux-display.js';
@@ -27,7 +29,9 @@ const TICK_INTERVAL_MS = 1000;
 
 export interface DashboardProps {
   parentId: string;
-  graph: TaskGraph;
+  graph: TaskGraph;        // Local/execution state (merged with runtime state)
+  apiGraph: TaskGraph;     // Backend state (unmodified API data)
+  backend: Backend;        // Which backend we're connected to
   config?: TuiConfig;
 }
 
@@ -70,7 +74,7 @@ function isExecutionComplete(
  * │  Legend: [✓] Done  [→] Ready  [·] Blocked  [⟳] In Progress          │
  * └─────────────────────────────────────────────────────────────────────┘
  */
-export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Element {
+export function Dashboard({ parentId, graph, apiGraph, backend, config }: DashboardProps): JSX.Element {
   const { exit } = useApp();
   const [executionState, setRuntimeState] = useState<RuntimeState | null>(null);
   const [isComplete, setIsComplete] = useState(false);
@@ -214,6 +218,25 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
   const completedCount = executionState?.completedTasks.length ?? 0;
   const failedCount = executionState?.failedTasks.length ?? 0;
 
+  // Extract backend tasks from the unmodified API graph for the status box
+  // Merge in real-time backend statuses from runtime state when available
+  // This enables immediate status updates after push without re-fetching the graph
+  const apiTasks: BackendTask[] = useMemo(
+    () =>
+      Array.from(apiGraph.tasks.values())
+        .map((t) => {
+          // Check if we have a more recent status from push
+          const pushedStatus = executionState?.backendStatuses?.[t.identifier];
+          return {
+            identifier: t.identifier,
+            // Use pushed status if available, otherwise fall back to API graph
+            status: pushedStatus ? pushedStatus.status as typeof t.status : t.status,
+          };
+        })
+        .sort((a, b) => a.identifier.localeCompare(b.identifier)),
+    [apiGraph, executionState?.backendStatuses]
+  );
+
   // Calculate elapsed time - recalculates on each tick
   // This consolidates the timer that was previously in Header
   const elapsedMs = useMemo(() => {
@@ -227,7 +250,15 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
     return (
       <Box flexDirection="column" padding={1} >
         <Header parentId={parentId} elapsedMs={undefined} />
-        <TaskTree graph={graph} executionState={undefined} tick={tick} />
+        {/* Side-by-side: Task Tree + Backend Status */}
+        <Box flexDirection="row">
+          <Box flexGrow={1}>
+            <TaskTree graph={graph} executionState={undefined} tick={tick} />
+          </Box>
+          <Box width={24} marginLeft={1}>
+            <BackendStatusBox tasks={apiTasks} backend={backend} />
+          </Box>
+        </Box>
         <Box marginTop={1}>
           <Text color={STRUCTURE_COLORS.muted}>
             Waiting for execution... (watching for state file)
@@ -251,7 +282,15 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
     return (
       <Box flexDirection="column" padding={1} >
         <Header parentId={parentId} elapsedMs={elapsedMs} />
-        <TaskTree graph={graph} executionState={executionState} tick={tick} />
+        {/* Side-by-side: Task Tree + Backend Status */}
+        <Box flexDirection="row">
+          <Box flexGrow={1}>
+            <TaskTree graph={graph} executionState={executionState} tick={tick} />
+          </Box>
+          <Box width={24} marginLeft={1}>
+            <BackendStatusBox tasks={apiTasks} backend={backend} />
+          </Box>
+        </Box>
 
         {/* Completion Summary */}
         <Box marginTop={1} flexDirection="column">
@@ -289,8 +328,15 @@ export function Dashboard({ parentId, graph, config }: DashboardProps): JSX.Elem
       {/* Header */}
       <Header parentId={parentId} elapsedMs={elapsedMs} />
 
-      {/* Task Tree */}
-      <TaskTree graph={graph} executionState={executionState} tick={tick} />
+      {/* Side-by-side: Task Tree + Backend Status */}
+      <Box flexDirection="row">
+        <Box flexGrow={1}>
+          <TaskTree graph={graph} executionState={executionState} tick={tick} />
+        </Box>
+        <Box width={24} marginLeft={1}>
+          <BackendStatusBox tasks={apiTasks} backend={backend} />
+        </Box>
+      </Box>
 
       {/* Agent Slots */}
       <Box marginTop={1}>
