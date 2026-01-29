@@ -1022,7 +1022,7 @@ describe('context-generator module', () => {
         cleanupContext('DUP-3');
       });
 
-      it('skips duplicate even after previous was synced', () => {
+      it('allows re-queueing after previous was synced', () => {
         const parentContext: IssueContext = {
           parent: {
             id: 'dup-parent-4',
@@ -1058,12 +1058,14 @@ describe('context-generator module', () => {
         queue.updates[0].syncedAt = new Date().toISOString();
         writePendingUpdates('DUP-4', queue);
 
-        // Queue same update again - should be skipped (same content = duplicate)
+        // Queue same update again - should be allowed since previous was synced
+        // (e.g., status might have been changed externally and needs re-applying)
         queuePendingUpdate('DUP-4', update);
 
         const finalQueue = readPendingUpdates('DUP-4');
-        expect(finalQueue.updates).toHaveLength(1);
+        expect(finalQueue.updates).toHaveLength(2);
         expect(finalQueue.updates[0].syncedAt).toBeDefined();
+        expect(finalQueue.updates[1].syncedAt).toBeUndefined();
 
         // Cleanup
         cleanupContext('DUP-4');
