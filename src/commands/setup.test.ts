@@ -376,6 +376,72 @@ describe('setup command: AGENTS.md not touched', () => {
   });
 });
 
+describe('setup command: --update-skills with no config anywhere', () => {
+  let testDir: string;
+  let originalCwd: string;
+  let originalXdgConfigHome: string | undefined;
+  let consoleLogSpy: ReturnType<typeof spyOn>;
+  let consoleOutput: string[];
+  let processExitSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    testDir = join(tmpdir(), `mobius-setup-noconfig-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(testDir, { recursive: true });
+    originalCwd = process.cwd();
+    originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+
+    // Point XDG_CONFIG_HOME to a non-existent directory to simulate no global config
+    process.env.XDG_CONFIG_HOME = join(testDir, 'nonexistent-xdg-config');
+
+    consoleOutput = [];
+    consoleLogSpy = spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      consoleOutput.push(args.map(String).join(' '));
+    });
+
+    // Mock process.exit to prevent actual exit and capture exit code
+    processExitSpy = spyOn(process, 'exit').mockImplementation((() => {
+      throw new Error('process.exit called');
+    }) as (code?: number) => never);
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    processExitSpy.mockRestore();
+    process.chdir(originalCwd);
+
+    // Restore XDG_CONFIG_HOME
+    if (originalXdgConfigHome !== undefined) {
+      process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+    } else {
+      delete process.env.XDG_CONFIG_HOME;
+    }
+
+    if (existsSync(testDir)) {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('exits with error when no config exists anywhere', async () => {
+    // Create a directory with no local config and XDG_CONFIG_HOME pointing to nonexistent dir
+    const projectDir = join(testDir, 'project');
+    mkdirSync(projectDir, { recursive: true });
+    process.chdir(projectDir);
+
+    const { setup } = await import('./setup.js');
+
+    // Should throw because process.exit is mocked
+    await expect(setup({ updateSkills: true })).rejects.toThrow('process.exit called');
+
+    // Verify error message was printed
+    const output = consoleOutput.join('\n');
+    expect(output).toContain('No existing Mobius installation found');
+    expect(output).toContain('Run `mobius setup` first');
+
+    // Verify exit code 1 was requested
+    expect(processExitSpy).toHaveBeenCalledWith(1);
+  });
+});
+
 describe('setup command: CLI integration', () => {
   it('registers -u, --update-skills option', async () => {
     // Verify the CLI properly registers the flag

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import chalk from 'chalk';
 import { select, confirm, input } from '@inquirer/prompts';
 import {
@@ -7,6 +7,7 @@ import {
   getGlobalConfigDir,
   getBundledSkillsDir,
   resolvePaths,
+  findLocalConfig,
 } from '../lib/paths.js';
 import {
   writeConfig,
@@ -33,6 +34,17 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
 
   // --update-skills: Skip config wizard, just update skills/commands
   if (options.updateSkills) {
+    // Auto-detect install type: check local config first, then global
+    const localConfig = findLocalConfig();
+    const globalConfigPath = join(getGlobalConfigDir(), 'config.yaml');
+    const hasGlobalConfig = configExists(globalConfigPath);
+
+    if (!localConfig && !hasGlobalConfig) {
+      console.log(chalk.red('\nError: No existing Mobius installation found.'));
+      console.log(chalk.gray('Run `mobius setup` first to create a configuration.\n'));
+      process.exit(1);
+    }
+
     console.log(chalk.bold('\nUpdating skills and commands...\n'));
 
     // Use existing installation paths (auto-detect local vs global)
