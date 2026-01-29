@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { confirm, input, select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import {
@@ -9,13 +9,21 @@ import {
   copySkills,
   writeConfig,
 } from '../lib/config.js';
-import { getBundledSkillsDir, getGlobalConfigDir, getPathsForType } from '../lib/paths.js';
+import {
+  findLocalConfig,
+  getBundledSkillsDir,
+  getGlobalConfigDir,
+  getPathsForType,
+  resolvePaths,
+} from '../lib/paths.js';
 import type { Backend, LoopConfig, Model } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
 
-export async function setup(): Promise<void> {
-  console.log(chalk.bold('\nMobius Setup Wizard\n'));
+export interface SetupOptions {
+  updateSkills?: boolean;
+}
 
+export async function setup(options: SetupOptions = {}): Promise<void> {
   // Check if bundled skills exist
   const bundledSkills = getBundledSkillsDir();
   if (!existsSync(bundledSkills)) {
@@ -23,6 +31,46 @@ export async function setup(): Promise<void> {
     console.log(chalk.gray('This may indicate a corrupted installation.'));
     process.exit(1);
   }
+
+  // --update-skills: Skip config wizard, just update skills/commands
+  if (options.updateSkills) {
+    // Auto-detect install type: check local config first, then global
+    const localConfig = findLocalConfig();
+    const globalConfigPath = join(getGlobalConfigDir(), 'config.yaml');
+    const hasGlobalConfig = configExists(globalConfigPath);
+
+    if (!localConfig && !hasGlobalConfig) {
+      console.log(chalk.red('\nError: No existing Mobius installation found.'));
+      console.log(chalk.gray('Run `mobius setup` first to create a configuration.\n'));
+      process.exit(1);
+    }
+
+    console.log(chalk.bold('\nUpdating skills and commands...\n'));
+
+    // Use existing installation paths (auto-detect local vs global)
+    const paths = resolvePaths();
+
+    // Copy skills
+    console.log(chalk.gray(`Copying skills to ${paths.skillsPath}...`));
+    copySkills(paths.skillsPath);
+
+    // Copy commands
+    console.log(chalk.gray('Copying commands...'));
+    copyCommands(paths);
+
+    console.log(chalk.green('\n✓ Skills and commands updated!\n'));
+
+    if (paths.type === 'local') {
+      console.log(chalk.gray(`Skills updated at: ${paths.skillsPath}`));
+    } else {
+      console.log(chalk.gray(`Skills updated at: ${paths.skillsPath}`));
+    }
+
+    console.log('');
+    return;
+  }
+
+  console.log(chalk.bold('\nMobius Setup Wizard\n'));
 
   // 1. Installation type
   const installType = await select<'local' | 'global'>({
