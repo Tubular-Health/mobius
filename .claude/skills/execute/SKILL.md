@@ -1,5 +1,5 @@
 ---
-name: execute-issue
+name: execute
 description: Execute a single sub-task with context priming. Supports both Linear and Jira backends via progressive disclosure. Use when ready to implement a refined issue, when the user mentions "execute", "implement", or "work on" an issue.
 invocation: /execute
 ---
@@ -169,7 +169,7 @@ subtaskId: "MOB-177"
 parentId: "MOB-161"
 commitHash: "f2ccd9e"
 filesModified:
-  - ".claude/skills/execute-issue/SKILL.md"
+  - ".claude/skills/execute/SKILL.md"
 verificationResults:
   typecheck: PASS
   tests: PASS
@@ -182,9 +182,9 @@ verificationResults:
 <context>
 This skill is the execution phase of the issue workflow:
 
-1. **define-issue** - Creates well-defined issues with acceptance criteria
-2. **refine-issue** - Breaks issues into single-file-focused sub-tasks with dependencies
-3. **execute-issue** (this skill) - Implements ONE sub-task, then stops
+1. **define** - Creates well-defined issues with acceptance criteria
+2. **refine** - Breaks issues into single-file-focused sub-tasks with dependencies
+3. **execute** (this skill) - Implements ONE sub-task, then stops
 
 **Loop-Based Execution Model**:
 This skill is designed to be called repeatedly by a loop script (e.g., `mobius loop`). Each invocation:

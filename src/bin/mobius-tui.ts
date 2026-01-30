@@ -128,7 +128,7 @@ export async function tui(taskId: string, options?: TuiOptions): Promise<void> {
 
   if (subTasks.length === 0) {
     console.error(chalk.yellow(`Issue ${taskId} has no sub-tasks.`));
-    console.error(chalk.gray('Consider running /refine-issue first to create sub-tasks.'));
+    console.error(chalk.gray('Consider running /refine first to create sub-tasks.'));
     process.exitCode = 1;
     return;
   }

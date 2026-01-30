@@ -1,6 +1,6 @@
 ---
-name: verify-issue
-description: Verify a completed issue by comparing implementation against acceptance criteria, running tests, and critiquing the work. Adds review notes as a comment on the ticket. Supports both Linear and Jira backends via progressive disclosure. Use as the final step in the issue workflow after execute-issue, when the user mentions "verify", "review", or "check" an issue.
+name: verify
+description: Verify a completed issue by comparing implementation against acceptance criteria, running tests, and critiquing the work. Adds review notes as a comment on the ticket. Supports both Linear and Jira backends via progressive disclosure. Use as the final step in the issue workflow after execute, when the user mentions "verify", "review", or "check" an issue.
 invocation: /verify
 ---
 
@@ -8,10 +8,10 @@ invocation: /verify
 Perform a thorough verification of a completed issue implementation. This skill compares what was actually built against the intended goal and acceptance criteria, identifies gaps, runs validation checks, and documents the review on the ticket.
 
 This is the fourth and final step in the issue workflow:
-1. **define-issue** - Creates well-defined issues with acceptance criteria
-2. **refine-issue** - Breaks issues into single-file-focused sub-tasks with dependencies
-3. **execute-issue** - Implements sub-tasks one at a time
-4. **verify-issue** (this skill) - Validates implementation against acceptance criteria
+1. **define** - Creates well-defined issues with acceptance criteria
+2. **refine** - Breaks issues into single-file-focused sub-tasks with dependencies
+3. **execute** - Implements sub-tasks one at a time
+4. **verify** (this skill) - Validates implementation against acceptance criteria
 </objective>
 
 <backend_detection>
@@ -58,11 +58,11 @@ If not specified, use defaults. These settings control the multi-agent verificat
 
 3. **Mark verification sub-task Done** - On PASS or PASS_WITH_NOTES, automatically mark the current verification sub-task as Done.
 
-The verify-issue skill is designed to run end-to-end autonomously. User interaction is only needed for:
+The verify skill is designed to run end-to-end autonomously. User interaction is only needed for:
 - Escalation after max_rework_iterations exceeded
 - Ambiguous requirements that need clarification (DISCUSS status)
 
-**Note**: The verification sub-task is created by refine-issue during issue breakdown. When mobius executes a "Verification Gate" sub-task, it routes to this skill instead of execute-issue.
+**Note**: The verification sub-task is created by refine during issue breakdown. When mobius executes a "Verification Gate" sub-task, it routes to this skill instead of execute.
 </autonomous_actions>
 
 <context_input>
@@ -346,7 +346,7 @@ Pass the issue identifier:
 
 Or invoke programmatically:
 ```
-Skill: verify-issue
+Skill: verify
 Args: PROJ-123
 ```
 </invocation>
@@ -368,7 +368,7 @@ Args: PROJ-123
 </quick_start>
 
 <parent_story_mode>
-When verify-issue is called on a verification sub-task (via mobius loop), operate in parent story mode:
+When verify is called on a verification sub-task (via mobius loop), operate in parent story mode:
 
 1. **Identify parent issue** - Get the parent issue ID from the verification sub-task
 2. **Collect all sibling sub-tasks** - Fetch using backend list tool with parentId filter
@@ -380,7 +380,7 @@ When verify-issue is called on a verification sub-task (via mobius loop), operat
    - Files modified across all sub-tasks
    - Coverage data from all test runs
 
-**Note**: The verification sub-task is created by refine-issue during issue breakdown. This skill focuses on EXECUTING verification, not creating the sub-task.
+**Note**: The verification sub-task is created by refine during issue breakdown. This skill focuses on EXECUTING verification, not creating the sub-task.
 
 **Context aggregation**:
 ```markdown
@@ -412,21 +412,21 @@ From sub-tasks:
 </parent_story_mode>
 
 <verification_subtask_context>
-**Note**: The verification sub-task is created by the **refine-issue** skill during issue breakdown, NOT by verify-issue.
+**Note**: The verification sub-task is created by the **refine** skill during issue breakdown, NOT by verify.
 
-When mobius loop encounters a "Verification Gate" sub-task (detected by title pattern), it routes execution to `/verify-issue` instead of `/execute-issue`.
+When mobius loop encounters a "Verification Gate" sub-task (detected by title pattern), it routes execution to `/verify` instead of `/execute`.
 
-**Expected sub-task format** (created by refine-issue):
+**Expected sub-task format** (created by refine):
 - **Title**: `[{parent-id}] Verification Gate` (MUST contain "Verification Gate")
 - **Blocked by**: All implementation sub-tasks
 - **Labels**: `["verification"]` (optional)
 
 **Execution flow**:
-1. refine-issue creates: implementation sub-tasks + Verification Gate sub-task
-2. mobius loop executes implementation sub-tasks via `/execute-issue`
+1. refine creates: implementation sub-tasks + Verification Gate sub-task
+2. mobius loop executes implementation sub-tasks via `/execute`
 3. When all implementation sub-tasks are Done, Verification Gate becomes unblocked
-4. mobius detects "Verification Gate" in title → routes to `/verify-issue`
-5. verify-issue runs multi-agent review on the parent issue
+4. mobius detects "Verification Gate" in title → routes to `/verify`
+5. verify runs multi-agent review on the parent issue
 6. On FAIL: reopens failing implementation sub-tasks → mobius loop continues
 7. On PASS: marks Verification Gate Done → parent issue can be completed
 </verification_subtask_context>
@@ -878,7 +878,7 @@ Include feedback comments in the `feedbackComments` field of the structured outp
 After addressing these issues, the verification gate will automatically re-run when all implementation sub-tasks are complete again.
 
 ---
-*Feedback from verify-issue multi-agent review*
+*Feedback from verify multi-agent review*
 ```
 
 ### 3. Include Status Transitions in Structured Output
@@ -897,7 +897,7 @@ The loop continues naturally after processing the structured output:
 3. Posts feedback comments via SDK
 4. Loop polls for ready tasks
 5. Picks up reopened sub-tasks
-6. Executes them via execute-issue
+6. Executes them via execute
 7. When all implementation sub-tasks Done, verification sub-task unblocks
 8. Verification runs again
 
@@ -1016,7 +1016,7 @@ Include the review as the `reviewComment` field in the structured output. The mo
 {clear action items}
 
 ---
-*Automated verification by verify-issue*
+*Automated verification by verify*
 ```
 </post_review_comment>
 
@@ -1287,7 +1287,7 @@ A successful verification achieves:
 - [ ] Coverage threshold configurable (default 80%)
 
 **Context Gathering** (AC 1, 2):
-- [ ] verify-issue receives verification sub-task ID as input (from mobius loop)
+- [ ] verify receives verification sub-task ID as input (from mobius loop)
 - [ ] Parent issue identified from the verification sub-task
 - [ ] Full parent issue context loaded (description, criteria, comments)
 - [ ] All sibling implementation sub-tasks collected and analyzed

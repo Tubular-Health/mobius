@@ -78,7 +78,7 @@ describe('setup command', () => {
       expect(existsSync(skillsDir)).toBe(true);
     });
 
-    it('creates commands directory when updating a local installation', async () => {
+    it('does not create commands directory when no bundled commands exist', async () => {
       // Create a local mobius config
       const configPath = join(testDir, 'mobius.config.yaml');
       writeFileSync(configPath, 'backend: linear\n');
@@ -87,9 +87,9 @@ describe('setup command', () => {
       const { setup } = await import('./setup.js');
       await setup({ updateSkills: true });
 
-      // Verify commands directory was created
+      // Commands directory should not be created when no bundled commands exist
       const commandsDir = join(testDir, '.claude', 'commands');
-      expect(existsSync(commandsDir)).toBe(true);
+      expect(existsSync(commandsDir)).toBe(false);
     });
 
     it('does not prompt for user input when updateSkills is true', async () => {

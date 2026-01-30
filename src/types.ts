@@ -13,7 +13,7 @@ export interface TuiConfig {
 
 /**
  * Verification quality gate configuration
- * Used by verify-issue skill to create verification sub-tasks
+ * Used by verify skill to create verification sub-tasks
  */
 export interface VerificationConfig {
   coverage_threshold: number; // Minimum test coverage percentage (default: 80)
@@ -146,8 +146,8 @@ export const DEFAULT_CONFIG: LoopConfig = {
 };
 
 export const BACKEND_SKILLS: Record<Backend, string> = {
-  linear: '/execute-issue',
-  jira: '/execute-issue',
+  linear: '/execute',
+  jira: '/execute',
 };
 
 export const BACKEND_ID_PATTERNS: Record<Backend, RegExp> = {
