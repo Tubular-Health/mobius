@@ -1,6 +1,6 @@
 {
   "name": "mobius-ai",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "AI-Powered Development Workflow Tool - Execute Linear/Jira issues with Claude",
   "type": "module",
   "main": "dist/bin/mobius.js",
