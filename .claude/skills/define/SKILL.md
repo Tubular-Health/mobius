@@ -1,5 +1,5 @@
 ---
-name: define-issue
+name: define
 description: Create well-defined issues (bugs, features, tasks) using Socratic questioning to eliminate ambiguity. Use when creating new Linear or Jira issues, when the user mentions Linear, Jira, or needs to define work items with proper acceptance criteria and relationships.
 invocation: /define
 ---
@@ -51,53 +51,31 @@ jira:
 </jira>
 </backend_context>
 
-<context_input>
-**Optional context for available teams and labels.**
+<context_gathering_mcp>
+**Use MCP tools to gather workspace context dynamically.**
 
-The skill may receive workspace metadata via the `MOBIUS_CONTEXT_FILE` environment variable to help with team/label selection. This context is optional - the skill can function without it by asking the user directly.
+Before presenting options to the user, fetch available teams, labels, and projects using MCP tools.
 
-**Context file structure** (at `MOBIUS_CONTEXT_FILE` path):
+**For Linear backend**:
+- `mcp__plugin_linear_linear__list_teams` - Get available teams
+- `mcp__plugin_linear_linear__list_issue_labels` - Get available labels
+- `mcp__plugin_linear_linear__list_projects` - Get available projects
+- `mcp__plugin_linear_linear__list_users` - Get assignable users
 
-```json
-{
-  "workspace": {
-    "teams": [
-      {"id": "uuid", "name": "Engineering", "key": "ENG"},
-      {"id": "uuid", "name": "Design", "key": "DES"}
-    ],
-    "labels": [
-      {"id": "uuid", "name": "Bug", "color": "#ff0000"},
-      {"id": "uuid", "name": "Feature", "color": "#00ff00"}
-    ],
-    "projects": [
-      {"id": "uuid", "name": "Web App", "key": "WEB"}
-    ]
-  },
-  "metadata": {
-    "fetchedAt": "2026-01-28T12:00:00Z",
-    "backend": "linear"
-  }
-}
-```
+**For Jira backend** (via Atlassian MCP):
+- `mcp__atlassian__searchJiraIssuesUsingJql` - Search for issues and get project context
+- `mcp__atlassian__getJiraProjectIssueTypesMetadata` - Get available issue types
+- `mcp__atlassian__getJiraIssueTypeMetaWithFields` - Get required fields for issue type
+- Fall back to asking user directly if MCP tools unavailable
 
-**Reading context** (optional):
-```bash
-# Context file path from environment (if available)
-if [ -n "$MOBIUS_CONTEXT_FILE" ]; then
-  cat "$MOBIUS_CONTEXT_FILE"
-fi
-```
+**Workflow**:
+1. Detect backend from config file (default: linear)
+2. Use MCP tools to fetch workspace metadata
+3. Present validated options in AskUserQuestion dialogs
+4. If MCP tools fail, gracefully fall back to asking user directly
 
-**When context is available**:
-- Use team names from context when presenting options
-- Use label names from context for validation
-- Use project names from context for Jira projects
-
-**When context is not available**:
-- Ask user for team/project name directly
-- Ask user for labels to apply
-- Skill functions normally without pre-fetched metadata
-</context_input>
+This enables presenting real team/project/label options to the user.
+</context_gathering_mcp>
 
 <quick_start>
 <initial_gate>
@@ -123,7 +101,7 @@ Options:
 6. **Identify relationships** - What blocks this? What does this block?
 7. **Set priority and metadata** - Priority, labels/issue type, project
 8. **Present for approval** - Show complete issue before creating
-9. **Output issue specification** - Output structured data for CLI to create
+9. **Create issue via MCP** - Create issue directly using MCP tools after approval
 </workflow>
 </quick_start>
 
@@ -171,13 +149,60 @@ Uncover hidden requirements, edge cases, and ambiguities through targeted questi
 </question_categories>
 
 <questioning_protocol>
-1. Start with 2-3 high-value questions using AskUserQuestion
-2. Based on answers, identify remaining ambiguities
-3. Ask follow-up questions until answers create no new questions
-4. Confirm understanding by summarizing back
-5. Only proceed to issue creation when requirements are clear
+**Thorough Socratic Questioning for Zero Ambiguity**
 
-Use AskUserQuestion with descriptive options where applicable. For open-ended information gathering, direct questions in chat are acceptable.
+The goal is to create issues with **no ambiguity** for execution and verification.
+
+**Interactive questioning flow**:
+
+1. **Initial classification** - Use AskUserQuestion for issue type
+2. **Scope definition** - Ask about affected files/systems
+3. **Edge case exploration** - "What should happen if X fails?"
+4. **Acceptance validation** - "How will we verify this is done?"
+5. **Boundary confirmation** - "What is explicitly NOT in scope?"
+6. **Priority assessment** - "How critical is this work?"
+7. **Dependency mapping** - "What blocks this or is blocked by it?"
+
+**Anti-Ambiguity Checklist** (verify before creating):
+- [ ] No vague terms like "should work better" or "improve performance"
+- [ ] Each criterion has explicit verification method
+- [ ] Edge cases are documented with expected behavior
+- [ ] Scope is bounded (what's in AND what's out)
+- [ ] Dependencies are identified and linked
+
+**AskUserQuestion patterns**:
+
+For **scope clarification**:
+```
+Question: "Which parts of the system does this affect?"
+Options:
+1. **Frontend only** - UI components, styling, client-side logic
+2. **Backend only** - API, database, server-side logic
+3. **Full stack** - Both frontend and backend changes
+4. **Infrastructure** - CI/CD, deployment, configuration
+```
+
+For **edge case handling**:
+```
+Question: "What should happen when the operation fails?"
+Options:
+1. **Show error message** - Display user-friendly error and allow retry
+2. **Silent fallback** - Use default behavior without notification
+3. **Block operation** - Prevent action until issue resolved
+4. **Log and continue** - Record error but proceed with degraded functionality
+```
+
+For **verification method**:
+```
+Question: "How should we verify this criterion is met?"
+Options:
+1. **Automated test** - Unit/integration test that can run in CI
+2. **Manual testing** - Step-by-step verification by human
+3. **Observable behavior** - Visible in logs, metrics, or UI
+4. **Code review** - Verified by inspecting the implementation
+```
+
+Continue questioning until all aspects are crystal clear.
 </questioning_protocol>
 
 <latent_error_prevention>
@@ -364,10 +389,21 @@ The agent executing dependent tasks should read the checkpoint's decision before
 
 <context_gathering>
 <gathering_approach>
-When context is available via `MOBIUS_CONTEXT_FILE`, use the pre-fetched workspace data.
-When context is not available, ask the user directly for team/project and labels.
+Use MCP tools to fetch workspace context dynamically, then present options to the user.
 
-**For related issues**: Ask the user if they know of related issues. The CLI can search for related issues if needed before this skill runs.
+**Gathering workflow**:
+1. Call `mcp__plugin_linear_linear__list_teams` to get available teams
+2. Present team options via AskUserQuestion
+3. Call `mcp__plugin_linear_linear__list_issue_labels` to get labels for selected team
+4. Present label options via AskUserQuestion
+5. Optionally call `mcp__plugin_linear_linear__list_projects` for project assignment
+
+**For Jira**:
+1. Use `mcp__atlassian__getJiraProjectIssueTypesMetadata` to get issue types
+2. Use `mcp__atlassian__searchJiraIssuesUsingJql` to find related issues
+3. Present options via AskUserQuestion
+
+**For related issues**: Ask the user if they know of related issues, or use `mcp__plugin_linear_linear__list_issues` (Linear) / `mcp__atlassian__searchJiraIssuesUsingJql` (Jira) to search for potentially related issues.
 </gathering_approach>
 
 <relationship_discovery>
@@ -440,47 +476,100 @@ Use AskUserQuestion:
 - **Cancel** - Don't create this issue
 </before_output>
 
-<output_specification>
-After approval, output the issue specification for the CLI to create.
+<mcp_creation>
+After approval, create the issue directly using MCP tools.
 
-See `<structured_output>` section for the complete output format.
-</output_specification>
+**For Linear**:
+```
+mcp__plugin_linear_linear__create_issue:
+  title: "{issue title}"
+  team: "{team name}"
+  description: "{full description with acceptance criteria}"
+  priority: {1-4}
+  state: "{initial state}"
+  labels: ["{label1}", "{label2}"]
+  # Optional relationships
+  blocks: ["{issue-id}"]
+  blockedBy: ["{issue-id}"]
+  relatedTo: ["{issue-id}"]
+```
 
-<after_output>
-After outputting the issue specification:
+**For Jira** - use `mcp__atlassian__createJiraIssue`:
 
-"The issue specification has been output. The mobius CLI will create this issue.
+```
+mcp__atlassian__createJiraIssue:
+  cloudId: "{cloud-id}"
+  projectKey: "{project-key}"
+  issueTypeName: "Bug"  # or "Story", "Task"
+  summary: "{issue title}"
+  description: |
+    ## Summary
+    {description content}
+
+    ## Acceptance Criteria
+    - [ ] Criterion 1
+      - **Verification**: test command or manual step
+  additional_fields:
+    priority:
+      name: "{High/Medium/Low}"
+```
+
+After creation, the MCP tool returns the created issue details including the URL.
+</mcp_creation>
+
+<after_creation>
+After creating the issue via MCP:
+
+"Issue created successfully!
+
+**{Issue ID}**: {Issue Title}
+**URL**: {issue URL from MCP response}
 
 Would you like to:
 - Define related issues
+- Break this down into sub-tasks (/refine)
 - Add this to a project/epic"
-</after_output>
+</after_creation>
 </approval_workflow>
 
 <examples>
 <bug_example>
 User: "There's a bug with schedules"
 
-Response flow:
-1. "What is happening vs what should happen?"
-2. "Can you reproduce this? What are the steps?"
-3. "Does this affect all users or specific scenarios?"
-4. "What error message do you see?"
+**Response flow with AskUserQuestion**:
 
-**Resulting issue specification** (output at end of response):
+1. Initial question: "What is happening vs what should happen?"
+2. Follow-up: "Can you reproduce this? What are the exact steps?"
+3. Scope question via AskUserQuestion:
+   - Question: "Does this affect all users or specific scenarios?"
+   - Options: All users, Specific user roles, Specific data conditions, Unknown
+4. Priority question via AskUserQuestion:
+   - Question: "What is the impact of this bug?"
+   - Options: Production down, Major feature broken, Degraded experience, Minor annoyance
 
-```yaml
----
-status: ISSUE_DEFINED
-timestamp: "2026-01-28T12:00:00Z"
-backend: linear  # or jira
+**After gathering all details, present for approval**:
 
-issue:
+"Here is the issue I'll create:
+
+**Title**: Schedule deactivation throws 500 error
+**Team**: Engineering
+**Type**: Bug
+**Priority**: Urgent (1)
+**State**: Todo
+
+**Description**:
+## Summary
+Users receive HTTP 500 error when deactivating schedules.
+...
+
+Ready to create this issue?"
+
+**After approval, create via MCP**:
+
+```
+mcp__plugin_linear_linear__create_issue:
   title: "Schedule deactivation throws 500 error"
-  team: "Engineering"  # Linear: team name, Jira: project key
-  type: "Bug"  # Linear: label, Jira: issuetype
-  priority: 1  # Linear: 1-4, Jira: Highest/High/Medium/Low/Lowest
-  state: "Todo"  # Initial state
+  team: "Engineering"
   description: |
     ## Summary
     Users receive HTTP 500 error when deactivating schedules.
@@ -505,36 +594,43 @@ issue:
       - **Verification**: Manual test - check team view after deactivation
     - [ ] Error logs capture root cause for monitoring
       - **Verification**: Observable - check logs after fix deployment
-  labels:
-    - "Bug"
-  relationships: {}  # Optional: blocks, blockedBy, relatedTo, duplicateOf
----
+  priority: 1
+  state: "Todo"
+  labels: ["Bug"]
 ```
+
+**Report result to user**:
+
+"Issue created successfully!
+
+**MOB-200**: Schedule deactivation throws 500 error
+**URL**: https://linear.app/mobius/issue/MOB-200
+
+Would you like to break this down into sub-tasks (/refine)?"
 </bug_example>
 
 <feature_example>
 User: "We need to add dark mode"
 
-Response flow:
+**Response flow with thorough AskUserQuestion**:
+
 1. "Who is the primary user of this feature?"
-2. "Should it follow system preferences or be manually toggled?"
-3. "Which screens/components need dark mode support?"
-4. "How will we know this feature is successful?"
+2. AskUserQuestion for behavior:
+   - Question: "How should the theme be controlled?"
+   - Options: Follow system only, Manual toggle only, Both system and manual, User choice on first launch
+3. AskUserQuestion for scope:
+   - Question: "Which areas need dark mode support?"
+   - Options: All screens, Core screens only, Settings and main views, Specific components (list them)
+4. AskUserQuestion for verification:
+   - Question: "How should we verify the feature works?"
+   - Options: Automated visual regression, Manual QA checklist, Accessibility audit, All of the above
 
-**Resulting issue specification** (output at end of response):
+**After gathering all details and approval, create via MCP**:
 
-```yaml
----
-status: ISSUE_DEFINED
-timestamp: "2026-01-28T12:00:00Z"
-backend: linear
-
-issue:
+```
+mcp__plugin_linear_linear__create_issue:
   title: "Add dark mode theme support"
   team: "Engineering"
-  type: "Feature"
-  priority: 3  # Normal
-  state: "Backlog"
   description: |
     ## Summary
     Add dark mode support with system preference detection and manual toggle.
@@ -543,6 +639,10 @@ issue:
     - App detects system dark mode preference on launch
     - User can manually toggle between light/dark/system
     - All screens render correctly in both modes
+
+    ## Scope
+    **In scope**: All core screens, settings, navigation
+    **Out of scope**: Admin dashboard (separate issue)
 
     ## Acceptance Criteria
     - [ ] Theme follows system preference by default
@@ -555,131 +655,99 @@ issue:
       - **Verification**: Manual test - set theme, restart app, verify theme persists
     - [ ] No flash of wrong theme on app launch
       - **Verification**: Observable - launch app in dark mode, no white flash
-  labels:
-    - "Feature"
-  relationships: {}
----
+
+    ## Edge Cases
+    - If localStorage is unavailable, default to system preference
+    - If system preference API unavailable, default to light mode
+  priority: 3
+  state: "Backlog"
+  labels: ["Feature"]
 ```
+
+**Report result to user**:
+
+"Issue created successfully!
+
+**MOB-201**: Add dark mode theme support
+**URL**: https://linear.app/mobius/issue/MOB-201
+
+This is a larger feature. Would you like to break it down into sub-tasks (/refine MOB-201)?"
 </feature_example>
 </examples>
 
-<structured_output>
-**This skill MUST output structured data for the mobius CLI to parse and create issues.**
+<issue_creation_mcp>
+**Create the issue directly using MCP tools after user approval.**
 
-At the END of your response, output a YAML or JSON block with the issue specification. The mobius CLI parses this to create issues via SDK.
+This skill creates issues directly via MCP tools - no structured YAML output needed.
 
-**Output format** (YAML preferred for readability):
+**For Linear** - use `mcp__plugin_linear_linear__create_issue`:
 
-```yaml
----
-status: ISSUE_DEFINED  # Required: indicates successful issue definition
-timestamp: "2026-01-28T12:00:00Z"  # Required: ISO-8601 timestamp
-backend: linear  # Required: "linear" or "jira"
-
-issue:
-  # Required fields
-  title: "Issue title"
-  team: "Team Name"  # Linear: team name, Jira: project key
+```
+mcp__plugin_linear_linear__create_issue:
+  title: "{issue title}"
+  team: "{team name}"
   description: |
     ## Summary
-    [description content]
+    {description content}
 
     ## Acceptance Criteria
     - [ ] Criterion 1
       - **Verification**: test command or manual step
-
-  # Type/label fields (backend-specific)
-  type: "Bug"  # Linear: maps to label, Jira: maps to issuetype
-  labels:  # Optional additional labels
-    - "Bug"
-    - "Frontend"
-
-  # Priority (backend-specific mapping)
-  priority: 2  # Linear: 0-4, Jira: converts to Highest/High/Medium/Low/Lowest
-
-  # Initial state
-  state: "Backlog"  # Linear: Backlog/Todo, Jira: To Do
-
-  # Optional fields
-  assignee: "user@example.com"  # Optional: user email or ID
-  dueDate: "2026-02-15"  # Optional: ISO date
-  parentId: "MOB-100"  # Optional: parent issue for sub-issues
-
-  # Relationships (optional)
-  relationships:
-    blocks:
-      - "MOB-123"
-    blockedBy:
-      - "MOB-456"
-    relatedTo:
-      - "MOB-789"
-    duplicateOf: null  # or "MOB-999" if duplicate
----
+  priority: {1-4}  # 1=Urgent, 2=High, 3=Normal, 4=Low
+  state: "{initial state}"  # Backlog, Todo, In Progress, Done
+  labels: ["{label1}", "{label2}"]
+  # Optional relationships
+  blocks: ["{issue-id}"]
+  blockedBy: ["{issue-id}"]
+  relatedTo: ["{issue-id}"]
+  duplicateOf: "{issue-id}"  # if marking as duplicate
 ```
 
-**Valid status values**:
-| Status | When to use |
-|--------|-------------|
-| `ISSUE_DEFINED` | Issue specification complete and approved |
-| `CANCELLED` | User cancelled issue creation |
-| `NEEDS_INFO` | More information needed from user |
+**For Jira** - use `mcp__atlassian__createJiraIssue`:
+
+```
+mcp__atlassian__createJiraIssue:
+  cloudId: "{cloud-id}"
+  projectKey: "{project-key}"
+  issueTypeName: "Bug"  # or "Story", "Task"
+  summary: "{issue title}"
+  description: |
+    ## Summary
+    {description content}
+
+    ## Acceptance Criteria
+    - [ ] Criterion 1
+      - **Verification**: test command or manual step
+  additional_fields:
+    priority:
+      name: "{High/Medium/Low}"
+```
+
+**After successful creation**:
+1. Extract the issue ID and URL from the MCP response
+2. Report the created issue to the user
+3. Offer next steps (refine, create related issues)
+
+**If MCP tool fails**:
+1. Report the error to the user
+2. Suggest troubleshooting steps (check API token, permissions)
+3. Offer to retry or save issue details for manual creation
+
+**Relationship handling**:
+- `blocks`: Issues that cannot start until this one completes
+- `blockedBy`: Issues that must complete before this one can start
+- `relatedTo`: Related issues for reference
+- `duplicateOf`: Mark as duplicate of existing issue
 
 **Backend-specific field mappings**:
 
-| Field | Linear | Jira |
-|-------|--------|------|
-| `team` | Team name (e.g., "Engineering") | Project key (e.g., "PROJ") |
-| `type` | Becomes primary label | `issuetype` (Bug/Story/Task/Epic) |
-| `priority` | 0=None, 1=Urgent, 2=High, 3=Normal, 4=Low | Highest/High/Medium/Low/Lowest |
-| `state` | Backlog, Todo, In Progress, Done | To Do, In Progress, Done |
-| `relationships` | `blocks`, `blockedBy`, `relatedTo`, `duplicateOf` | Link types: blocks, relates to, duplicates |
-
-**Jira-specific output example**:
-
-```yaml
----
-status: ISSUE_DEFINED
-timestamp: "2026-01-28T12:00:00Z"
-backend: jira
-
-issue:
-  title: "Schedule deactivation throws 500 error"
-  team: "PROJ"  # Project key for Jira
-  type: "Bug"  # issuetype for Jira
-  priority: "High"  # Jira uses string priorities
-  state: "To Do"
-  description: |
-    ## Summary
-    Users receive HTTP 500 error when deactivating schedules.
-
-    ## Acceptance Criteria
-    - [ ] User can deactivate schedule without error
-  labels:
-    - "backend"
-    - "p1"
-  relationships:
-    blocks:
-      - "PROJ-456"
----
-```
-
-**Critical requirements**:
-1. Output MUST be valid YAML or JSON
-2. Output MUST appear at the END of your response
-3. Output MUST include `status`, `timestamp`, and `backend` fields
-4. For `ISSUE_DEFINED` status, `issue` object is required with all required fields
-5. `description` should include acceptance criteria with verification methods
-
-**Example cancelled output**:
-
-```yaml
----
-status: CANCELLED
-timestamp: "2026-01-28T12:00:00Z"
-reason: "User chose not to create issue"
----
-```
-</structured_output>
+| Field | Linear | Jira (via Atlassian MCP) |
+|-------|--------|--------------------------|
+| `team` / `projectKey` | Team name | Project key |
+| `priority` | 1=Urgent, 2=High, 3=Normal, 4=Low | Highest/High/Medium/Low/Lowest |
+| `state` / `status` | Backlog, Todo, In Progress, Done | To Do, In Progress, Done |
+| `labels` / `issueTypeName` | Labels array | Issue type name (Bug/Story/Task) |
+</issue_creation_mcp>
 
 <anti_patterns>
 **Don't accept vague requirements**:
@@ -716,10 +784,14 @@ An issue is ready when:
 - [ ] Title is specific and actionable
 - [ ] Description includes all relevant context
 - [ ] Acceptance criteria are behavioral outcomes
-- [ ] Each criterion is verifiable
+- [ ] Each criterion has explicit verification method
 - [ ] Priority reflects actual urgency/impact
 - [ ] Relationships are identified and linked
 - [ ] Project/team is set
-- [ ] User has approved before outputting specification
-- [ ] Structured output is valid YAML/JSON with all required fields
+- [ ] No vague terms remain (no "should work better", "improve performance")
+- [ ] Edge cases are documented with expected behavior
+- [ ] Scope is bounded (what's in AND what's out)
+- [ ] User has approved before creating
+- [ ] Issue created successfully via MCP tool
+- [ ] Created issue URL returned to user
 </success_criteria>

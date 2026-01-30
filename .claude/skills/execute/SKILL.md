@@ -1,5 +1,5 @@
 ---
-name: execute-issue
+name: execute
 description: Execute a single sub-task with context priming. Supports both Linear and Jira backends via progressive disclosure. Use when ready to implement a refined issue, when the user mentions "execute", "implement", or "work on" an issue.
 invocation: /execute
 ---

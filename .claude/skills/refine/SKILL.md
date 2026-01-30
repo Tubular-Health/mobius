@@ -1,5 +1,5 @@
 ---
-name: refine-issue
+name: refine
 description: Break down issues into sub-tasks with dependencies. Supports Linear and Jira backends. Use when the user mentions "refine", "break down", or "plan" for an issue.
 invocation: /refine
 ---
@@ -56,7 +56,7 @@ Did you mean to use a different backend, or is this a valid issue ID?
 <parent_issue_loading>
 **Fetch parent issue details using MCP tools.**
 
-Use MCP tools to load the parent issue directly - no context file needed.
+Use MCP tools to load the parent issue directly.
 
 **For Linear** - use `mcp__plugin_linear_linear__get_issue`:
 
