@@ -20,19 +20,23 @@ Sub-tasks are designed for autonomous execution - each should be completable wit
 </context>
 
 <backend_detection>
-**FIRST**: Detect the backend from context file metadata.
+**Ask user which backend to use via AskUserQuestion if not obvious from issue ID format.**
 
-Read the `metadata.backend` field from the context file:
+**Auto-detection from issue ID**:
+- Linear format: `MOB-123`, `VRZ-456` (typically 2-4 letter prefix)
+- Jira format: `PROJ-123` (typically longer project key)
 
-```bash
-cat "$MOBIUS_CONTEXT_FILE" | jq '.metadata.backend'
-```
+If the format is ambiguous, use AskUserQuestion:
 
-**Values**: `linear` or `jira`
+Question: "Which issue tracker are you using?"
 
-**Default**: If no backend is specified in metadata, default to `linear`.
+Options:
+1. **Linear** - Use Linear MCP tools
+2. **Jira** - Use Jira/Atlassian MCP tools
 
-The backend information is included in the structured output so the mobius loop knows which SDK to use for issue creation. All workflow logic remains the same regardless of backend.
+Store the selection to use appropriate MCP tools throughout the skill.
+
+**Default**: If not specified, default to `linear`.
 </backend_detection>
 
 <input_validation>
@@ -49,187 +53,159 @@ Did you mean to use a different backend, or is this a valid issue ID?
 ```
 </input_validation>
 
-<context_input>
-**The mobius loop provides parent issue context via environment variable and local files.**
+<parent_issue_loading>
+**Fetch parent issue details using MCP tools.**
 
-The skill receives context through:
-1. `MOBIUS_CONTEXT_FILE` environment variable - path to the context JSON file
-2. Local files at `~/.mobius/issues/{parentId}/`
+Use MCP tools to load the parent issue directly - no context file needed.
 
-**Context file structure** (at `MOBIUS_CONTEXT_FILE` path):
+**For Linear** - use `mcp__plugin_linear_linear__get_issue`:
 
-```json
-{
-  "parent": {
-    "id": "uuid",
-    "identifier": "MOB-161",
-    "title": "Parent issue title",
-    "description": "Full description with acceptance criteria",
-    "gitBranchName": "branch-name",
-    "status": "Backlog",
-    "labels": ["Feature"],
-    "priority": { "value": 1, "name": "Urgent" },
-    "team": "Mobius",
-    "teamId": "uuid",
-    "url": "https://linear.app/..."
-  },
-  "subTasks": [],
-  "metadata": {
-    "fetchedAt": "2026-01-28T12:00:00Z",
-    "updatedAt": "2026-01-28T12:00:00Z",
-    "backend": "linear"
-  }
-}
+```
+mcp__plugin_linear_linear__get_issue:
+  id: "MOB-123"  # The issue identifier (e.g., "MOB-123")
+  includeRelations: true  # To get blocking relationships
 ```
 
-**Reading context**:
-```bash
-# Context file path from environment
-CONTEXT_FILE="$MOBIUS_CONTEXT_FILE"
+**Extract from the response**:
+- **Title and description**: What needs to be implemented
+- **Acceptance criteria**: Checklist of requirements (look for checkbox patterns in description)
+- **Labels**: Bug/Feature/Improvement for context
+- **Priority**: Urgency level for task ordering
+- **Team/Project**: For sub-task inheritance
+- **Existing relationships**: blockedBy, blocks, relatedTo
+- **URL**: For reference in sub-tasks
 
-# Or read directly from local storage
-cat ~/.mobius/issues/MOB-161/parent.json
+**For Jira** - use `mcp__atlassian__getJiraIssue`:
+
+```
+mcp__atlassian__getJiraIssue:
+  cloudId: "{cloud-id}"
+  issueIdOrKey: "PROJ-123"
 ```
 
-**Backend detection**: The `metadata.backend` field indicates whether the issue is from Linear or Jira. This affects how the mobius loop creates sub-tasks, but the skill outputs a uniform structure regardless of backend.
-</context_input>
+**Extract from the response**:
+- **Summary and description**: What needs to be implemented
+- **Issue type**: Bug/Story/Task for context
+- **Priority**: Urgency level
+- **Project key**: For sub-task inheritance
+- **Issue links**: blocks, is blocked by relationships
 
-<structured_output>
-**This skill MUST output structured data for the mobius loop to parse.**
+**If MCP tool fails**:
+1. Report the error to the user
+2. Check if the issue ID is valid
+3. Verify API permissions
+4. Offer to retry or use a different issue ID
+</parent_issue_loading>
 
-At the END of your response, output a YAML or JSON block with the sub-task specifications. The mobius loop parses this to create sub-tasks via SDK.
+<subtask_creation_mcp>
+**Create sub-tasks directly using MCP tools after user approval.**
 
-**Output format** (YAML preferred for readability):
+This skill creates sub-tasks directly via MCP tools - no structured YAML output needed.
 
-```yaml
----
-status: BREAKDOWN_APPROVED  # Required: one of the valid status values
-timestamp: "2026-01-28T12:00:00Z"  # Required: ISO-8601 timestamp
-parentId: "MOB-161"  # Required: parent issue identifier
-backend: "linear"  # Required: backend from context metadata
+**Creation order**: Create sub-tasks in dependency order (leaf tasks first):
+1. Create tasks with no blockers first
+2. Capture returned issue IDs
+3. Create dependent tasks with `blockedBy` referencing created issue IDs
 
-subTasks:
-  - title: "[MOB-161] Define TypeScript types for feature"
-    description: |
-      ## Summary
-      Create type definitions for the feature.
+**For Linear** - use `mcp__plugin_linear_linear__create_issue`:
 
-      ## Target File(s)
-      `src/types/feature.ts` (Create)
+```
+mcp__plugin_linear_linear__create_issue:
+  title: "[{parent-id}] {sub-task title}"
+  team: "{team from parent}"
+  description: |
+    ## Summary
+    {Brief description of what this task accomplishes}
 
-      ## Acceptance Criteria
-      - [ ] Type exported with proper definition
-      - [ ] File compiles without errors
+    ## Context
+    Part of {parent-id}: {parent title}
 
-      ## Verify Command
-      ```bash
-      grep -q "export type Feature" src/types/feature.ts && echo "PASS"
-      ```
-    targetFile: "src/types/feature.ts"
-    changeType: "create"
-    blockedBy: []  # Empty for first task
-    order: 1
+    ## Target File(s)
+    `{file-path}` ({Create/Modify})
 
-  - title: "[MOB-161] Implement feature service"
-    description: |
-      ## Summary
-      Implement the feature service.
+    ## Action
+    {Specific implementation guidance}
 
-      ## Target File(s)
-      `src/lib/feature.ts` (Create)
+    ## Avoid
+    - Do NOT {anti-pattern} because {reason}
 
-      ## Acceptance Criteria
-      - [ ] Service function implemented
-      - [ ] Tests pass
+    ## Acceptance Criteria
+    - [ ] {Criterion 1}
+      * **Verification**: {how to verify}
+    - [ ] {Criterion 2}
 
-      ## Verify Command
-      ```bash
-      grep -q "export function" src/lib/feature.ts && echo "PASS"
-      ```
-    targetFile: "src/lib/feature.ts"
-    changeType: "create"
-    blockedBy: [1]  # Blocked by order 1
-    order: 2
-
-  - title: "[MOB-161] Verification Gate"
-    description: |
-      Runs verify-issue to validate implementation meets acceptance criteria.
-    targetFile: null
-    changeType: "verification"
-    blockedBy: [1, 2]  # Blocked by ALL implementation tasks
-    order: 3
-    isVerificationGate: true
-
-dependencyGraph: |
-  ```mermaid
-  graph TD
-    A[1: Define types] --> B[2: Implement service]
-    B --> C[3: Verification Gate]
-  ```
-
-summary:
-  totalSubTasks: 3
-  implementationTasks: 2
-  verificationGate: 1
-  parallelGroups:
-    - [1]
-    - [2]
-    - [3]
-  readyToStart: [1]
----
+    ## Verify Command
+    ```bash
+    {executable verification command}
+    ```
+  parentId: "{parent issue UUID}"  # Links as sub-task
+  blockedBy: ["{blocker-id-1}", "{blocker-id-2}"]  # Issue IDs from earlier creations
+  labels: ["{inherited-labels}"]
 ```
 
-**Valid status values**:
-| Status | When to use |
-|--------|-------------|
-| `BREAKDOWN_APPROVED` | User approved breakdown, create sub-tasks |
-| `BREAKDOWN_REVISED` | User requested changes, presenting revised plan |
-| `NEEDS_CLARIFICATION` | Ambiguous requirements, asking user questions |
-| `NO_BREAKDOWN_NEEDED` | Issue is already small enough, no sub-tasks required |
+**Verification Gate creation**:
+```
+mcp__plugin_linear_linear__create_issue:
+  title: "[{parent-id}] Verification Gate"
+  team: "{team from parent}"
+  description: |
+    Runs verify-issue to validate implementation meets acceptance criteria.
 
-**Critical requirements**:
-1. Output MUST be valid YAML or JSON
-2. Output MUST appear at the END of your response
-3. Output MUST include `status`, `timestamp`, `parentId`, `backend` fields
-4. Each sub-task MUST include `title`, `description`, `blockedBy`, `order` fields
-5. The `blockedBy` array contains order numbers (not identifiers) of blocking tasks
-6. Verification Gate MUST be the final task, blocked by ALL implementation tasks
-7. The mobius loop will create the actual issues using the appropriate SDK
-
-**Sub-task description format**:
-Each sub-task description should follow this template:
-```markdown
-## Summary
-{Brief description of what this task accomplishes}
-
-## Context
-Part of {parent-id}: {parent title}
-
-## Target File(s)
-`{file-path}` ({Create/Modify})
-
-## Action
-{Specific implementation guidance}
-
-## Avoid
-- Do NOT {anti-pattern} because {reason}
-
-## Acceptance Criteria
-- [ ] {Criterion 1}
-  * **Verification**: {how to verify}
-- [ ] {Criterion 2}
-
-## Verify Command
-```bash
-{executable verification command}
+    **Blocked by**: ALL implementation sub-tasks
+    **Action**: Run `/verify {parent-id}` after all implementation tasks complete
+  parentId: "{parent issue UUID}"
+  blockedBy: ["{all-implementation-task-ids}"]  # ALL created sub-task IDs
 ```
 
-**Blocked by**: {order numbers or "None"}
-**Enables**: {order numbers this unblocks}
+**For Jira** - use `mcp__atlassian__createJiraIssue`:
+
+```
+mcp__atlassian__createJiraIssue:
+  cloudId: "{cloud-id}"
+  projectKey: "{project-key}"
+  issueTypeName: "Sub-task"
+  summary: "[{parent-id}] {sub-task title}"
+  description: |
+    ## Summary
+    {Brief description of what this task accomplishes}
+
+    ## Context
+    Part of {parent-id}: {parent title}
+
+    ## Target File(s)
+    `{file-path}` ({Create/Modify})
+
+    ## Action
+    {Specific implementation guidance}
+
+    ## Acceptance Criteria
+    - [ ] {Criterion 1}
+      * **Verification**: {how to verify}
+  parentId: "{parent-issue-key}"  # Links as sub-task
 ```
 
-**Important**: The mobius loop handles all issue creation via SDK. This skill only outputs the specification - it does NOT create issues directly.
-</structured_output>
+**Verification Gate for Jira**:
+```
+mcp__atlassian__createJiraIssue:
+  cloudId: "{cloud-id}"
+  projectKey: "{project-key}"
+  issueTypeName: "Sub-task"
+  summary: "[{parent-id}] Verification Gate"
+  description: |
+    Runs verify-issue to validate implementation meets acceptance criteria.
+
+    **Blocked by**: ALL implementation sub-tasks
+    **Action**: Run `/verify {parent-id}` after all implementation tasks complete
+  parentId: "{parent-issue-key}"
+```
+
+**Track created issues**: Maintain a mapping of order numbers to created issue IDs for proper blocking relationships.
+
+**Error handling**:
+- If a sub-task creation fails, report the error and ask user how to proceed
+- Offer to retry the failed creation or skip and continue
+- Report which sub-tasks were successfully created
+</subtask_creation_mcp>
 
 <quick_start>
 <invocation>
@@ -248,37 +224,53 @@ Args: MOB-123
 </invocation>
 
 <workflow>
-1. **Read context** - Load parent issue from `MOBIUS_CONTEXT_FILE` or local files
-2. **Detect backend** - Read backend from context metadata (default: linear)
-3. **Deep exploration** - Use Explore agent to thoroughly analyze related code, patterns, and dependencies
-4. **Identify work units** - Break down into single-file-focused tasks
-5. **Determine blocking order** - Analyze functional dependencies between tasks
-6. **Include verification gate** - Add a final "Verification Gate" sub-task blocked by ALL implementation sub-tasks
-7. **Present breakdown** - Show complete plan with all sub-tasks including verification gate
-8. **Gather feedback** - Use AskUserQuestion for refinement
-9. **Output specification** - Output structured YAML with approved sub-task specifications
+1. **Fetch parent issue** - Load parent issue via MCP tools (e.g., `mcp__plugin_linear_linear__get_issue`)
+2. **Detect backend** - Infer from issue ID format or ask user
+3. **Phase 1: Initial exploration** - Single Explore agent identifies affected areas, patterns, dependencies
+4. **Phase 2: Identify work units** - Main agent groups affected files into sub-task-sized work units
+5. **Phase 3: Per-task subagent research** - Spawn `feature-dev:code-architect` subagents (batched 3 at a time) to deep-dive and write complete sub-task descriptions
+6. **Phase 4: Aggregate & present** - Collect subagent write-ups, establish dependency ordering, add verification gate, present full breakdown
+7. **Gather feedback** - Use AskUserQuestion for refinement
+8. **Phase 5: Create sub-tasks via MCP** - Create sub-tasks directly using MCP tools in dependency order
 </workflow>
 </quick_start>
 
 <research_phase>
-<load_parent_context>
-Read the parent issue from the context file:
+<load_parent_via_mcp>
+Fetch the parent issue using MCP tools:
 
-```bash
-# Read from context file
-cat "$MOBIUS_CONTEXT_FILE" | jq '.parent'
-
-# Or read directly from local storage
-cat ~/.mobius/issues/{parentId}/parent.json
+**For Linear**:
+```
+mcp__plugin_linear_linear__get_issue:
+  id: "{issue-id}"  # e.g., "MOB-123"
+  includeRelations: true
 ```
 
-**Extract from parent**:
+**Extract from response**:
 - **Title and description**: What needs to be implemented
-- **Acceptance criteria**: Checklist of requirements (look for checkbox patterns)
+- **Acceptance criteria**: Checklist of requirements (look for `- [ ]` patterns in description)
 - **Labels**: Bug/Feature/Improvement for context
 - **Priority**: Urgency level for task ordering
-- **Team/Project**: For sub-task inheritance
-</load_parent_context>
+- **Team**: For sub-task inheritance (use same team for all sub-tasks)
+- **Existing relationships**: blockedBy, blocks (to maintain)
+- **URL**: For linking back to parent
+
+**For Jira** - use `mcp__atlassian__getJiraIssue`:
+
+```
+mcp__atlassian__getJiraIssue:
+  cloudId: "{cloud-id}"
+  issueIdOrKey: "PROJ-123"
+```
+
+**Extract from response**:
+- **Summary and description**: What needs to be implemented
+- **Issue type**: Bug/Story/Task for context
+- **Priority**: Urgency level for task ordering
+- **Project key**: For sub-task inheritance (use same project for all sub-tasks)
+- **Issue links**: blocks, is blocked by (to maintain)
+- **URL**: For linking back to parent
+</load_parent_via_mcp>
 
 <deep_exploration>
 Use the Task tool with Explore agent to thoroughly analyze the codebase:
@@ -317,19 +309,130 @@ From the exploration, extract:
 - **Pattern notes**: Existing conventions to follow
 </analysis_output>
 
-<parallel_research>
-**Optional optimization**: For complex issues (5+ files across multiple directories), spawn parallel Explore agents to gather context faster.
+<work_unit_identification>
+**Phase 2**: After Phase 1 exploration, the main agent groups findings into sub-task-sized work units.
 
-**Triggers** - use parallel research when:
-- Issue affects 5+ files across multiple directories
-- Multiple subsystems are involved
-- Deep domain knowledge is required
+**Process**:
+1. Review the Explore agent's file list and dependency graph
+2. Group files into work units following the single-file principle (one file or tightly-coupled pair per unit)
+3. For each work unit, note:
+   - **Target file(s)**: The primary file (and optional test pair)
+   - **Rough scope**: Create / Modify / Delete, approximate change size
+   - **Related areas**: Nearby files the subagent should examine for patterns and context
+   - **Dependency hints**: Which other work units this one likely depends on or enables
 
-**Skip** when: Simple features (< 4 files), well-understood areas, or time-sensitive changes.
+**Output**: A list of work unit briefs, each feeding into a Phase 3 subagent.
 
-For detailed agent prompts, aggregation strategy, and synthesis templates, see `.claude/skills/refine-issue/parallel-research.md`.
-</parallel_research>
+**Example work unit brief**:
+```
+Work Unit 3: Create useTheme hook
+  Target: src/hooks/useTheme.ts (Create)
+  Related: src/hooks/useAuth.ts (pattern reference), src/contexts/ThemeContext.tsx (dependency)
+  Scope: ~40 lines, new hook consuming ThemeContext
+  Depends on: Work Unit 2 (ThemeContext)
+  Enables: Work Units 4, 5, 6 (components consuming the hook)
+```
+</work_unit_identification>
 </research_phase>
+
+<per_task_subagent_phase>
+**Phase 3**: Spawn `feature-dev:code-architect` subagents to deep-dive each work unit and produce complete sub-task descriptions.
+
+<subagent_batching>
+**Batching rules**:
+- Spawn up to **3 subagents simultaneously** per batch
+- Wait for all subagents in a batch to complete before launching the next batch
+- If a work unit depends on another's output (rare at this stage), place it in a later batch
+
+**Example** (7 work units):
+- Batch 1: Work Units 1, 2, 3 (parallel)
+- Batch 2: Work Units 4, 5, 6 (parallel)
+- Batch 3: Work Unit 7 (final)
+</subagent_batching>
+
+<subagent_prompt_template>
+Each subagent receives the following context and returns a complete sub-task write-up:
+
+```
+Task tool:
+  subagent_type: feature-dev:code-architect
+  prompt: |
+    You are writing a sub-task description for an implementation breakdown.
+
+    ## Parent Issue
+    Title: {parent issue title}
+    Description: {parent issue description}
+    Acceptance Criteria: {acceptance criteria from parent}
+
+    ## Architecture Context (from Phase 1 exploration)
+    {Paste the Explore agent's analysis output — affected files, patterns, dependency graph, conventions}
+
+    ## Your Assigned Work Unit
+    Target file(s): {target file path(s)} ({Create/Modify})
+    Rough scope: {approximate change description}
+    Related areas to examine: {nearby files for pattern reference}
+    Dependency hints: Depends on {work unit N}, enables {work unit M}
+
+    ## Your Task
+    Analyze the target file(s) and related areas deeply. Then produce a complete sub-task description using this exact template:
+
+    ## Summary
+    {1-2 sentences: what this sub-task accomplishes}
+
+    ## Context
+    Part of {parent-id}: {parent title}
+
+    ## Target File(s)
+    `{file-path}` ({Create/Modify})
+
+    ## Action
+    {2-4 sentences of specific implementation guidance}
+    - Use {library/pattern} following `{existing example file}`
+    - Handle {error case} by {specific handling}
+    - Return {exact output shape}
+
+    ## Avoid
+    - Do NOT {anti-pattern 1} because {reason}
+    - Do NOT {anti-pattern 2} because {reason}
+
+    ## Acceptance Criteria
+    - [ ] {Criterion 1}
+      * **Verification**: {how to verify}
+    - [ ] {Criterion 2}
+      * **Verification**: {how to verify}
+
+    ## Verify Command
+    ```bash
+    {executable verification command}
+    ```
+
+    ## Dependencies
+    - **Blocked by**: {work unit numbers this depends on, or "None"}
+    - **Enables**: {work unit numbers this unblocks}
+
+    IMPORTANT: Be specific. Reference actual file paths, function names, and patterns you find in the codebase. Do not use generic placeholders.
+```
+</subagent_prompt_template>
+
+<subagent_output_handling>
+**Validation**: After each subagent returns, verify:
+1. All template sections are present (Summary, Context, Target Files, Action, Avoid, Acceptance Criteria, Verify Command, Dependencies)
+2. Target file paths are concrete (no placeholders)
+3. Verify command is executable (not pseudocode)
+4. Acceptance criteria are measurable
+
+**On failure**:
+- If a subagent returns incomplete or malformed output, retry once with a clarifying note
+- If retry also fails, the main agent writes the sub-task description manually using Phase 1 exploration data
+- Log which work units required fallback for debugging
+
+**On success**:
+- Store the write-up keyed by work unit number
+- Pass all collected write-ups to Phase 4 (aggregation)
+</subagent_output_handling>
+
+For subagent pattern details, batching strategy, and rationale, see `.claude/skills/refine-issue/parallel-research.md`.
+</per_task_subagent_phase>
 
 <decomposition_phase>
 <single_file_principle>
@@ -342,6 +445,8 @@ Each sub-task should focus on ONE file (or tightly-coupled pair like component +
 </single_file_principle>
 
 <task_structure>
+**Note**: In the standard flow, `feature-dev:code-architect` subagents (Phase 3) produce these sub-task descriptions. The main agent validates completeness and consistency during Phase 4 aggregation.
+
 <task_structure_quick>
 Each sub-task must include:
 - **Target file(s)**: Single file or source + test pair
@@ -403,6 +508,24 @@ Determine blocking order based on functional requirements:
 - Tests for different features can run in parallel
 </ordering_principles>
 
+<aggregation_phase>
+**Phase 4**: Collect all sub-task write-ups from Phase 3 subagents and assemble the final breakdown.
+
+**Aggregation steps**:
+1. **Collect write-ups** — Gather all sub-task descriptions from Phase 3 subagents (keyed by work unit number)
+2. **Assign ordering numbers** — Use dependency hints from subagent outputs combined with ordering principles to assign sequential order numbers
+3. **Establish blockedBy relationships** — Convert dependency hints into formal `blockedBy` references using assigned order numbers
+4. **Verify no circular dependencies** — Walk the dependency graph to confirm it is a DAG (directed acyclic graph)
+5. **Identify parallel groups** — Group tasks that share no mutual dependencies for concurrent execution
+6. **Add verification gate** — Append the verification gate sub-task blocked by ALL implementation tasks
+7. **Quality checks**:
+   - Each sub-task targets a single file (or tightly-coupled pair)
+   - No duplicate target files across sub-tasks
+   - All template sections are complete (Summary, Context, Target Files, Action, Avoid, Acceptance Criteria, Verify Command)
+   - Verify commands are executable (not pseudocode)
+   - Acceptance criteria are measurable
+</aggregation_phase>
+
 <verification_gate>
 **ALWAYS include a Verification Gate as the final sub-task.** This is required for every refined issue.
 
@@ -431,19 +554,6 @@ This task triggers the verify-issue skill to validate all implementation sub-tas
 **Enables**: Parent issue completion
 ```
 
-**Structured output specification**:
-```yaml
-- title: "[{parent-id}] Verification Gate"
-  description: |
-    Runs verify-issue to validate implementation meets acceptance criteria.
-  targetFile: null
-  changeType: "verification"
-  blockedBy: [{all implementation task order numbers}]
-  order: {final order number}
-  isVerificationGate: true
-```
-
-The mobius loop handles creation via the appropriate SDK (Linear or Jira) based on the `backend` field in the structured output.
 </verification_gate>
 
 <sizing_guidelines>
@@ -545,7 +655,7 @@ Parallel groups:
 </breakdown_format>
 
 <refinement_questions>
-After presenting, use AskUserQuestion:
+After presenting the initial breakdown, use AskUserQuestion:
 
 Question: "How would you like to proceed with this breakdown?"
 
@@ -556,6 +666,42 @@ Options:
 4. **Add context** - I have additional information to include
 5. **Start over** - Need a different approach entirely
 </refinement_questions>
+
+<per_subtask_validation>
+**For complex breakdowns (4+ sub-tasks), validate each sub-task interactively.**
+
+For each sub-task, use AskUserQuestion to verify:
+
+**Scope validation**:
+```
+Question: "Is the scope for sub-task {N} ({title}) correct?"
+Options:
+1. **Correct** - Scope is well-defined
+2. **Too broad** - Should be split into smaller tasks
+3. **Too narrow** - Can be combined with another task
+4. **Needs clarification** - Requirements are unclear
+```
+
+**Edge case validation**:
+```
+Question: "What should happen if {operation} fails in sub-task {N}?"
+Options:
+1. **Throw error** - Fail fast with clear error message
+2. **Return fallback** - Use default value and continue
+3. **Retry** - Attempt operation again with backoff
+4. **Not applicable** - This operation cannot fail
+```
+
+**Acceptance criteria validation**:
+```
+Question: "How should we verify sub-task {N} is complete?"
+Options:
+1. **Automated test** - Unit/integration test in CI
+2. **Manual verification** - Human checks specific behavior
+3. **Type checking** - TypeScript compilation succeeds
+4. **All of the above** - Multiple verification methods
+```
+</per_subtask_validation>
 
 <iterative_refinement>
 If user selects adjustment options:
@@ -569,138 +715,177 @@ Loop back to presentation after each refinement until user approves.
 </presentation_phase>
 
 <output_phase>
-<structured_output_generation>
-After user approval, generate the structured YAML output with all sub-task specifications.
+<mcp_creation_process>
+After user approval, create sub-tasks directly using MCP tools.
 
-**Output the specification** at the END of your response:
+**Creation sequence**:
 
-```yaml
----
-status: BREAKDOWN_APPROVED
-timestamp: "{current ISO-8601 timestamp}"
-parentId: "{parent issue identifier}"
-backend: "{backend from context metadata}"
+1. **Create leaf tasks first** (tasks with no blockers)
+2. **Track created issue IDs** in a mapping: `{ order: issueId }`
+3. **Create dependent tasks** using tracked IDs for `blockedBy`
+4. **Create Verification Gate last** with all implementation task IDs as blockers
+5. **Report progress** as each sub-task is created
 
-subTasks:
-  - title: "[{parent-id}] {sub-task title}"
-    description: |
-      {full description with acceptance criteria and verify command}
-    targetFile: "{file path or null for verification}"
-    changeType: "{create|modify|delete|verification}"
-    blockedBy: [{order numbers of blocking tasks}]
-    order: 1
-
-  # ... additional sub-tasks ...
-
-  - title: "[{parent-id}] Verification Gate"
-    description: |
-      Runs verify-issue to validate implementation meets acceptance criteria.
-    targetFile: null
-    changeType: "verification"
-    blockedBy: [{all implementation task order numbers}]
-    order: {final order number}
-    isVerificationGate: true
-
-dependencyGraph: |
-  {mermaid diagram showing dependencies}
-
-summary:
-  totalSubTasks: {count}
-  implementationTasks: {count}
-  verificationGate: 1
-  parallelGroups: {list of parallel groups}
-  readyToStart: [{order numbers of tasks with no blockers}]
----
+**Example creation flow**:
 ```
+Creating sub-task 1/4: "Define TypeScript types"...
+  -> Created MOB-201
 
-**Important**: The mobius loop handles all issue creation via SDK. This skill outputs the specification - it does NOT create issues directly.
-</structured_output_generation>
+Creating sub-task 2/4: "Implement feature service" (blocked by MOB-201)...
+  -> Created MOB-202
 
-<creation_delegation>
-The mobius loop parses the structured output and creates sub-tasks via SDK:
+Creating sub-task 3/4: "Add useFeature hook" (blocked by MOB-201)...
+  -> Created MOB-203
 
-**For Linear**:
-- Uses SDK to create issues with `parentId` and `blockedBy` fields
-- Handles creation order automatically (leaf tasks first)
-- Stores created issue IDs to reference in blockedBy for later tasks
+Creating sub-task 4/4: "Verification Gate" (blocked by MOB-201, MOB-202, MOB-203)...
+  -> Created MOB-204
 
-**For Jira**:
-- Uses SDK for two-phase creation (sub-tasks first, then links)
-- Phase 1: Create all sub-tasks
-- Phase 2: Create blocking relationships via `createJiraIssueLinks()`
-- Reports success/failure counts
-
-This delegation ensures:
-- Reliable issue creation via tested SDK code
-- Proper error handling and retry logic
-- Consistent behavior across backends
-</creation_delegation>
+All sub-tasks created successfully!
+```
+</mcp_creation_process>
 
 <completion_summary>
-After outputting the structured specification, provide a summary for the user:
+After creating all sub-tasks via MCP, provide a summary with URLs:
 
 ```markdown
 ## Breakdown Complete: {parent issue ID}
 
-**Status**: BREAKDOWN_APPROVED
-**Sub-tasks specified**: {count}
+**Sub-tasks created**: {count}
 **Verification gate**: Included
 
-| Order | Title | Blocked By | Ready |
-|-------|-------|------------|-------|
-| 1 | Define types | - | Yes |
-| 2 | Implement service | 1 | No |
-| 3 | Add hook | 1 | No |
-| 4 | Verification Gate | 1, 2, 3 | No |
+| ID | Title | Blocked By | URL |
+|----|-------|------------|-----|
+| MOB-201 | Define types | - | https://linear.app/... |
+| MOB-202 | Implement service | MOB-201 | https://linear.app/... |
+| MOB-203 | Add hook | MOB-201 | https://linear.app/... |
+| MOB-204 | Verification Gate | MOB-201, MOB-202, MOB-203 | https://linear.app/... |
 
-**Ready to start**: Task 1
-**Parallel opportunities**: After task 1, tasks 2 and 3 can run simultaneously
+**Ready to start**: MOB-201
+**Parallel opportunities**: After MOB-201, MOB-202 and MOB-203 can run simultaneously
 
-The mobius loop will create these sub-tasks in {backend}.
+**Dependency Graph**:
+```mermaid
+graph TD
+    A[MOB-201: Define types] --> B[MOB-202: Implement service]
+    A --> C[MOB-203: Add hook]
+    B --> D[MOB-204: Verification Gate]
+    C --> D
 ```
 
-**Note**: The mobius loop handles:
-- Creating sub-tasks via SDK
-- Posting the dependency diagram as a comment
-- Reporting creation success/failure
+Would you like to:
+- Start execution with `/execute MOB-201`
+- View the parent issue in Linear
+```
 </completion_summary>
+
+<post_creation_comment>
+Optionally post the dependency graph as a comment on the parent issue:
+
+```
+mcp__plugin_linear_linear__create_comment:
+  issueId: "{parent-issue-uuid}"
+  body: |
+    ## Sub-task Breakdown
+
+    | ID | Title | Blocked By |
+    |----|-------|------------|
+    | MOB-201 | Define types | - |
+    | MOB-202 | Implement service | MOB-201 |
+    | MOB-203 | Add hook | MOB-201 |
+    | MOB-204 | Verification Gate | MOB-201, MOB-202, MOB-203 |
+
+    **Ready to start**: MOB-201
+```
+
+**For Jira** - use `mcp__atlassian__addCommentToJiraIssue`:
+
+```
+mcp__atlassian__addCommentToJiraIssue:
+  cloudId: "{cloud-id}"
+  issueIdOrKey: "{parent-issue-key}"
+  commentBody: |
+    ## Sub-task Breakdown
+
+    | ID | Title | Blocked By |
+    |----|-------|------------|
+    | PROJ-201 | Define types | - |
+    | PROJ-202 | Implement service | PROJ-201 |
+    | PROJ-203 | Add hook | PROJ-201 |
+    | PROJ-204 | Verification Gate | PROJ-201, PROJ-202, PROJ-203 |
+
+    **Ready to start**: PROJ-201
+```
+</post_creation_comment>
 </output_phase>
 
 <error_handling>
-<context_load_failure>
-If context file cannot be loaded:
-1. Check `MOBIUS_CONTEXT_FILE` environment variable is set
-2. Verify the file exists at the specified path
-3. Try reading from local storage: `~/.mobius/issues/{parentId}/parent.json`
-4. Report error with suggested action:
-   - "Context file not found" - Run `mobius loop {issue-id}` to generate context
-   - "Invalid JSON" - Context file may be corrupted, re-run mobius loop
-</context_load_failure>
+<mcp_fetch_failure>
+If parent issue fetch via MCP fails:
 
-<output_format_errors>
-If structured output is malformed:
-1. Ensure YAML is valid (proper indentation, correct syntax)
-2. Verify all required fields are present:
-   - `status`, `timestamp`, `parentId`, `backend`
-   - Each sub-task has `title`, `description`, `blockedBy`, `order`
-3. Validate `blockedBy` arrays contain valid order numbers
-4. Confirm Verification Gate is marked with `isVerificationGate: true`
+1. **Issue not found**:
+   - Verify the issue ID is correct
+   - Check if the issue exists in the tracker
+   - Try with the full identifier (e.g., "MOB-123" not just "123")
 
-The mobius loop will report parsing errors - fix the output format and re-run.
-</output_format_errors>
+2. **Permission denied**:
+   - MCP tool may not have access to this issue
+   - Check API token permissions in Linear/Jira settings
+   - Verify the issue is not in a restricted project
 
-<creation_failure_handling>
-**Note**: Sub-task creation is handled by the mobius loop, not this skill.
+3. **MCP tool unavailable**:
+   - Linear MCP tools (`mcp__plugin_linear_linear__*`) or Atlassian MCP tools (`mcp__atlassian__*`) may not be configured
+   - Ask user to verify the appropriate MCP server is running
+   - Fall back to asking user to provide issue details manually
 
-If the loop reports creation failures:
-1. Check the loop's error output for specific failures
-2. Common issues:
-   - "Issue not found" - Verify parent issue ID exists
-   - "Permission denied" - Check API token permissions
-   - "Link type not available" (Jira) - "Blocks" link type may need configuration
-3. Partial failures are reported by the loop - successfully created sub-tasks remain valid
-4. Re-run `/refine` after fixing issues to regenerate the specification
-</creation_failure_handling>
+**Recovery**: Ask user if they want to retry, use a different issue ID, or provide details manually.
+</mcp_fetch_failure>
+
+<mcp_creation_failure>
+If sub-task creation via MCP fails:
+
+1. **Partial creation**: Some sub-tasks may have been created before the failure
+   - Report which sub-tasks were successfully created (with IDs)
+   - Ask user how to proceed with remaining sub-tasks
+
+2. **Permission errors**:
+   - Check if user has permission to create issues in the team
+   - Verify API token has write access
+
+3. **Validation errors**:
+   - Check if required fields are missing
+   - Verify team name exists
+   - Check if labels are valid for the workspace
+
+4. **Rate limiting**:
+   - MCP tool may be rate-limited
+   - Wait and retry, or create remaining sub-tasks manually
+
+**Recovery options via AskUserQuestion**:
+```
+Question: "Sub-task creation failed. How would you like to proceed?"
+Options:
+1. **Retry failed** - Attempt to create failed sub-tasks again
+2. **Skip and continue** - Mark failed ones and proceed with rest
+3. **Create manually** - I'll create the remaining sub-tasks myself
+4. **Cancel** - Don't create any more sub-tasks
+```
+</mcp_creation_failure>
+
+<relationship_errors>
+If blocking relationship creation fails:
+
+1. **Issue ID not found**:
+   - The blocker issue ID may be invalid
+   - Verify the ID was captured correctly during creation
+
+2. **Self-reference**:
+   - An issue cannot block itself
+   - Check for circular references in the dependency graph
+
+3. **Jira link type unavailable**:
+   - "Blocks" link type may not be configured in Jira
+   - Ask admin to enable the link type, or use "relates to" as fallback
+</relationship_errors>
 </error_handling>
 
 <examples>
@@ -840,6 +1025,59 @@ This task triggers the verify-issue skill to validate all implementation sub-tas
 - [1] → [2] → [3] (sequential foundation)
 - [4], [5], [6], [7] can all run in parallel after [3]
 - [8] runs after ALL other tasks complete
+
+**After user approval, create via MCP**:
+
+```
+# Step 1: Create leaf task (no blockers)
+mcp__plugin_linear_linear__create_issue:
+  title: "[MOB-100] Define theme types"
+  team: "Engineering"
+  parentId: "{parent-uuid}"
+  description: |
+    ## Summary
+    Create TypeScript type definitions for the theme system...
+    [full description]
+  -> Returns: MOB-101
+
+# Step 2: Create task blocked by MOB-101
+mcp__plugin_linear_linear__create_issue:
+  title: "[MOB-100] Create ThemeProvider context"
+  team: "Engineering"
+  parentId: "{parent-uuid}"
+  blockedBy: ["MOB-101"]
+  description: |
+    ## Summary
+    Create React context provider for theme state management...
+  -> Returns: MOB-102
+
+# Continue for all sub-tasks...
+
+# Final: Create Verification Gate blocked by ALL
+mcp__plugin_linear_linear__create_issue:
+  title: "[MOB-100] Verification Gate"
+  team: "Engineering"
+  parentId: "{parent-uuid}"
+  blockedBy: ["MOB-101", "MOB-102", "MOB-103", "MOB-104", "MOB-105", "MOB-106", "MOB-107"]
+  description: |
+    Runs verify-issue to validate implementation meets acceptance criteria.
+  -> Returns: MOB-108
+```
+
+**Report result to user**:
+
+"## Breakdown Complete: MOB-100
+
+**Sub-tasks created**: 8
+
+| ID | Title | Blocked By | URL |
+|----|-------|------------|-----|
+| MOB-101 | Define theme types | - | https://linear.app/... |
+| MOB-102 | Create ThemeProvider | MOB-101 | https://linear.app/... |
+| ... | ... | ... | ... |
+| MOB-108 | Verification Gate | MOB-101-107 | https://linear.app/... |
+
+**Ready to start**: MOB-101"
 </example_breakdown>
 </examples>
 
@@ -872,48 +1110,42 @@ This task triggers the verify-issue skill to validate all implementation sub-tas
 <success_criteria>
 A successful refinement produces:
 
-- [ ] Parent issue context loaded from `MOBIUS_CONTEXT_FILE` or local files
-- [ ] Backend detected from context metadata
+- [ ] Parent issue fetched via MCP tool (e.g., `mcp__plugin_linear_linear__get_issue`)
+- [ ] Backend detected from issue ID format or user input
 - [ ] All affected files identified through deep exploration
 - [ ] Each sub-task targets exactly one file (or source + test pair)
 - [ ] Every sub-task has clear, verifiable acceptance criteria
-- [ ] Blocking relationships are logically sound (using order numbers)
+- [ ] Each sub-task validated with user via AskUserQuestion (for complex breakdowns)
+- [ ] Blocking relationships are logically sound
 - [ ] No circular dependencies exist
 - [ ] Parallel opportunities are maximized
 - [ ] Ready tasks (no blockers) are clearly identified
-- [ ] **Verification Gate included as final task** (with `isVerificationGate: true`)
+- [ ] **Verification Gate included as final task**
 - [ ] Verification Gate blocked by ALL implementation sub-tasks
-- [ ] User approved breakdown before output
-- [ ] Structured YAML output with all sub-task specifications
-- [ ] Output includes `status`, `timestamp`, `parentId`, `backend` fields
-- [ ] Each sub-task has `title`, `description`, `blockedBy`, `order` fields
-- [ ] Dependency graph included in output
+- [ ] User approved breakdown before creation
+- [ ] Sub-tasks created via MCP tools in dependency order
+- [ ] Blocking relationships established correctly via MCP
+- [ ] All created issue URLs returned to user
+- [ ] Summary with dependency graph provided
 </success_criteria>
 
 <testing>
 **Manual integration testing** for verifying the refine-issue skill works end-to-end.
 
 <verification_steps>
-After running `/refine {issue-id}` and having mobius loop create sub-tasks, verify the results.
+After running `/refine {issue-id}`, verify the results.
 
-<output_verification>
-**Structured output verification**:
+<mcp_operation_verification>
+**MCP tool verification**:
 
-1. **Check YAML validity**: The output should be parseable YAML
-2. **Verify required fields**:
-   - `status`: Should be `BREAKDOWN_APPROVED`
-   - `timestamp`: Valid ISO-8601 timestamp
-   - `parentId`: Matches input issue ID
-   - `backend`: `linear` or `jira`
-3. **Verify sub-tasks**:
-   - Each has `title`, `description`, `blockedBy`, `order`
-   - `blockedBy` arrays contain valid order numbers
-   - Last sub-task has `isVerificationGate: true`
-4. **Verify dependency graph**: Mermaid diagram matches blocking relationships
-</output_verification>
+1. **Parent issue fetch**: Verify `mcp__plugin_linear_linear__get_issue` returns expected data
+2. **Sub-task creation**: Each `mcp__plugin_linear_linear__create_issue` call succeeds
+3. **Blocking relationships**: `blockedBy` arrays are correctly set on creation
+4. **Created issue URLs**: All URLs are returned and accessible
+</mcp_operation_verification>
 
 <linear_verification>
-**Linear verification steps** (after mobius loop creates sub-tasks):
+**Linear verification steps** (after skill creates sub-tasks via MCP):
 
 1. **Open parent issue** in Linear web UI
 2. **Check sub-tasks list**: All created sub-tasks should appear as children
@@ -923,106 +1155,98 @@ After running `/refine {issue-id}` and having mobius loop create sub-tasks, veri
 **Expected behavior**:
 - Sub-tasks appear nested under parent issue
 - "Blocked by" relationships visible on each sub-task
-- Dependency graph in parent comment matches actual relationships
+- URLs returned by skill match actual Linear URLs
 </linear_verification>
 
 <jira_verification>
-**Jira verification steps** (after mobius loop creates sub-tasks):
+**Jira verification steps** (if Jira MCP tools available):
 
 1. **Open parent issue** in Jira web UI
 2. **Check sub-tasks section**: All created sub-tasks should appear linked to parent
 3. **Open each sub-task**: Click on the sub-task to view its detail page
-4. **Check "is blocked by" links**: In the issue links section, verify:
-   - "is blocked by" relationships point to correct blocker issues
-   - Link direction is correct (blocked task shows "is blocked by", blocker shows "blocks")
-5. **Verify link type**: Links should use the "Blocks" link type (inward: "is blocked by", outward: "blocks")
+4. **Check "is blocked by" links**: Verify relationships are correct
 
 **Expected behavior**:
 - Sub-tasks appear in parent's sub-task section
 - Each sub-task's "Issue Links" section shows "is blocked by: PROJ-XXX"
-- Blocker issues show "blocks: PROJ-YYY" in their links section
-- Dependency graph in parent comment matches actual link relationships
+- URLs returned by skill match actual Jira URLs
 </jira_verification>
 </verification_steps>
 
 <troubleshooting>
 **Common errors and solutions**:
 
-<context_not_found>
-**Context file not found**
+<mcp_tool_unavailable>
+**MCP tool not available**
 ```
-Error: MOBIUS_CONTEXT_FILE not set or file not found
+Error: Tool mcp__plugin_linear_linear__get_issue not found
 ```
 
-**Cause**: The mobius loop hasn't generated context yet.
+**Cause**: Linear MCP server not configured or not running.
 
 **Solution**:
-1. Run `mobius loop {issue-id}` to generate context files
-2. Check that `~/.mobius/issues/{parentId}/` directory exists
-3. Verify `MOBIUS_CONTEXT_FILE` environment variable is set correctly
-</context_not_found>
+1. Verify Linear MCP server is configured in Claude settings
+2. Check that the MCP server is running
+3. Restart Claude Code to refresh MCP connections
+</mcp_tool_unavailable>
 
-<invalid_yaml>
-**Invalid YAML output**
+<issue_not_found>
+**Issue not found**
 ```
-Error: Failed to parse skill output
+Error: Issue MOB-999 not found
 ```
 
-**Cause**: The structured output has YAML syntax errors.
+**Cause**: The issue ID doesn't exist or user doesn't have access.
 
 **Solution**:
-1. Check for proper indentation (YAML is sensitive to spaces)
-2. Ensure all strings with special characters are quoted
-3. Verify all arrays use consistent formatting
-4. Use a YAML validator to check syntax
-</invalid_yaml>
+1. Verify the issue ID is correct
+2. Check if the issue exists in Linear/Jira
+3. Verify API token has access to the project/team
+</issue_not_found>
 
-<missing_fields>
-**Missing required fields**
+<creation_failed>
+**Sub-task creation failed**
 ```
-Error: Output missing required field: blockedBy
+Error: Failed to create issue
 ```
 
-**Cause**: Sub-task specification is incomplete.
+**Cause**: Permission issue, invalid data, or API error.
 
 **Solution**:
-1. Ensure each sub-task has all required fields:
-   - `title`, `description`, `targetFile`, `changeType`
-   - `blockedBy` (array of order numbers, can be empty `[]`)
-   - `order` (sequential integer)
-2. Ensure Verification Gate has `isVerificationGate: true`
-</missing_fields>
+1. Check API token has write permissions
+2. Verify team name exists in workspace
+3. Check if labels are valid for the workspace
+4. Review the error message for specific details
+</creation_failed>
 </troubleshooting>
 
 <end_to_end_test>
 **Complete end-to-end verification checklist**:
 
 1. **Setup**:
-   - [ ] Mobius configured with Linear or Jira backend
-   - [ ] Context generated for test parent issue
-   - [ ] `MOBIUS_CONTEXT_FILE` environment variable set
+   - [ ] Linear MCP server configured and running
+   - [ ] Test parent issue exists in Linear
 
 2. **Run refine**:
    - [ ] Execute `/refine {test-issue-id}` on a test issue
+   - [ ] Observe parent issue fetched via MCP
    - [ ] Review the breakdown presentation
+   - [ ] Validate each sub-task scope via AskUserQuestion (if prompted)
    - [ ] Approve the breakdown when prompted
-   - [ ] Verify structured YAML output is valid
 
-3. **Verify output structure**:
-   - [ ] `status: BREAKDOWN_APPROVED` in output
-   - [ ] All sub-tasks have required fields
-   - [ ] Verification Gate is last task with `isVerificationGate: true`
-   - [ ] `blockedBy` arrays contain valid order references
-   - [ ] Dependency graph mermaid matches blocking relationships
-
-4. **Verify mobius loop creation** (after loop processes output):
-   - [ ] All sub-tasks created in issue tracker
+3. **Verify MCP creation**:
+   - [ ] Each sub-task creation via MCP succeeds
+   - [ ] Progress reported as sub-tasks are created
    - [ ] Blocking relationships established correctly
-   - [ ] Dependency diagram comment posted to parent
+   - [ ] All issue URLs returned in summary
+
+4. **Verify in Linear**:
+   - [ ] All sub-tasks appear under parent issue
+   - [ ] Blocking relationships visible on each sub-task
+   - [ ] Verification Gate is blocked by all implementation tasks
 
 5. **Verify execution**:
-   - [ ] `mobius loop {parent-id}` respects dependency order
-   - [ ] Blocked tasks wait for blockers to complete
-   - [ ] Parallel execution works for unblocked tasks
+   - [ ] `/execute {first-task-id}` works correctly
+   - [ ] Blocked tasks cannot start until blockers complete
 </end_to_end_test>
 </testing>
