@@ -149,7 +149,7 @@ mcp__plugin_linear_linear__create_issue:
   title: "[{parent-id}] Verification Gate"
   team: "{team from parent}"
   description: |
-    Runs verify-issue to validate implementation meets acceptance criteria.
+    Runs verify to validate implementation meets acceptance criteria.
 
     **Blocked by**: ALL implementation sub-tasks
     **Action**: Run `/verify {parent-id}` after all implementation tasks complete
@@ -192,7 +192,7 @@ mcp__atlassian__createJiraIssue:
   issueTypeName: "Sub-task"
   summary: "[{parent-id}] Verification Gate"
   description: |
-    Runs verify-issue to validate implementation meets acceptance criteria.
+    Runs verify to validate implementation meets acceptance criteria.
 
     **Blocked by**: ALL implementation sub-tasks
     **Action**: Run `/verify {parent-id}` after all implementation tasks complete
@@ -218,7 +218,7 @@ The skill expects an issue identifier as argument:
 
 Or invoke programmatically:
 ```
-Skill: refine-issue
+Skill: refine
 Args: MOB-123
 ```
 </invocation>
@@ -431,7 +431,7 @@ Task tool:
 - Pass all collected write-ups to Phase 4 (aggregation)
 </subagent_output_handling>
 
-For subagent pattern details, batching strategy, and rationale, see `.claude/skills/refine-issue/parallel-research.md`.
+For subagent pattern details, batching strategy, and rationale, see `.claude/skills/refine/parallel-research.md`.
 </per_task_subagent_phase>
 
 <decomposition_phase>
@@ -532,7 +532,7 @@ Determine blocking order based on functional requirements:
 The verification gate:
 - Has title: `[{parent-id}] Verification Gate` (MUST contain "Verification Gate" for mobius routing)
 - Is blocked by ALL implementation sub-tasks
-- When executed by mobius, routes to `/verify-issue` instead of `/execute-issue`
+- When executed by mobius, routes to `/verify` instead of `/execute`
 - Validates all acceptance criteria are met before the parent can be completed
 
 **Template**:
@@ -543,7 +543,7 @@ The verification gate:
 **Change type**: Verification (no code changes)
 
 ### Action
-This task triggers the verify-issue skill to validate all implementation sub-tasks meet the parent issue's acceptance criteria.
+This task triggers the verify skill to validate all implementation sub-tasks meet the parent issue's acceptance criteria.
 
 ### Done
 - [ ] All tests pass
@@ -996,7 +996,7 @@ Files: Header.tsx, Sidebar.tsx, Card.tsx (modify)
 **Change type**: Verification (no code changes)
 
 ### Action
-This task triggers the verify-issue skill to validate all implementation sub-tasks meet the parent issue's acceptance criteria.
+This task triggers the verify skill to validate all implementation sub-tasks meet the parent issue's acceptance criteria.
 
 ### Done
 - [ ] All tests pass
@@ -1060,7 +1060,7 @@ mcp__plugin_linear_linear__create_issue:
   parentId: "{parent-uuid}"
   blockedBy: ["MOB-101", "MOB-102", "MOB-103", "MOB-104", "MOB-105", "MOB-106", "MOB-107"]
   description: |
-    Runs verify-issue to validate implementation meets acceptance criteria.
+    Runs verify to validate implementation meets acceptance criteria.
   -> Returns: MOB-108
 ```
 
@@ -1130,7 +1130,7 @@ A successful refinement produces:
 </success_criteria>
 
 <testing>
-**Manual integration testing** for verifying the refine-issue skill works end-to-end.
+**Manual integration testing** for verifying the refine skill works end-to-end.
 
 <verification_steps>
 After running `/refine {issue-id}`, verify the results.

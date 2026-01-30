@@ -21,13 +21,13 @@ import {
 } from './tmux-display.js';
 
 // Skills for different task types
-const VERIFICATION_SKILL = '/verify-issue';
+const VERIFICATION_SKILL = '/verify';
 
 /**
  * Determine which skill to use for a task based on its title
  *
- * Tasks with "Verification Gate" in the title are routed to verify-issue,
- * all other tasks go to execute-issue.
+ * Tasks with "Verification Gate" in the title are routed to verify,
+ * all other tasks go to execute.
  */
 function selectSkillForTask(task: SubTask): string {
   const titleLower = task.title.toLowerCase();
@@ -37,7 +37,7 @@ function selectSkillForTask(task: SubTask): string {
     return VERIFICATION_SKILL;
   }
 
-  // Default to execute-issue for implementation tasks
+  // Default to execute for implementation tasks
   return BACKEND_SKILLS.linear;
 }
 
@@ -61,7 +61,7 @@ interface AgentHandle {
   command: string;
 }
 
-// Status markers from the execute-issue skill
+// Status markers from the execute skill
 const STATUS_PATTERNS = {
   SUBTASK_COMPLETE: /STATUS:\s*SUBTASK_COMPLETE/,
   VERIFICATION_FAILED: /STATUS:\s*VERIFICATION_FAILED/,
@@ -185,7 +185,7 @@ async function spawnAgents(
     }
 
     // Select the appropriate skill based on task type
-    // Verification Gate tasks route to /verify-issue, others to /execute-issue
+    // Verification Gate tasks route to /verify, others to /execute
     const skill = selectSkillForTask(task);
 
     // Build the Claude command with the specific subtask identifier
@@ -399,7 +399,7 @@ export async function spawnAgentInPane(
   const startTime = Date.now();
 
   // Select the appropriate skill based on task type
-  // Verification Gate tasks route to /verify-issue, others to /execute-issue
+  // Verification Gate tasks route to /verify, others to /execute
   const skill = selectSkillForTask(task);
 
   // Build and run the command with the task's specific identifier

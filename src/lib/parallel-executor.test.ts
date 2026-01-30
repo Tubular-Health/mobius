@@ -54,7 +54,7 @@ describe('parallel-executor', () => {
   describe('buildClaudeCommand', () => {
     it('produces correct command with task identifier', () => {
       const subtaskIdentifier = 'MOB-124';
-      const skill = '/execute-issue';
+      const skill = '/execute';
       const worktreePath = '/path/to/worktree';
       const config = createMockConfig();
 
@@ -77,7 +77,7 @@ describe('parallel-executor', () => {
     it('includes model flag when model is specified', () => {
       const command = buildClaudeCommand(
         'MOB-125',
-        '/execute-issue',
+        '/execute',
         '/worktree',
         createMockConfig({ model: 'sonnet' })
       );
@@ -88,7 +88,7 @@ describe('parallel-executor', () => {
     it('handles haiku model correctly', () => {
       const command = buildClaudeCommand(
         'MOB-126',
-        '/execute-issue',
+        '/execute',
         '/worktree',
         createMockConfig({ model: 'haiku' })
       );
@@ -99,18 +99,18 @@ describe('parallel-executor', () => {
     it('builds command with different task identifiers', () => {
       const config = createMockConfig();
 
-      const command1 = buildClaudeCommand('PROJ-100', '/execute-issue', '/path1', config);
-      const command2 = buildClaudeCommand('PROJ-200', '/execute-issue', '/path2', config);
+      const command1 = buildClaudeCommand('PROJ-100', '/execute', '/path1', config);
+      const command2 = buildClaudeCommand('PROJ-200', '/execute', '/path2', config);
 
-      expect(command1).toContain("echo '/execute-issue PROJ-100'");
-      expect(command2).toContain("echo '/execute-issue PROJ-200'");
+      expect(command1).toContain("echo '/execute PROJ-100'");
+      expect(command2).toContain("echo '/execute PROJ-200'");
       expect(command1).not.toEqual(command2);
     });
 
     it('handles worktree paths with spaces', () => {
       const command = buildClaudeCommand(
         'MOB-127',
-        '/execute-issue',
+        '/execute',
         '/path/with spaces/worktree',
         createMockConfig()
       );
@@ -122,7 +122,7 @@ describe('parallel-executor', () => {
     it('builds command components in correct order', () => {
       const command = buildClaudeCommand(
         'MOB-128',
-        '/execute-issue',
+        '/execute',
         '/worktree',
         createMockConfig()
       );
@@ -528,7 +528,7 @@ Still working...
       ];
 
       const commands = tasks.map((task) =>
-        buildClaudeCommand(task.identifier, '/execute-issue', '/worktree', config)
+        buildClaudeCommand(task.identifier, '/execute', '/worktree', config)
       );
 
       // Each command should contain its unique identifier

@@ -1,6 +1,6 @@
 # Per-Task Subagent Pattern
 
-Reference document for the Phase 3 per-task subagent research pattern used by the refine-issue skill.
+Reference document for the Phase 3 per-task subagent research pattern used by the refine skill.
 
 ## Overview
 

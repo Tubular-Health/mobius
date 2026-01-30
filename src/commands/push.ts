@@ -467,7 +467,7 @@ async function pushCreateSubtask(
       return {
         ...baseResult,
         success: false,
-        error: 'create_subtask requires team context - use refine-issue skill instead',
+        error: 'create_subtask requires team context - use refine skill instead',
       };
     }
 

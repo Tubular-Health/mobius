@@ -229,7 +229,7 @@ interface VerificationFailedOutput extends SkillOutputBase {
 }
 
 /**
- * Output when verification finds issues needing rework (execute-issue format)
+ * Output when verification finds issues needing rework (execute format)
  */
 interface NeedsWorkOutput extends SkillOutputBase {
   status: 'NEEDS_WORK';
@@ -239,7 +239,7 @@ interface NeedsWorkOutput extends SkillOutputBase {
 }
 
 /**
- * Output when verification gate finds issues needing rework (verify-issue format)
+ * Output when verification gate finds issues needing rework (verify format)
  *
  * This format supports multiple failing subtasks with detailed issue tracking
  * and feedback comments for the rework loop.

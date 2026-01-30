@@ -340,7 +340,7 @@ function processSkillOutputAndQueue(
       }
 
       case 'NEEDS_WORK': {
-        // Support both execute-issue format (subtaskId) and verify-issue format (failingSubtasks)
+        // Support both execute format (subtaskId) and verify format (failingSubtasks)
         const failingTasks: Array<{ id: string; identifier: string }> = [];
 
         if ('subtaskId' in output && output.subtaskId) {
@@ -815,7 +815,7 @@ describe('Backend Sync Integration Tests', () => {
       expect(comments[0]).toContain('Needs Rework');
     });
 
-    it('NEEDS_WORK with verify-issue format handles multiple failing subtasks', async () => {
+    it('NEEDS_WORK with verify format handles multiple failing subtasks', async () => {
       mockBackend.initIssue('SYNC-101', 'Done');
       mockBackend.initIssue('SYNC-102', 'Done');
       mockBackend.initIssue('SYNC-VERIFY', 'In Progress');

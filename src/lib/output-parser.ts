@@ -228,7 +228,7 @@ function validateStatusSpecificFields(output: Record<string, unknown>): string[]
       break;
 
     case 'NEEDS_WORK': {
-      // Support both execute-issue format (subtaskId) and verify-issue format (failingSubtasks)
+      // Support both execute format (subtaskId) and verify format (failingSubtasks)
       const hasExecuteFormat = typeof output.subtaskId === 'string';
       const hasVerifyFormat =
         Array.isArray(output.failingSubtasks) && output.failingSubtasks.length > 0;
@@ -239,7 +239,7 @@ function validateStatusSpecificFields(output: Record<string, unknown>): string[]
         );
       }
 
-      // For execute-issue format, issues and suggestedFixes are required
+      // For execute format, issues and suggestedFixes are required
       if (hasExecuteFormat && !hasVerifyFormat) {
         if (!Array.isArray(output.issues)) {
           errors.push('NEEDS_WORK with subtaskId requires issues (array)');
@@ -249,7 +249,7 @@ function validateStatusSpecificFields(output: Record<string, unknown>): string[]
         }
       }
 
-      // For verify-issue format, feedbackComments and reworkIteration are expected but not required
+      // For verify format, feedbackComments and reworkIteration are expected but not required
       // The failingSubtasks array is validated above
       break;
     }

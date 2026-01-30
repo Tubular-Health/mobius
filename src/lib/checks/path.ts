@@ -35,8 +35,8 @@ export async function checkSkills(paths: PathConfig): Promise<CheckResult> {
     };
   }
 
-  // Check for execute-issue skill
-  const executeSkill = `${paths.skillsPath}/execute-issue`;
+  // Check for execute skill
+  const executeSkill = `${paths.skillsPath}/execute`;
   if (!existsSync(executeSkill)) {
     return {
       name,

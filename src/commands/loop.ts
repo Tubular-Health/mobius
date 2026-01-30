@@ -74,7 +74,7 @@ import { BACKEND_ID_PATTERNS } from '../types.js';
 import { pushPendingUpdatesForTask } from './push.js';
 
 /**
- * Type alias for NEEDS_WORK output from execute-issue skill
+ * Type alias for NEEDS_WORK output from execute skill
  * (has subtaskId, issues, suggestedFixes)
  */
 type NeedsWorkExecuteOutput = {
@@ -586,7 +586,7 @@ async function fetchParentIssue(taskId: string, backend: Backend): Promise<Paren
 /**
  * Re-sync the task graph from the backend with fresh status data
  *
- * This enables the loop to see external status changes (e.g., from verify-issue agents).
+ * This enables the loop to see external status changes (e.g., from verify agents).
  * On fetch failure, returns the existing graph (graceful degradation).
  */
 async function syncGraphFromBackend(
@@ -785,7 +785,7 @@ function queueLinearUpdates(
     }
 
     case 'NEEDS_WORK': {
-      // Support both execute-issue format (single subtaskId) and verify-issue format (failingSubtasks array)
+      // Support both execute format (single subtaskId) and verify format (failingSubtasks array)
       const failingTasks: Array<{ id: string; identifier: string }> = [];
 
       // Execute-issue format: single subtaskId
@@ -813,7 +813,7 @@ function queueLinearUpdates(
         console.log(chalk.gray(`  Queued: ${task.identifier} status -> Todo (rework)`));
       }
 
-      // Queue feedback comments (from verify-issue format)
+      // Queue feedback comments (from verify format)
       if ('feedbackComments' in output && Array.isArray(output.feedbackComments)) {
         for (const fc of output.feedbackComments) {
           queuePendingUpdate(parentId, {
@@ -825,7 +825,7 @@ function queueLinearUpdates(
           console.log(chalk.gray(`  Queued: ${fc.subtaskId} rework comment`));
         }
       } else if ('subtaskId' in output && output.subtaskId && 'issues' in output) {
-        // Fallback: build comment from issues/suggestedFixes (execute-issue format)
+        // Fallback: build comment from issues/suggestedFixes (execute format)
         const commentBody = buildNeedsWorkComment(output as NeedsWorkExecuteOutput);
         queuePendingUpdate(parentId, {
           type: 'add_comment',
@@ -904,7 +904,7 @@ function buildFailureComment(
 }
 
 /**
- * Build a rework comment when verification finds issues (execute-issue format)
+ * Build a rework comment when verification finds issues (execute format)
  */
 function buildNeedsWorkComment(output: NeedsWorkExecuteOutput): string {
   const lines = [

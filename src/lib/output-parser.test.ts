@@ -130,7 +130,7 @@ describe('output-parser module', () => {
         }
       });
 
-      it('parses valid JSON NEEDS_WORK output (execute-issue format)', () => {
+      it('parses valid JSON NEEDS_WORK output (execute format)', () => {
         const input = JSON.stringify({
           status: 'NEEDS_WORK',
           timestamp: '2024-01-15T14:30:00Z',
@@ -147,7 +147,7 @@ describe('output-parser module', () => {
         }
       });
 
-      it('parses valid JSON NEEDS_WORK output (verify-issue format)', () => {
+      it('parses valid JSON NEEDS_WORK output (verify format)', () => {
         const input = JSON.stringify({
           status: 'NEEDS_WORK',
           timestamp: '2024-01-15T14:30:00Z',
