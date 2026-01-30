@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.4.0...mobius-ai-v1.5.0) (2026-01-30)
+
+
+### Features
+
+* **skill:** add per-task subagent phase to refine-issue ([#40](https://github.com/Tubular-Health/mobius/issues/40)) ([40e6ad9](https://github.com/Tubular-Health/mobius/commit/40e6ad9df4e27885758dc17943a8af293e51abe5))
+
 ## [1.4.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.3.0...mobius-ai-v1.4.0) (2026-01-29)
 
 
