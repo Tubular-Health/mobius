@@ -80,6 +80,7 @@ import type { IssueContext, RuntimeState } from '../types/context.js';
 import type { Backend, ExecutionConfig, Model } from '../types.js';
 import { BACKEND_ID_PATTERNS, resolveBackend } from '../types.js';
 import { pushPendingUpdatesForTask } from './push.js';
+import { submit } from './submit.js';
 
 /**
  * Type alias for NEEDS_WORK output from execute skill
@@ -101,6 +102,7 @@ export interface LoopOptions {
   sequential?: boolean; // Use sequential bash loop instead
   fresh?: boolean; // Clear stale state before starting
   debug?: boolean | 'minimal' | 'normal' | 'verbose'; // Enable debug logging
+  noSubmit?: boolean; // Skip automatic PR submission after successful completion
 }
 
 /**
@@ -549,6 +551,28 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       endMobiusSession(taskId, 'completed');
     } else if (anyFailed) {
       endMobiusSession(taskId, 'failed');
+    }
+
+    // Auto-submit PR before cleanup on successful completion
+    if (allComplete && !options.noSubmit) {
+      console.log(chalk.gray('\nCreating pull request...'));
+      const originalCwd = process.cwd();
+      try {
+        process.chdir(worktreeInfo.path);
+        await submit(taskId, {
+          backend,
+          model: executionConfig.model,
+          skipStatusUpdate: true,
+        });
+        console.log(chalk.green('Pull request created successfully.'));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.log(chalk.yellow(`⚠ PR submission failed: ${message}`));
+        console.log(chalk.yellow('Worktree will be preserved for manual submission.'));
+        allComplete = false;
+      } finally {
+        process.chdir(originalCwd);
+      }
     }
 
     // Cleanup on success
