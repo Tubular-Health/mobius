@@ -232,7 +232,6 @@ export function buildClaudeCommand(
   const modelFlag = config.model ? `--model ${config.model}` : '';
 
   // Build the disallowed tools flag if specified
-  // Patterns like "mcp__linear__*" or "mcp__atlassian__*" disable entire MCP servers
   const disallowedToolsFlag = config.disallowed_tools?.length
     ? `--disallowedTools '${config.disallowed_tools.join(',')}'`
     : '';

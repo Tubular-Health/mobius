@@ -83,8 +83,8 @@ export interface ExecutionConfig {
   tui?: TuiConfig;
   // Quality gate verification settings
   verification?: VerificationConfig;
-  // Tool filtering - patterns to disable specific MCP tools
-  // Supports glob patterns: "mcp__linear__*", "mcp__atlassian__*"
+  // Tool filtering - patterns to disable specific Claude tools during agent execution
+  // Supports glob patterns passed to --disallowedTools flag
   disallowed_tools?: string[];
 }
 
