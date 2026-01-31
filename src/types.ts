@@ -168,8 +168,8 @@ export const BACKEND_SKILLS: Record<Backend, string> = {
 };
 
 export const BACKEND_ID_PATTERNS: Record<Backend, RegExp> = {
-  linear: /^[A-Z]+-[0-9]+$/,
-  jira: /^[A-Z]+-[0-9]+$/,
+  linear: /^[A-Z][A-Z0-9]*-[0-9]+$/,
+  jira: /^[A-Z][A-Z0-9]*-[0-9]+$/,
   local: /^LOC-[0-9]+$/,
 };
 

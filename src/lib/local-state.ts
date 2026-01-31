@@ -252,10 +252,12 @@ export function readParentSpec(issueId: string): ParentIssueContext | null {
  * Write a sub-task spec to .mobius/issues/{issueId}/tasks/{taskId}.json
  */
 export function writeSubTaskSpec(issueId: string, task: SubTaskContext): void {
+  const identifier = task.identifier ?? task.id;
+  if (!identifier) return;
   ensureIssueDir(issueId);
-  const filePath = join(getIssuePath(issueId), 'tasks', `${task.identifier}.json`);
+  const filePath = join(getIssuePath(issueId), 'tasks', `${identifier}.json`);
   const tmpPath = `${filePath}.tmp`;
-  writeFileSync(tmpPath, JSON.stringify(task, null, 2), 'utf-8');
+  writeFileSync(tmpPath, JSON.stringify({ ...task, identifier }, null, 2), 'utf-8');
   renameSync(tmpPath, filePath);
 }
 
@@ -299,7 +301,12 @@ export function readSubTasks(issueId: string): SubTaskContext[] {
       if (!file.endsWith('.json')) continue;
       try {
         const content = readFileSync(join(tasksDir, file), 'utf-8');
-        tasks.push(JSON.parse(content) as SubTaskContext);
+        const task = JSON.parse(content) as SubTaskContext;
+        // Infer identifier from filename if missing
+        if (!task.identifier) {
+          task.identifier = file.replace(/\.json$/, '');
+        }
+        tasks.push(task);
       } catch {
         // Skip malformed files
       }
@@ -318,10 +325,18 @@ export function readSubTasks(issueId: string): SubTaskContext[] {
  * string arrays for blockedBy/blocks and omit identifier/gitBranchName) and
  * the LinearIssue format expected by the task graph builder.
  */
+/** Status priority for deduplication — higher value wins */
+const STATUS_PRIORITY: Record<string, number> = {
+  pending: 0,
+  ready: 1,
+  in_progress: 2,
+  done: 3,
+};
+
 export function readLocalSubTasksAsLinearIssues(issueId: string): LinearIssue[] {
   const tasks = readSubTasks(issueId);
 
-  return tasks.map((task) => {
+  const issues = tasks.map((task) => {
     // Refine writes blockedBy/blocks as string arrays like ["task-002"],
     // but SubTaskContext expects Array<{id, identifier}>. Handle both.
     const rawBlockedBy = (task.blockedBy ?? []) as Array<string | { id: string; identifier: string }>;
@@ -343,6 +358,16 @@ export function readLocalSubTasksAsLinearIssues(issueId: string): LinearIssue[] 
       relations: { blockedBy, blocks },
     };
   });
+
+  // Deduplicate by id — prefer done > in_progress > ready > pending
+  const byId = new Map<string, LinearIssue>();
+  for (const issue of issues) {
+    const existing = byId.get(issue.id);
+    if (!existing || (STATUS_PRIORITY[issue.status] ?? 0) > (STATUS_PRIORITY[existing.status] ?? 0)) {
+      byId.set(issue.id, issue);
+    }
+  }
+  return Array.from(byId.values());
 }
 
 /**

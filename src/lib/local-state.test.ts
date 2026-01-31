@@ -43,6 +43,7 @@ const {
   readParentSpec,
   writeSubTaskSpec,
   readSubTasks,
+  readLocalSubTasksAsLinearIssues,
   writeIterationLog,
   writeSummary,
   queuePendingUpdate,
@@ -634,6 +635,224 @@ describe('local-state module', () => {
       // Verify files are in temp dir, not real cwd
       const mobiusInTemp = join(tempDir, '.mobius', 'issues', 'ISOLATION-TEST', 'parent.json');
       expect(existsSync(mobiusInTemp)).toBe(true);
+    });
+  });
+
+  describe('readSubTasks identifier normalization', () => {
+    it('infers identifier from filename when missing in JSON', () => {
+      ensureProjectMobiusDir();
+      const tasksDir = join(tempDir, '.mobius', 'issues', 'PARENT-NORM', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      // Write a task file WITHOUT an identifier field (simulates refine bug)
+      const taskWithoutIdentifier = {
+        id: 'task-VG',
+        title: 'Verification Gate',
+        description: 'Verify everything',
+        status: 'pending',
+        blockedBy: [],
+        blocks: [],
+      };
+      writeFileSync(
+        join(tasksDir, 'task-VG.json'),
+        JSON.stringify(taskWithoutIdentifier, null, 2),
+        'utf-8'
+      );
+
+      const tasks = readSubTasks('PARENT-NORM');
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].identifier).toBe('task-VG');
+      expect(tasks[0].id).toBe('task-VG');
+    });
+
+    it('preserves existing identifier when present', () => {
+      ensureProjectMobiusDir();
+      const tasksDir = join(tempDir, '.mobius', 'issues', 'PARENT-NORM2', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      const taskWithIdentifier = {
+        id: 'task-001',
+        identifier: 'MOB-123',
+        title: 'Some Task',
+        description: '',
+        status: 'done',
+        blockedBy: [],
+        blocks: [],
+      };
+      writeFileSync(
+        join(tasksDir, 'MOB-123.json'),
+        JSON.stringify(taskWithIdentifier, null, 2),
+        'utf-8'
+      );
+
+      const tasks = readSubTasks('PARENT-NORM2');
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].identifier).toBe('MOB-123');
+    });
+  });
+
+  describe('readLocalSubTasksAsLinearIssues deduplication', () => {
+    it('deduplicates by id preferring done over pending', () => {
+      ensureProjectMobiusDir();
+      const tasksDir = join(tempDir, '.mobius', 'issues', 'PARENT-DEDUP', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      // Write task-VG.json with status "done"
+      writeFileSync(
+        join(tasksDir, 'task-VG.json'),
+        JSON.stringify({
+          id: 'task-VG',
+          identifier: 'task-VG',
+          title: 'Verification Gate',
+          description: '',
+          status: 'done',
+          blockedBy: [],
+          blocks: [],
+        }, null, 2),
+        'utf-8'
+      );
+
+      // Write undefined.json (phantom) with same id but status "pending"
+      writeFileSync(
+        join(tasksDir, 'undefined.json'),
+        JSON.stringify({
+          id: 'task-VG',
+          title: 'Verification Gate',
+          description: '',
+          status: 'pending',
+          blockedBy: [],
+          blocks: [],
+        }, null, 2),
+        'utf-8'
+      );
+
+      const issues = readLocalSubTasksAsLinearIssues('PARENT-DEDUP');
+      expect(issues).toHaveLength(1);
+      expect(issues[0].id).toBe('task-VG');
+      expect(issues[0].status).toBe('done');
+    });
+
+    it('deduplicates by id preferring in_progress over ready', () => {
+      ensureProjectMobiusDir();
+      const tasksDir = join(tempDir, '.mobius', 'issues', 'PARENT-DEDUP2', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      writeFileSync(
+        join(tasksDir, 'a-first.json'),
+        JSON.stringify({
+          id: 'task-X',
+          identifier: 'task-X',
+          title: 'Task X',
+          description: '',
+          status: 'ready',
+          blockedBy: [],
+          blocks: [],
+        }, null, 2),
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(tasksDir, 'b-second.json'),
+        JSON.stringify({
+          id: 'task-X',
+          identifier: 'task-X',
+          title: 'Task X',
+          description: '',
+          status: 'in_progress',
+          blockedBy: [],
+          blocks: [],
+        }, null, 2),
+        'utf-8'
+      );
+
+      const issues = readLocalSubTasksAsLinearIssues('PARENT-DEDUP2');
+      expect(issues).toHaveLength(1);
+      expect(issues[0].status).toBe('in_progress');
+    });
+
+    it('keeps all tasks when ids are unique', () => {
+      ensureProjectMobiusDir();
+      const tasksDir = join(tempDir, '.mobius', 'issues', 'PARENT-DEDUP3', 'tasks');
+      mkdirSync(tasksDir, { recursive: true });
+
+      writeFileSync(
+        join(tasksDir, 'task-001.json'),
+        JSON.stringify({
+          id: 'task-001',
+          identifier: 'task-001',
+          title: 'Task 1',
+          description: '',
+          status: 'pending',
+          blockedBy: [],
+          blocks: [],
+        }, null, 2),
+        'utf-8'
+      );
+
+      writeFileSync(
+        join(tasksDir, 'task-002.json'),
+        JSON.stringify({
+          id: 'task-002',
+          identifier: 'task-002',
+          title: 'Task 2',
+          description: '',
+          status: 'done',
+          blockedBy: [],
+          blocks: [],
+        }, null, 2),
+        'utf-8'
+      );
+
+      const issues = readLocalSubTasksAsLinearIssues('PARENT-DEDUP3');
+      expect(issues).toHaveLength(2);
+    });
+  });
+
+  describe('writeSubTaskSpec identifier guard', () => {
+    it('uses task.id as fallback when identifier is missing', () => {
+      const task = {
+        id: 'task-fallback',
+        title: 'Fallback Task',
+        description: '',
+        status: 'pending' as const,
+        blockedBy: [],
+        blocks: [],
+      } as unknown as SubTaskContext;
+
+      writeSubTaskSpec('PARENT-GUARD', task);
+
+      const filePath = join(
+        tempDir,
+        '.mobius',
+        'issues',
+        'PARENT-GUARD',
+        'tasks',
+        'task-fallback.json'
+      );
+      expect(existsSync(filePath)).toBe(true);
+
+      const written = JSON.parse(readFileSync(filePath, 'utf-8'));
+      expect(written.identifier).toBe('task-fallback');
+      expect(written.id).toBe('task-fallback');
+    });
+
+    it('does not create file when both identifier and id are missing', () => {
+      const task = {
+        title: 'No ID Task',
+        description: '',
+        status: 'pending' as const,
+        blockedBy: [],
+        blocks: [],
+      } as unknown as SubTaskContext;
+
+      writeSubTaskSpec('PARENT-GUARD2', task);
+
+      // Should not create an undefined.json file
+      const tasksDir = join(tempDir, '.mobius', 'issues', 'PARENT-GUARD2', 'tasks');
+      if (existsSync(tasksDir)) {
+        const files = require('node:fs').readdirSync(tasksDir);
+        expect(files.filter((f: string) => f.endsWith('.json'))).toHaveLength(0);
+      }
     });
   });
 });

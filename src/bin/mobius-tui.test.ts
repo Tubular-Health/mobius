@@ -11,6 +11,8 @@ describe('validateTaskId', () => {
       expect(validateTaskId('MOB-123', 'linear')).toBe(true);
       expect(validateTaskId('ABC-1', 'linear')).toBe(true);
       expect(validateTaskId('PROJ-9999', 'linear')).toBe(true);
+      expect(validateTaskId('TUB2-1', 'linear')).toBe(true);
+      expect(validateTaskId('A1B2-99', 'linear')).toBe(true);
     });
 
     it('rejects invalid Linear task IDs', () => {
@@ -21,6 +23,7 @@ describe('validateTaskId', () => {
       expect(validateTaskId('MOB-abc', 'linear')).toBe(false); // letters instead of numbers
       expect(validateTaskId('', 'linear')).toBe(false); // empty
       expect(validateTaskId('MOB-123-456', 'linear')).toBe(false); // extra parts
+      expect(validateTaskId('2AB-123', 'linear')).toBe(false); // starts with digit
     });
   });
 
@@ -29,6 +32,7 @@ describe('validateTaskId', () => {
       expect(validateTaskId('PROJ-123', 'jira')).toBe(true);
       expect(validateTaskId('XYZ-1', 'jira')).toBe(true);
       expect(validateTaskId('MYPROJECT-9999', 'jira')).toBe(true);
+      expect(validateTaskId('TUB2-1', 'jira')).toBe(true);
     });
 
     it('rejects invalid Jira task IDs', () => {
@@ -39,12 +43,13 @@ describe('validateTaskId', () => {
       expect(validateTaskId('PROJ-abc', 'jira')).toBe(false); // letters instead of numbers
       expect(validateTaskId('', 'jira')).toBe(false); // empty
       expect(validateTaskId('PROJ-123-456', 'jira')).toBe(false); // extra parts
+      expect(validateTaskId('2AB-123', 'jira')).toBe(false); // starts with digit
     });
   });
 
   describe('both backends accept same format', () => {
     it('accepts PREFIX-NUMBER format for both backends', () => {
-      const validIds = ['MOB-123', 'PROJ-456', 'ABC-1', 'XYZ-9999'];
+      const validIds = ['MOB-123', 'PROJ-456', 'ABC-1', 'XYZ-9999', 'TUB2-1'];
 
       for (const id of validIds) {
         expect(validateTaskId(id, 'linear')).toBe(true);
