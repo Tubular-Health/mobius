@@ -5,7 +5,10 @@
 import chalk from 'chalk';
 import ora from 'ora';
 import { readConfig } from '../lib/config.js';
-import { fetchLinearIssue, fetchLinearSubTasks } from '../lib/linear.js';
+import { fetchJiraIssue } from '../lib/jira.js';
+import type { ParentIssue } from '../lib/linear.js';
+import { fetchLinearIssue } from '../lib/linear.js';
+import { readLocalSubTasksAsLinearIssues, readParentSpec } from '../lib/local-state.js';
 import { renderMermaidWithTitle } from '../lib/mermaid-renderer.js';
 import { resolvePaths } from '../lib/paths.js';
 import { buildTaskGraph, getGraphStats } from '../lib/task-graph.js';
@@ -34,18 +37,32 @@ export async function tree(taskId: string, options: TreeOptions): Promise<void> 
     process.exit(1);
   }
 
-  if (backend !== 'linear') {
-    console.error(chalk.red(`Backend ${backend} not yet supported for tree command`));
-    process.exit(1);
-  }
-
-  // Fetch parent issue with spinner
+  // Fetch parent issue with spinner (backend-aware)
   const issueSpinner = ora({
-    text: `Fetching issue ${taskId} from ${backend}...`,
+    text: backend === 'local'
+      ? `Reading issue ${taskId} from local state...`
+      : `Fetching issue ${taskId} from ${backend}...`,
     color: 'blue',
   }).start();
 
-  const parentIssue = await fetchLinearIssue(taskId);
+  let parentIssue: ParentIssue | null = null;
+
+  if (backend === 'local') {
+    const parentSpec = readParentSpec(taskId);
+    if (parentSpec) {
+      parentIssue = {
+        id: parentSpec.id,
+        identifier: parentSpec.identifier,
+        title: parentSpec.title,
+        gitBranchName: parentSpec.gitBranchName,
+      };
+    }
+  } else if (backend === 'jira') {
+    parentIssue = await fetchJiraIssue(taskId);
+  } else {
+    parentIssue = await fetchLinearIssue(taskId);
+  }
+
   if (!parentIssue) {
     issueSpinner.fail(`Could not fetch issue ${taskId}`);
     process.exit(1);
@@ -54,14 +71,14 @@ export async function tree(taskId: string, options: TreeOptions): Promise<void> 
   issueSpinner.succeed(`${parentIssue.identifier}: ${parentIssue.title}`);
   console.log(chalk.gray(`  Branch: ${parentIssue.gitBranchName}`));
 
-  // Fetch sub-tasks with spinner
+  // Read sub-tasks from local state
   const subTasksSpinner = ora({
-    text: `Fetching sub-tasks and dependencies...`,
+    text: `Reading sub-tasks from local state...`,
     color: 'blue',
   }).start();
 
-  const subTasks = await fetchLinearSubTasks(parentIssue.id);
-  if (!subTasks || subTasks.length === 0) {
+  const subTasks = readLocalSubTasksAsLinearIssues(taskId);
+  if (subTasks.length === 0) {
     subTasksSpinner.warn(`No sub-tasks found for ${taskId}`);
     return;
   }

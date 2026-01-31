@@ -42,7 +42,7 @@ export async function checkDocker(sandboxEnabled: boolean): Promise<CheckResult>
       status: 'warn',
       message: 'Docker installed but daemon not running',
       required: false,
-      details: 'Start Docker to enable sandbox mode, or use --local flag',
+      details: 'Start Docker to enable sandbox mode, or use --no-sandbox flag',
     };
   }
 }

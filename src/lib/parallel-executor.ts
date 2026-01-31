@@ -242,16 +242,17 @@ export function buildClaudeCommand(
 
   // The command:
   // 1. cd to worktree
-  // 2. Set MOBIUS_CONTEXT_FILE environment variable if provided
-  // 3. echo the skill invocation to claude with the specific subtask ID
+  // 2. echo the skill invocation to claude with the specific subtask ID
+  // 3. pipe to claude with MOBIUS_CONTEXT_FILE set in its environment
   // 4. pipe through cclean for clean output (requires stream-json format)
-  // Note: We use a subshell to change directory without affecting the parent shell
+  // Note: envPrefix must be on the claude command (not echo) because in a bash
+  // pipeline, VAR=value only applies to the immediately following command.
   const command = [
     `cd "${worktreePath}"`,
     '&&',
-    `${envPrefix}echo '${skill} ${subtaskIdentifier}'`,
+    `echo '${skill} ${subtaskIdentifier}'`,
     '|',
-    `claude -p --dangerously-skip-permissions --verbose --output-format stream-json ${modelFlag} ${disallowedToolsFlag}`.trim(),
+    `${envPrefix}claude -p --dangerously-skip-permissions --verbose --output-format stream-json ${modelFlag} ${disallowedToolsFlag}`.trim(),
     '|',
     'cclean',
   ].join(' ');

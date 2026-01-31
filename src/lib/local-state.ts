@@ -23,6 +23,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import type { ParentIssueContext, SubTaskContext } from '../types/context.js';
+import type { LinearIssue } from './task-graph.js';
 
 /**
  * Entry in the iteration log tracking execution attempts
@@ -286,6 +287,40 @@ export function readSubTasks(issueId: string): SubTaskContext[] {
   }
 
   return tasks;
+}
+
+/**
+ * Read local sub-tasks and convert to LinearIssue[] for buildTaskGraph()
+ *
+ * Handles the schema mismatch between refine-written task files (which use
+ * string arrays for blockedBy/blocks and omit identifier/gitBranchName) and
+ * the LinearIssue format expected by the task graph builder.
+ */
+export function readLocalSubTasksAsLinearIssues(issueId: string): LinearIssue[] {
+  const tasks = readSubTasks(issueId);
+
+  return tasks.map((task) => {
+    // Refine writes blockedBy/blocks as string arrays like ["task-002"],
+    // but SubTaskContext expects Array<{id, identifier}>. Handle both.
+    const rawBlockedBy = (task.blockedBy ?? []) as Array<string | { id: string; identifier: string }>;
+    const rawBlocks = (task.blocks ?? []) as Array<string | { id: string; identifier: string }>;
+
+    const blockedBy = rawBlockedBy.map((b) =>
+      typeof b === 'string' ? { id: b, identifier: b } : b
+    );
+    const blocks = rawBlocks.map((b) =>
+      typeof b === 'string' ? { id: b, identifier: b } : b
+    );
+
+    return {
+      id: task.id,
+      identifier: task.identifier ?? task.id,
+      title: task.title,
+      status: task.status,
+      gitBranchName: task.gitBranchName ?? '',
+      relations: { blockedBy, blocks },
+    };
+  });
 }
 
 /**

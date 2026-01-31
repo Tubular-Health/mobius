@@ -7,6 +7,7 @@ import {
   copyAgentsTemplate,
   copyCommands,
   copySkills,
+  ensureClaudeSettings,
   writeConfig,
 } from '../lib/config.js';
 import {
@@ -57,6 +58,13 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     // Copy commands
     console.log(chalk.gray('Copying commands...'));
     copyCommands(paths);
+
+    // Ensure .claude/settings.json has .mobius/ permissions
+    if (paths.type === 'local') {
+      const projectDir = dirname(paths.configPath);
+      console.log(chalk.gray('Ensuring .mobius/ permissions in .claude/settings.json...'));
+      ensureClaudeSettings(projectDir);
+    }
 
     console.log(chalk.green('\n✓ Skills and commands updated!\n'));
 
@@ -181,11 +189,13 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   console.log(chalk.gray('Copying commands...'));
   copyCommands(paths);
 
-  // For local install, also copy AGENTS.md if it doesn't exist
+  // For local install, also copy AGENTS.md and ensure .mobius/ permissions
   if (installType === 'local') {
     const projectDir = dirname(paths.configPath);
     console.log(chalk.gray('Checking AGENTS.md template...'));
     copyAgentsTemplate(projectDir);
+    console.log(chalk.gray('Ensuring .mobius/ permissions in .claude/settings.json...'));
+    ensureClaudeSettings(projectDir);
   }
 
   console.log(chalk.green('\n✓ Setup complete!\n'));

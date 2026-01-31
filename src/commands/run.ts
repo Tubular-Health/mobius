@@ -4,10 +4,10 @@ import { execa } from 'execa';
 import { readConfig } from '../lib/config.js';
 import { resolvePaths } from '../lib/paths.js';
 import type { Backend, Model } from '../types.js';
-import { BACKEND_ID_PATTERNS } from '../types.js';
+import { BACKEND_ID_PATTERNS, resolveBackend } from '../types.js';
 
 interface RunOptions {
-  local?: boolean;
+  noSandbox?: boolean;
   backend?: Backend;
   model?: Model;
   delay?: number;
@@ -29,7 +29,7 @@ export async function run(
 
   // Load config
   const config = readConfig(paths.configPath);
-  const backend = options.backend ?? config.backend;
+  const backend = resolveBackend(options.backend, taskId, config.backend);
 
   // Validate task ID format
   const pattern = BACKEND_ID_PATTERNS[backend];
@@ -46,8 +46,8 @@ export async function run(
     args.push(String(maxIterations));
   }
 
-  if (options.local) {
-    args.push('--local');
+  if (options.noSandbox) {
+    args.push('--no-sandbox');
   }
 
   if (options.backend) {

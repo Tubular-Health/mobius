@@ -35,9 +35,9 @@ import type {
 import type { Backend } from '../types.js';
 import { readConfig } from './config.js';
 import { debugLog } from './debug-logger.js';
-import { fetchJiraIssue, fetchJiraSubTasks } from './jira.js';
-import { fetchLinearIssue, fetchLinearSubTasks } from './linear.js';
-import { ensureProjectMobiusDir, getProjectMobiusPath } from './local-state.js';
+import { fetchJiraIssue } from './jira.js';
+import { fetchLinearIssue } from './linear.js';
+import { ensureProjectMobiusDir, getProjectMobiusPath, readSubTasks } from './local-state.js';
 import { mapLinearStatus } from './task-graph.js';
 
 /**
@@ -260,48 +260,6 @@ async function fetchJiraParentContext(
 }
 
 /**
- * Fetch sub-tasks from Linear and convert to SubTaskContext format
- */
-async function fetchLinearSubTaskContexts(parentId: string): Promise<SubTaskContext[]> {
-  const subTasks = await fetchLinearSubTasks(parentId);
-  if (!subTasks) {
-    return [];
-  }
-
-  return subTasks.map((task) => ({
-    id: task.id,
-    identifier: task.identifier,
-    title: task.title,
-    description: '', // Would need to extend fetchLinearSubTasks
-    status: mapLinearStatus(task.status),
-    gitBranchName: task.gitBranchName || '',
-    blockedBy: task.relations?.blockedBy || [],
-    blocks: task.relations?.blocks || [],
-  }));
-}
-
-/**
- * Fetch sub-tasks from Jira and convert to SubTaskContext format
- */
-async function fetchJiraSubTaskContexts(parentKey: string): Promise<SubTaskContext[]> {
-  const subTasks = await fetchJiraSubTasks(parentKey);
-  if (!subTasks) {
-    return [];
-  }
-
-  return subTasks.map((task) => ({
-    id: task.id,
-    identifier: task.identifier,
-    title: task.title,
-    description: '', // Would need to extend fetchJiraSubTasks
-    status: mapLinearStatus(task.status), // Reuse Linear status mapping
-    gitBranchName: task.gitBranchName || '',
-    blockedBy: task.relations?.blockedBy || [],
-    blocks: task.relations?.blocks || [],
-  }));
-}
-
-/**
  * Generate local context files for an issue
  *
  * Fetches issue data from the configured backend (Linear or Jira) via SDK
@@ -332,15 +290,12 @@ export async function generateContext(
 
   if (backend === 'linear') {
     parentContext = await fetchLinearParentContext(parentIdentifier);
-    if (parentContext) {
-      subTaskContexts = await fetchLinearSubTaskContexts(parentContext.id);
-    }
-  } else {
+  } else if (backend === 'jira') {
     parentContext = await fetchJiraParentContext(parentIdentifier);
-    if (parentContext) {
-      subTaskContexts = await fetchJiraSubTaskContexts(parentIdentifier);
-    }
   }
+
+  // Always read sub-tasks from local state
+  subTaskContexts = readSubTasks(parentIdentifier);
 
   if (!parentContext) {
     return null;

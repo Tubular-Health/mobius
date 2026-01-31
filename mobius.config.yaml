@@ -4,7 +4,7 @@
 # Environment variables override these settings:
 #   MOBIUS_BACKEND, MOBIUS_DELAY_SECONDS, etc.
 
-# Issue tracker backend: linear | jira
+# Issue tracker backend: linear | jira | local
 backend: linear
 
 # Backend-specific settings
@@ -31,7 +31,7 @@ execution:
   model: opus
 
   # Run in Docker sandbox by default (safer for autonomous execution)
-  # Set to false or use --local flag to run directly
+  # Set to false or use --no-sandbox flag to run directly
   sandbox: true
 
   # Docker container name for sandbox mode
@@ -40,7 +40,7 @@ execution:
   # Parallel execution settings (for `mobius loop` command)
 
   # Maximum concurrent Claude agents for parallel sub-task execution (1-10)
-  max_parallel_agents: 3
+  max_parallel_agents: 10
 
   # Base directory for git worktrees (<repo> replaced with repository name at runtime)
   worktree_path: "../<repo>-worktrees/"

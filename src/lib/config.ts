@@ -139,6 +139,58 @@ export function copyDefaultConfig(targetPath: string): void {
 }
 
 /**
+ * Ensure .claude/settings.json has .mobius/ permissions
+ */
+export function ensureClaudeSettings(projectDir: string): void {
+  const settingsPath = join(projectDir, '.claude', 'settings.json');
+  const mobiusPermissions = [
+    'Bash(mkdir */.mobius/*)',
+    'Bash(mkdir -p */.mobius/*)',
+    'Bash(mkdir .mobius/*)',
+    'Bash(mkdir -p .mobius/*)',
+    'Bash(ls .mobius/*)',
+    'Bash(ls */.mobius/*)',
+    'Write(.mobius/**)',
+    'Edit(.mobius/**)',
+  ];
+
+  let settings: { permissions?: { allow?: string[] } } = {};
+
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    } catch {
+      // If parse fails, start fresh
+      settings = {};
+    }
+  }
+
+  if (!settings.permissions) {
+    settings.permissions = {};
+  }
+  if (!settings.permissions.allow) {
+    settings.permissions.allow = [];
+  }
+
+  // Add missing permissions
+  let added = 0;
+  for (const perm of mobiusPermissions) {
+    if (!settings.permissions.allow.includes(perm)) {
+      settings.permissions.allow.push(perm);
+      added++;
+    }
+  }
+
+  if (added > 0) {
+    const dir = dirname(settingsPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf-8');
+  }
+}
+
+/**
  * Check if config exists
  */
 export function configExists(configPath: string): boolean {

@@ -531,6 +531,12 @@ async function pushUpdate(update: PendingUpdate, backend: Backend): Promise<Push
     issueIdentifier: getIssueIdentifier(update),
   };
 
+  // Skip API calls for local-only task IDs (e.g., "task-001") that don't exist in the backend.
+  // Sub-tasks are stored locally; only the parent issue lives in Linear/Jira.
+  if (!BACKEND_ID_PATTERNS[backend].test(baseResult.issueIdentifier)) {
+    return { ...baseResult, success: true };
+  }
+
   try {
     switch (update.type) {
       case 'status_change':
