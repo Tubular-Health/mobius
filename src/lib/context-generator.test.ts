@@ -2,10 +2,10 @@
  * Unit tests for context-generator module
  *
  * Tests the local context file generation and management functions.
- * Uses temporary directories to avoid polluting the real ~/.mobius directory.
+ * Uses the project-local .mobius/ directory for context storage.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,6 +19,7 @@ import type {
   SubTaskContext,
 } from '../types/context.js';
 import {
+  _resetLegacyWarnings,
   addRuntimeActiveTask,
   cleanupContext,
   clearAllRuntimeActiveTasks,
@@ -85,10 +86,15 @@ describe('context-generator module', () => {
 
   describe('path helper functions', () => {
     describe('getMobiusBasePath', () => {
-      it('returns path under home directory', () => {
+      it('returns project-local .mobius/ path instead of ~/.mobius/', () => {
         const basePath = getMobiusBasePath();
-        expect(basePath).toContain('.mobius');
-        expect(basePath.startsWith(homedir())).toBe(true);
+        expect(basePath).toEndWith('.mobius');
+        // Should NOT be the legacy ~/.mobius path
+        expect(basePath).not.toBe(join(homedir(), '.mobius'));
+        // The .mobius dir should be inside a directory that contains
+        // project files, not directly under home
+        const parentDir = basePath.replace(/\/.mobius$/, '');
+        expect(parentDir).not.toBe(homedir());
       });
     });
 
@@ -163,6 +169,109 @@ describe('context-generator module', () => {
         expect(fullContextPath).toContain('MOB-161');
       });
     });
+
+    describe('derived paths resolve to project-local subdirectories', () => {
+      it('getContextPath returns {repo-root}/.mobius/issues/{parentId}', () => {
+        const contextPath = getContextPath('MOB-123');
+        const basePath = getMobiusBasePath();
+        expect(contextPath).toBe(join(basePath, 'issues', 'MOB-123'));
+      });
+    });
+  });
+
+  describe('legacy path warning', () => {
+    const legacyTestId = 'LEGACY-WARN-TEST';
+    let legacyDir: string;
+
+    beforeEach(() => {
+      _resetLegacyWarnings();
+      legacyDir = join(homedir(), '.mobius', 'issues', legacyTestId);
+    });
+
+    afterEach(() => {
+      _resetLegacyWarnings();
+      // Clean up legacy dir if created
+      if (existsSync(legacyDir)) {
+        rmSync(legacyDir, { recursive: true });
+      }
+      // Clean up project-local context
+      cleanupContext(legacyTestId);
+    });
+
+    it('warns when legacy ~/.mobius/ data exists for a parent', () => {
+      // Create legacy directory
+      mkdirSync(legacyDir, { recursive: true });
+
+      const warnSpy = spyOn(console, 'warn');
+
+      // Writing context triggers ensureContextDirectories which calls checkLegacyPath
+      const context: IssueContext = {
+        parent: {
+          id: 'legacy-uuid',
+          identifier: legacyTestId,
+          title: 'Legacy Test',
+          description: '',
+          gitBranchName: 'feature/legacy',
+          status: 'Backlog',
+          labels: [],
+          url: '',
+        },
+        subTasks: [],
+        metadata: {
+          fetchedAt: '2024-01-15T10:00:00Z',
+          updatedAt: '2024-01-15T10:00:00Z',
+          backend: 'linear',
+        },
+      };
+
+      writeFullContextFile(legacyTestId, context);
+
+      expect(warnSpy).toHaveBeenCalled();
+      const warnMsg = warnSpy.mock.calls[0][0] as string;
+      expect(warnMsg).toContain('Legacy context found');
+      expect(warnMsg).toContain(legacyTestId);
+
+      warnSpy.mockRestore();
+    });
+
+    it('warns only once per parentId', () => {
+      // Create legacy directory
+      mkdirSync(legacyDir, { recursive: true });
+
+      const warnSpy = spyOn(console, 'warn');
+
+      const context: IssueContext = {
+        parent: {
+          id: 'legacy-uuid-2',
+          identifier: legacyTestId,
+          title: 'Legacy Test 2',
+          description: '',
+          gitBranchName: 'feature/legacy-2',
+          status: 'Backlog',
+          labels: [],
+          url: '',
+        },
+        subTasks: [],
+        metadata: {
+          fetchedAt: '2024-01-15T10:00:00Z',
+          updatedAt: '2024-01-15T10:00:00Z',
+          backend: 'linear',
+        },
+      };
+
+      // First call triggers warning
+      writeFullContextFile(legacyTestId, context);
+      // Second call should not trigger warning again
+      writeFullContextFile(legacyTestId, context);
+
+      // Filter for our specific legacy warning (not other potential console.warn calls)
+      const legacyWarns = warnSpy.mock.calls.filter(
+        (call) => typeof call[0] === 'string' && call[0].includes('Legacy context found')
+      );
+      expect(legacyWarns).toHaveLength(1);
+
+      warnSpy.mockRestore();
+    });
   });
 
   describe('writeFullContextFile', () => {
@@ -200,6 +309,48 @@ describe('context-generator module', () => {
 
       // Cleanup
       cleanupContext('TEST-1');
+    });
+
+    it('creates .mobius/ with .gitignore on first call', () => {
+      const mobiusDir = getMobiusBasePath();
+      const gitignorePath = join(mobiusDir, '.gitignore');
+
+      // Clean up .gitignore if it exists (to test creation)
+      const gitignoreExisted = existsSync(gitignorePath);
+
+      const context: IssueContext = {
+        parent: {
+          id: 'gitignore-uuid',
+          identifier: 'GITIGNORE-TEST',
+          title: 'Gitignore Test',
+          description: '',
+          gitBranchName: 'feature/gitignore',
+          status: 'Backlog',
+          labels: [],
+          url: '',
+        },
+        subTasks: [],
+        metadata: {
+          fetchedAt: '2024-01-15T10:00:00Z',
+          updatedAt: '2024-01-15T10:00:00Z',
+          backend: 'linear',
+        },
+      };
+
+      writeFullContextFile('GITIGNORE-TEST', context);
+
+      // .gitignore should exist
+      expect(existsSync(gitignorePath)).toBe(true);
+      const content = readFileSync(gitignorePath, 'utf-8');
+      expect(content).toContain('state/');
+
+      // Cleanup
+      cleanupContext('GITIGNORE-TEST');
+
+      // Restore .gitignore state if it didn't exist before
+      if (!gitignoreExisted && existsSync(gitignorePath)) {
+        // Leave it - ensureProjectMobiusDir would recreate it anyway
+      }
     });
 
     it('creates parent directories if they do not exist', () => {
