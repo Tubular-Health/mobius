@@ -2,6 +2,9 @@ import chalk from 'chalk';
 import { execa } from 'execa';
 import which from 'which';
 import { readConfig } from '../lib/config.js';
+import { updateJiraIssueStatus } from '../lib/jira.js';
+import { fetchLinearIssue, updateLinearIssueStatus } from '../lib/linear.js';
+import { readParentSpec, writeParentSpec } from '../lib/local-state.js';
 import { resolvePaths } from '../lib/paths.js';
 import type { Backend, Model } from '../types.js';
 import { BACKEND_ID_PATTERNS } from '../types.js';
@@ -10,6 +13,7 @@ interface SubmitOptions {
   backend?: Backend;
   model?: Model;
   draft?: boolean;
+  skipStatusUpdate?: boolean;
 }
 
 async function hasCclean(): Promise<boolean> {
@@ -77,5 +81,51 @@ export async function submit(taskId: string | undefined, options: SubmitOptions)
       console.error(chalk.red(`Error: ${error.message}`));
     }
     process.exit(1);
+  }
+
+  // After successful PR creation, update parent issue status to "In Review"
+  if (taskId && !options.skipStatusUpdate) {
+    await updateParentStatusToReview(taskId, backend);
+  }
+}
+
+async function updateParentStatusToReview(taskId: string, backend: Backend): Promise<void> {
+  const reviewStatus = 'In Review';
+
+  try {
+    if (backend === 'linear') {
+      // Fetch the issue to get its UUID (required by updateLinearIssueStatus)
+      const issue = await fetchLinearIssue(taskId);
+      if (!issue) {
+        console.warn(chalk.yellow(`⚠ Could not fetch issue ${taskId} to update status`));
+        return;
+      }
+      const result = await updateLinearIssueStatus(issue.id, reviewStatus);
+      if (result.success) {
+        console.log(chalk.green(`✓ Updated ${taskId} status to "${reviewStatus}"`));
+      } else {
+        console.warn(chalk.yellow(`⚠ Could not update status: ${result.error}`));
+      }
+    } else if (backend === 'jira') {
+      const success = await updateJiraIssueStatus(taskId, reviewStatus);
+      if (success) {
+        console.log(chalk.green(`✓ Updated ${taskId} status to "${reviewStatus}"`));
+      } else {
+        console.warn(chalk.yellow(`⚠ Could not update ${taskId} status to "${reviewStatus}"`));
+      }
+    } else if (backend === 'local') {
+      const spec = readParentSpec(taskId);
+      if (spec) {
+        spec.status = reviewStatus;
+        writeParentSpec(taskId, spec);
+        console.log(chalk.green(`✓ Updated local parent.json status to "${reviewStatus}"`));
+      } else {
+        console.warn(chalk.yellow(`⚠ No local parent.json found for ${taskId}`));
+      }
+    }
+  } catch (error) {
+    // Status update failure should not fail submit - PR creation is the primary goal
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(chalk.yellow(`⚠ Status update failed (PR was created successfully): ${message}`));
   }
 }
