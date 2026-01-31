@@ -23,6 +23,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import type { ParentIssueContext, SubTaskContext } from '../types/context.js';
+import type { LinearIssue } from './task-graph.js';
 
 /**
  * Entry in the iteration log tracking execution attempts
@@ -259,6 +260,28 @@ export function writeSubTaskSpec(issueId: string, task: SubTaskContext): void {
 }
 
 /**
+ * Update just the status field of a sub-task's JSON file on disk.
+ *
+ * Reads the existing file, patches the status, and writes it back atomically.
+ * This ensures syncGraphFromLocal() sees the updated status on the next iteration.
+ */
+export function updateSubTaskStatus(issueId: string, taskIdentifier: string, status: string): void {
+  const filePath = join(getIssuePath(issueId), 'tasks', `${taskIdentifier}.json`);
+  if (!existsSync(filePath)) return;
+
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    const task = JSON.parse(content) as SubTaskContext;
+    task.status = status as SubTaskContext['status'];
+    const tmpPath = `${filePath}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(task, null, 2), 'utf-8');
+    renameSync(tmpPath, filePath);
+  } catch {
+    // Non-fatal: in-memory graph still has the correct status
+  }
+}
+
+/**
  * Read all sub-task specs from .mobius/issues/{issueId}/tasks/
  *
  * Returns an array of all valid sub-task specs found in the tasks directory.
@@ -286,6 +309,40 @@ export function readSubTasks(issueId: string): SubTaskContext[] {
   }
 
   return tasks;
+}
+
+/**
+ * Read local sub-tasks and convert to LinearIssue[] for buildTaskGraph()
+ *
+ * Handles the schema mismatch between refine-written task files (which use
+ * string arrays for blockedBy/blocks and omit identifier/gitBranchName) and
+ * the LinearIssue format expected by the task graph builder.
+ */
+export function readLocalSubTasksAsLinearIssues(issueId: string): LinearIssue[] {
+  const tasks = readSubTasks(issueId);
+
+  return tasks.map((task) => {
+    // Refine writes blockedBy/blocks as string arrays like ["task-002"],
+    // but SubTaskContext expects Array<{id, identifier}>. Handle both.
+    const rawBlockedBy = (task.blockedBy ?? []) as Array<string | { id: string; identifier: string }>;
+    const rawBlocks = (task.blocks ?? []) as Array<string | { id: string; identifier: string }>;
+
+    const blockedBy = rawBlockedBy.map((b) =>
+      typeof b === 'string' ? { id: b, identifier: b } : b
+    );
+    const blocks = rawBlocks.map((b) =>
+      typeof b === 'string' ? { id: b, identifier: b } : b
+    );
+
+    return {
+      id: task.id,
+      identifier: task.identifier ?? task.id,
+      title: task.title,
+      status: task.status,
+      gitBranchName: task.gitBranchName ?? '',
+      relations: { blockedBy, blocks },
+    };
+  });
 }
 
 /**

@@ -6,6 +6,8 @@
  */
 
 import { LinearClient } from '@linear/sdk';
+import type { Backend } from '../types.js';
+import { BACKEND_ID_PATTERNS } from '../types.js';
 import type { ExecutionResult } from './parallel-executor.js';
 import type { SubTask } from './task-graph.js';
 
@@ -117,7 +119,8 @@ export async function verifyLinearCompletion(
  */
 export async function processResults(
   tracker: ExecutionTracker,
-  results: ExecutionResult[]
+  results: ExecutionResult[],
+  backend?: Backend
 ): Promise<VerifiedResult[]> {
   const verifiedResults: VerifiedResult[] = [];
 
@@ -131,6 +134,23 @@ export async function processResults(
     }
 
     if (result.success) {
+      // Skip backend verification for local-only task IDs (e.g., "task-001")
+      // that don't exist in the remote backend
+      const isLocalTask = backend
+        ? !BACKEND_ID_PATTERNS[backend].test(result.identifier)
+        : !Object.values(BACKEND_ID_PATTERNS).some((p) => p.test(result.identifier));
+
+      if (isLocalTask) {
+        // Trust the execution result for local-only tasks
+        verifiedResults.push({
+          ...result,
+          linearVerified: true,
+          linearStatus: 'Done (local)',
+          shouldRetry: false,
+        });
+        continue;
+      }
+
       // Verify with Linear SDK
       const verification = await verifyLinearCompletion(
         result.identifier,

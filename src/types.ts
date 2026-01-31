@@ -156,3 +156,16 @@ export const BACKEND_ID_PATTERNS: Record<Backend, RegExp> = {
   jira: /^[A-Z]+-[0-9]+$/,
   local: /^LOC-[0-9]+$/,
 };
+
+export function detectBackendFromId(taskId: string): Backend | null {
+  if (BACKEND_ID_PATTERNS.local.test(taskId)) return 'local';
+  return null; // linear and jira share the same pattern, can't disambiguate
+}
+
+export function resolveBackend(
+  explicit: Backend | undefined,
+  taskId: string,
+  configBackend: Backend
+): Backend {
+  return explicit ?? detectBackendFromId(taskId) ?? configBackend;
+}

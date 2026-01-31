@@ -7,7 +7,7 @@
 # Usage:
 #   mobius VER-159                 # Execute sub-tasks (uses default backend)
 #   mobius VER-159 10              # Max 10 iterations
-#   mobius VER-159 --local         # Run locally (bypass sandbox)
+#   mobius VER-159 --no-sandbox    # Run locally (bypass sandbox)
 #   mobius VER-159 --backend=jira  # Use Jira backend
 #
 # Configuration:
@@ -153,7 +153,11 @@ parse_args() {
     local args=()
     for arg in "$@"; do
         case "$arg" in
+            --no-sandbox)
+                RUN_LOCAL=true
+                ;;
             --local|-l)
+                echo "Warning: --local is deprecated, use --no-sandbox instead" >&2
                 RUN_LOCAL=true
                 ;;
             --help|-h)
@@ -244,7 +248,8 @@ OPTIONS:
     --model=MODEL        Claude model: opus, sonnet, haiku (default: $MODEL)
     --delay=SECONDS      Delay between iterations (default: $DELAY_SECONDS)
     --parallel=N         Max parallel agents for parallel mode (default: $MAX_PARALLEL_AGENTS)
-    --local, -l          Run locally (bypass container sandbox)
+    --no-sandbox         Bypass container sandbox, run directly on host
+    --local, -l          (deprecated) Alias for --no-sandbox
     --config             Show current configuration and exit
     --version, -v        Show version
     --help, -h           Show this help message
@@ -271,7 +276,7 @@ CONFIGURATION:
 EXAMPLES:
     mobius VER-159                    Execute sub-tasks of VER-159 (Linear)
     mobius VER-159 10                 Max 10 iterations
-    mobius VER-159 --local            Run locally with browser access
+    mobius VER-159 --no-sandbox       Run locally with browser access
     mobius VER-159 --model=sonnet     Use Sonnet model
     mobius PROJ-123 --backend=jira    Use Jira backend
 

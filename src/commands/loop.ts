@@ -35,8 +35,9 @@ import { fetchJiraIssue } from '../lib/jira.js';
 import { fetchLinearIssue, type ParentIssue } from '../lib/linear.js';
 import {
   type IterationLogEntry,
+  readLocalSubTasksAsLinearIssues,
   readParentSpec,
-  readSubTasks,
+  updateSubTaskStatus,
   writeIterationLog,
 } from '../lib/local-state.js';
 import {
@@ -77,7 +78,7 @@ import { renderFullTreeOutput } from '../lib/tree-renderer.js';
 import { createWorktree, removeWorktree } from '../lib/worktree.js';
 import type { IssueContext, RuntimeState } from '../types/context.js';
 import type { Backend, ExecutionConfig, Model } from '../types.js';
-import { BACKEND_ID_PATTERNS } from '../types.js';
+import { BACKEND_ID_PATTERNS, resolveBackend } from '../types.js';
 import { pushPendingUpdatesForTask } from './push.js';
 
 /**
@@ -94,7 +95,6 @@ type NeedsWorkExecuteOutput = {
 
 export interface LoopOptions {
   maxIterations?: number;
-  local?: boolean;
   backend?: Backend;
   model?: Model;
   parallel?: number; // Override max_parallel_agents
@@ -109,7 +109,7 @@ export interface LoopOptions {
 export async function loop(taskId: string, options: LoopOptions): Promise<void> {
   const paths = resolvePaths();
   const config = readConfig(paths.configPath);
-  const backend = options.backend ?? config.backend;
+  const backend = resolveBackend(options.backend, taskId, config.backend);
 
   // Validate task ID format
   const pattern = BACKEND_ID_PATTERNS[backend];
@@ -437,9 +437,9 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         }
       }
 
-      // Verify results via Linear SDK
+      // Verify results — local tasks are auto-verified, backend tasks check via SDK
       console.log(chalk.gray('Verifying results via Linear...'));
-      const verifiedResults = await processResults(tracker, results);
+      const verifiedResults = await processResults(tracker, results, backend);
 
       // Process verified results and update graph
       const verified = verifiedResults.filter((r) => r.success && r.linearVerified);
@@ -458,6 +458,8 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         if (result.success && result.linearVerified) {
           graph = updateTaskStatus(graph, result.taskId, 'done');
           runtimeState = completeRuntimeTask(runtimeState, result.identifier);
+          // Persist status to local task file so syncGraphFromLocal() sees it
+          updateSubTaskStatus(taskId, result.identifier, 'done');
           console.log(chalk.green(`  ✓ ${result.identifier} (Linear: ${result.linearStatus})`));
         } else if (result.shouldRetry) {
           // Remove from active tasks for retry (will be re-added next iteration)
@@ -622,30 +624,20 @@ async function fetchParentIssue(taskId: string, backend: Backend): Promise<Paren
 }
 
 /**
- * Convert local SubTaskContext[] to LinearIssue[] for buildTaskGraph()
+ * Read local sub-tasks as LinearIssue[] for buildTaskGraph()
  *
- * Reads sub-task specs from .mobius/issues/{id}/tasks/*.json and converts
- * them to the LinearIssue format expected by the task graph builder.
+ * Uses the shared readLocalSubTasksAsLinearIssues() which handles the schema
+ * mismatch between refine-written task files and the LinearIssue format.
  */
 function readLocalSubTasks(taskId: string): LinearIssue[] {
-  const localTasks = readSubTasks(taskId);
+  const localIssues = readLocalSubTasksAsLinearIssues(taskId);
   debugLog('task_state_change', 'loop', taskId, {
     event: 'read_local_subtasks',
-    count: localTasks.length,
+    count: localIssues.length,
   });
-  console.log(chalk.gray(`Reading sub-tasks from local state (${localTasks.length} found)`));
+  console.log(chalk.gray(`Reading sub-tasks from local state (${localIssues.length} found)`));
 
-  return localTasks.map((task) => ({
-    id: task.id,
-    identifier: task.identifier,
-    title: task.title,
-    status: task.status,
-    gitBranchName: task.gitBranchName,
-    relations: {
-      blockedBy: task.blockedBy,
-      blocks: task.blocks,
-    },
-  }));
+  return localIssues;
 }
 
 /**
