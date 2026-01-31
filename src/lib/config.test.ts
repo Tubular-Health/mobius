@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { LoopConfig } from '../types.js';
+import type { Backend, LoopConfig } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
 import { readConfig, validateConfig } from './config.js';
 
@@ -22,6 +22,65 @@ describe('config module', () => {
     if (existsSync(tempDir)) {
       rmSync(tempDir, { recursive: true });
     }
+  });
+
+  describe('backend validation', () => {
+    it('accepts local as a valid backend', () => {
+      const config: LoopConfig = {
+        backend: 'local',
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('error message lists local as valid option for invalid backend', () => {
+      const config: LoopConfig = {
+        backend: 'invalid' as Backend,
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain(
+        "Invalid backend: invalid. Must be 'linear', 'jira', or 'local'"
+      );
+    });
+
+    it('does not run Jira validation for local backend', () => {
+      const config: LoopConfig = {
+        backend: 'local',
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      // No jira config at all - should still pass
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
   });
 
   describe('verification config defaults', () => {

@@ -241,8 +241,8 @@ export function validateConfig(config: LoopConfig): { valid: boolean; errors: st
 
   if (!config.backend) {
     errors.push('Missing required field: backend');
-  } else if (!['linear', 'jira'].includes(config.backend)) {
-    errors.push(`Invalid backend: ${config.backend}. Must be 'linear' or 'jira'`);
+  } else if (!['linear', 'jira', 'local'].includes(config.backend)) {
+    errors.push(`Invalid backend: ${config.backend}. Must be 'linear', 'jira', or 'local'`);
   }
 
   if (!config.execution) {
