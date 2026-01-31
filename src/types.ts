@@ -111,6 +111,22 @@ export interface CheckResult {
   details?: string;
 }
 
+export interface CliDetectionResult {
+  tool: string;
+  installed: boolean;
+  version?: string;
+  path?: string;
+}
+
+export type Platform = 'darwin' | 'linux' | 'win32';
+
+export interface InstallMethod {
+  platform: Platform;
+  method: string;
+  command: string;
+  url?: string;
+}
+
 export interface PathConfig {
   type: 'local' | 'global';
   configPath: string;
