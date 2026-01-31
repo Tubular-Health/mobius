@@ -260,6 +260,28 @@ export function writeSubTaskSpec(issueId: string, task: SubTaskContext): void {
 }
 
 /**
+ * Update just the status field of a sub-task's JSON file on disk.
+ *
+ * Reads the existing file, patches the status, and writes it back atomically.
+ * This ensures syncGraphFromLocal() sees the updated status on the next iteration.
+ */
+export function updateSubTaskStatus(issueId: string, taskIdentifier: string, status: string): void {
+  const filePath = join(getIssuePath(issueId), 'tasks', `${taskIdentifier}.json`);
+  if (!existsSync(filePath)) return;
+
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    const task = JSON.parse(content) as SubTaskContext;
+    task.status = status as SubTaskContext['status'];
+    const tmpPath = `${filePath}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(task, null, 2), 'utf-8');
+    renameSync(tmpPath, filePath);
+  } catch {
+    // Non-fatal: in-memory graph still has the correct status
+  }
+}
+
+/**
  * Read all sub-task specs from .mobius/issues/{issueId}/tasks/
  *
  * Returns an array of all valid sub-task specs found in the tasks directory.

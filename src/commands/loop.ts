@@ -37,6 +37,7 @@ import {
   type IterationLogEntry,
   readLocalSubTasksAsLinearIssues,
   readParentSpec,
+  updateSubTaskStatus,
   writeIterationLog,
 } from '../lib/local-state.js';
 import {
@@ -457,6 +458,8 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         if (result.success && result.linearVerified) {
           graph = updateTaskStatus(graph, result.taskId, 'done');
           runtimeState = completeRuntimeTask(runtimeState, result.identifier);
+          // Persist status to local task file so syncGraphFromLocal() sees it
+          updateSubTaskStatus(taskId, result.identifier, 'done');
           console.log(chalk.green(`  ✓ ${result.identifier} (Linear: ${result.linearStatus})`));
         } else if (result.shouldRetry) {
           // Remove from active tasks for retry (will be re-added next iteration)
