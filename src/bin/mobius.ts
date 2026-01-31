@@ -32,10 +32,17 @@ program
   .command('setup')
   .description('Interactive setup wizard')
   .option('-u, --update-skills', 'Update skills/commands only (skip config wizard)')
+  .option('--update-shortcuts', 'Update shortcuts script only (skip config wizard)')
   .option('-i, --install', 'Auto-install CLI tools with confirmation')
-  .action(async (options: { updateSkills?: boolean; install?: boolean }) => {
-    await setup({ updateSkills: options.updateSkills, install: options.install });
-  });
+  .action(
+    async (options: { updateSkills?: boolean; updateShortcuts?: boolean; install?: boolean }) => {
+      await setup({
+        updateSkills: options.updateSkills,
+        updateShortcuts: options.updateShortcuts,
+        install: options.install,
+      });
+    }
+  );
 
 program
   .command('doctor')
@@ -68,7 +75,9 @@ program
   .command('run <task-id> [max-iterations]')
   .description('Execute sub-tasks sequentially (use "loop" for parallel execution)')
   .option('--no-sandbox', 'Bypass container sandbox, run directly on host')
-  .addOption(new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp())
+  .addOption(
+    new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp()
+  )
   .option('-b, --backend <backend>', 'Backend: linear, jira, or local')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
   .option('-d, --delay <seconds>', 'Delay between iterations', parseInt)
@@ -89,7 +98,9 @@ program
   .command('loop <task-id>')
   .description('Execute sub-tasks with parallel execution and worktree isolation')
   .option('--no-sandbox', 'Bypass container sandbox, run directly on host')
-  .addOption(new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp())
+  .addOption(
+    new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp()
+  )
   .option('-b, --backend <backend>', 'Backend: linear, jira, or local')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
   .option('-p, --parallel <count>', 'Max parallel agents (overrides config)', parseInt)
@@ -188,7 +199,9 @@ program
 program
   .argument('[task-id]', 'Task ID to execute (uses parallel loop by default)')
   .option('--no-sandbox', 'Bypass container sandbox, run directly on host')
-  .addOption(new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp())
+  .addOption(
+    new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp()
+  )
   .option('-b, --backend <backend>', 'Backend: linear, jira, or local')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
   .option('-s, --sequential', 'Use sequential execution instead of parallel')
