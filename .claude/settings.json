@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir */.mobius/*)",
+      "Bash(mkdir -p */.mobius/*)",
+      "Bash(mkdir .mobius/*)",
+      "Bash(mkdir -p .mobius/*)",
+      "Bash(ls .mobius/*)",
+      "Bash(ls */.mobius/*)",
+      "Write(.mobius/**)",
+      "Edit(.mobius/**)"
+    ]
+  }
+}
