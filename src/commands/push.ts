@@ -16,6 +16,7 @@ import {
   getPendingUpdatesPath,
   getSyncLogPath,
   readPendingUpdates,
+  readSession,
   resolveTaskId,
   updateBackendStatus,
   writePendingUpdates,
@@ -23,6 +24,7 @@ import {
 import { debugLog } from '../lib/debug-logger.js';
 import { addJiraComment, createJiraIssue, updateJiraIssueStatus } from '../lib/jira.js';
 import { addLinearComment, createLinearIssue, updateLinearIssueStatus } from '../lib/linear.js';
+import { readIterationLog, writeSummary } from '../lib/local-state.js';
 import { resolvePaths } from '../lib/paths.js';
 import type { PendingUpdate, SyncLog, SyncLogEntry } from '../types/context.js';
 import type { Backend } from '../types.js';
@@ -32,6 +34,7 @@ export interface PushOptions {
   backend?: Backend;
   dryRun?: boolean;
   all?: boolean;
+  summary?: boolean;
 }
 
 interface PushResult {
@@ -52,6 +55,18 @@ export async function push(parentId: string | undefined, options: PushOptions): 
   const paths = resolvePaths();
   const config = readConfig(paths.configPath);
   const backend = options.backend ?? config.backend;
+
+  // Handle --summary flag: generate and push loop summary
+  if (options.summary) {
+    const resolvedSummaryId = resolveTaskId(parentId) ?? undefined;
+    if (!resolvedSummaryId) {
+      console.error(chalk.red('Error: No task ID provided for summary'));
+      console.error(chalk.gray('Usage: mobius push <task-id> --summary'));
+      process.exit(1);
+    }
+    await pushLoopSummary(resolvedSummaryId, backend);
+    return;
+  }
 
   // Resolve task ID (use provided or fall back to current task)
   const resolvedId = options.all ? undefined : (resolveTaskId(parentId) ?? undefined);
@@ -224,6 +239,175 @@ export async function pushPendingUpdatesForTask(
   }
 
   return { success, failed, errors };
+}
+
+/**
+ * Generate and push a loop summary for the given parent issue
+ *
+ * Reads iteration data from execution/iterations.json and session info
+ * to build a structured summary. In backend modes (linear/jira), pushes
+ * the summary as a comment on the parent issue. In local mode, writes
+ * to .mobius/issues/{id}/summary.json.
+ *
+ * @param parentId - The parent issue identifier
+ * @param backend - The backend to push to
+ */
+async function pushLoopSummary(parentId: string, backend: Backend): Promise<void> {
+  const iterations = readIterationLog(parentId);
+
+  if (iterations.length === 0) {
+    console.error(chalk.yellow(`No iteration data found for ${parentId}`));
+    console.error(chalk.gray('Run "mobius loop <task-id>" first to generate iteration data'));
+    process.exit(1);
+  }
+
+  // Compute summary statistics
+  const completedTasks = iterations.filter((e) => e.status === 'success');
+  const failedTasks = iterations.filter((e) => e.status === 'failed');
+  const uniqueSubtasks = new Set(iterations.map((e) => e.subtaskId));
+
+  // Compute elapsed time from session or iteration timestamps
+  const session = readSession(parentId);
+  const startTime = session?.startedAt ?? iterations[0].startedAt;
+  const lastIteration = iterations[iterations.length - 1];
+  const endTime = lastIteration.completedAt ?? lastIteration.startedAt;
+  const elapsedMs = new Date(endTime).getTime() - new Date(startTime).getTime();
+  const elapsedMinutes = Math.round(elapsedMs / 60000);
+
+  // Build task outcome map (latest status per subtask)
+  const taskOutcomes = new Map<string, { status: string; iterations: number }>();
+  for (const entry of iterations) {
+    const existing = taskOutcomes.get(entry.subtaskId);
+    taskOutcomes.set(entry.subtaskId, {
+      status: entry.status,
+      iterations: (existing?.iterations ?? 0) + 1,
+    });
+  }
+
+  if (backend === 'local') {
+    // In local mode, write summary.json
+    const summary = {
+      parentId,
+      completedAt: new Date().toISOString(),
+      totalTasks: uniqueSubtasks.size,
+      completedTasks: completedTasks.length,
+      failedTasks: failedTasks.length,
+      totalIterations: iterations.length,
+      taskOutcomes: Array.from(taskOutcomes.entries()).map(([id, outcome]) => ({
+        id,
+        status: outcome.status,
+        iterations: outcome.iterations,
+      })),
+    };
+    writeSummary(parentId, summary);
+    console.log(chalk.green(`Summary written to .mobius/issues/${parentId}/summary.json`));
+    displaySummaryStats(
+      iterations.length,
+      completedTasks.length,
+      failedTasks.length,
+      elapsedMinutes
+    );
+    return;
+  }
+
+  // Backend mode: push summary as comment on parent issue
+  const commentBody = buildSummaryComment(
+    parentId,
+    iterations.length,
+    completedTasks.length,
+    failedTasks.length,
+    elapsedMinutes,
+    taskOutcomes
+  );
+
+  const spinner = ora({
+    text: `Pushing loop summary to ${backend}...`,
+    color: 'blue',
+  }).start();
+
+  let success: boolean;
+  let error: string | undefined;
+
+  if (backend === 'linear') {
+    const result = await addLinearComment(parentId, commentBody);
+    success = result.success;
+    error = result.error;
+  } else {
+    const result = await addJiraComment(parentId, commentBody);
+    success = result !== null;
+    error = result === null ? 'Failed to add Jira comment' : undefined;
+  }
+
+  if (success) {
+    spinner.succeed('Loop summary pushed successfully');
+    displaySummaryStats(
+      iterations.length,
+      completedTasks.length,
+      failedTasks.length,
+      elapsedMinutes
+    );
+  } else {
+    spinner.fail(`Failed to push summary: ${error ?? 'Unknown error'}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Build a Markdown summary comment for backend posting
+ */
+function buildSummaryComment(
+  parentId: string,
+  totalIterations: number,
+  completed: number,
+  failed: number,
+  elapsedMinutes: number,
+  taskOutcomes: Map<string, { status: string; iterations: number }>
+): string {
+  const lines = [
+    '## Loop Execution Summary',
+    '',
+    `**Issue**: ${parentId}`,
+    `**Total Iterations**: ${totalIterations}`,
+    `**Completed**: ${completed}`,
+    `**Failed**: ${failed}`,
+    `**Elapsed Time**: ${elapsedMinutes} minute(s)`,
+    '',
+    '### Task Outcomes',
+    '',
+    '| Task | Status | Iterations |',
+    '|------|--------|------------|',
+  ];
+
+  for (const [id, outcome] of taskOutcomes) {
+    const statusIcon =
+      outcome.status === 'success' ? 'Done' : outcome.status === 'failed' ? 'Failed' : 'Partial';
+    lines.push(`| ${id} | ${statusIcon} | ${outcome.iterations} |`);
+  }
+
+  lines.push('', '---', '*Generated by mobius push --summary*');
+
+  return lines.join('\n');
+}
+
+/**
+ * Display summary statistics to the console
+ */
+function displaySummaryStats(
+  totalIterations: number,
+  completed: number,
+  failed: number,
+  elapsedMinutes: number
+): void {
+  console.log('');
+  console.log(chalk.bold('Loop Summary:'));
+  console.log(chalk.gray(`  Iterations:  ${totalIterations}`));
+  console.log(chalk.green(`  Completed:   ${completed}`));
+  if (failed > 0) {
+    console.log(chalk.red(`  Failed:      ${failed}`));
+  } else {
+    console.log(chalk.gray(`  Failed:      ${failed}`));
+  }
+  console.log(chalk.gray(`  Elapsed:     ${elapsedMinutes} minute(s)`));
 }
 
 /**

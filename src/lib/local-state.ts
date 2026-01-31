@@ -11,6 +11,8 @@
  * even when called from nested subdirectories.
  */
 
+import { execSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -20,8 +22,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { execSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import type { ParentIssueContext, SubTaskContext } from '../types/context.js';
 
 /**
@@ -286,6 +286,27 @@ export function readSubTasks(issueId: string): SubTaskContext[] {
   }
 
   return tasks;
+}
+
+/**
+ * Read all iteration log entries from .mobius/issues/{issueId}/execution/iterations.json
+ *
+ * Returns an empty array if the file doesn't exist or is corrupted.
+ */
+export function readIterationLog(issueId: string): IterationLogEntry[] {
+  const filePath = join(getIssuePath(issueId), 'execution', 'iterations.json');
+  if (!existsSync(filePath)) return [];
+
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed)) {
+      return parsed as IterationLogEntry[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 /**
