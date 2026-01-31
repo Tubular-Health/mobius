@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { confirm, input, select } from '@inquirer/prompts';
 import chalk from 'chalk';
@@ -9,9 +10,11 @@ import {
   showCliStatus,
 } from '../lib/cli-installer.js';
 import {
+  addShortcutsSourceLine,
   configExists,
   copyAgentsTemplate,
   copyCommands,
+  copyShortcuts,
   copySkills,
   ensureClaudeSettings,
   writeConfig,
@@ -21,6 +24,7 @@ import {
   getBundledSkillsDir,
   getGlobalConfigDir,
   getPathsForType,
+  getShortcutsInstallPath,
   resolvePaths,
 } from '../lib/paths.js';
 import { getPlatform } from '../lib/platform-detect.js';
@@ -29,6 +33,7 @@ import { DEFAULT_CONFIG } from '../types.js';
 
 export interface SetupOptions {
   updateSkills?: boolean;
+  updateShortcuts?: boolean;
   install?: boolean;
 }
 
@@ -82,6 +87,19 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
       console.log(chalk.gray(`Skills updated at: ${paths.skillsPath}`));
     }
 
+    console.log('');
+    return;
+  }
+
+  // --update-shortcuts: Skip config wizard, just update shortcuts script
+  if (options.updateShortcuts) {
+    console.log(chalk.bold('\nUpdating shortcuts script...\n'));
+
+    copyShortcuts();
+
+    console.log(chalk.green(`✓ Shortcuts script updated at ${getShortcutsInstallPath()}\n`));
+    console.log(chalk.gray('To enable shortcuts, add this to your shell rc file:'));
+    console.log(chalk.cyan(`  source "${getShortcutsInstallPath()}"`));
     console.log('');
     return;
   }
@@ -202,6 +220,35 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   console.log(chalk.gray('Copying commands...'));
   copyCommands(paths);
 
+  // Copy shortcuts
+  console.log(chalk.gray('Installing shortcuts script...'));
+  copyShortcuts();
+
+  const addSourceLine = await confirm({
+    message: 'Add source line to your shell rc file? (enables md/mr/me/ms shortcuts)',
+    default: true,
+  });
+
+  if (addSourceLine) {
+    const home = homedir();
+    const zshrc = join(home, '.zshrc');
+    const bashrc = join(home, '.bashrc');
+
+    if (existsSync(zshrc)) {
+      addShortcutsSourceLine(zshrc);
+      console.log(chalk.gray(`  Added source line to ${zshrc}`));
+    } else if (existsSync(bashrc)) {
+      addShortcutsSourceLine(bashrc);
+      console.log(chalk.gray(`  Added source line to ${bashrc}`));
+    } else {
+      console.log(chalk.yellow('  No .zshrc or .bashrc found. Add manually:'));
+      console.log(chalk.cyan(`    source "${getShortcutsInstallPath()}"`));
+    }
+  } else {
+    console.log(chalk.gray('  To enable shortcuts later, add to your shell rc file:'));
+    console.log(chalk.cyan(`    source "${getShortcutsInstallPath()}"`));
+  }
+
   // For local install, also copy AGENTS.md and ensure .mobius/ permissions
   if (installType === 'local') {
     const projectDir = dirname(paths.configPath);
@@ -243,6 +290,9 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   console.log(chalk.bold('Next steps:'));
   console.log(`  1. Run ${chalk.cyan('mobius doctor')} to verify installation`);
   console.log(`  2. Run ${chalk.cyan('mobius <TASK-ID>')} to start executing tasks`);
+  console.log(
+    `  3. Use ${chalk.cyan('md')}/${chalk.cyan('mr')}/${chalk.cyan('me')}/${chalk.cyan('ms')} shortcuts for the define-refine-execute-submit workflow`
+  );
 
   if (backend === 'linear') {
     console.log(`\n${chalk.gray('Note: Linear MCP should be auto-configured in Claude Code.')}`);
