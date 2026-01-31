@@ -1,6 +1,6 @@
 ---
 name: refine
-description: Break down issues into sub-tasks with dependencies. Supports Linear and Jira backends. Use when the user mentions "refine", "break down", or "plan" for an issue.
+description: Break down issues into sub-tasks with dependencies. Supports Linear, Jira, and local backends. Sub-tasks are always written locally. Use when the user mentions "refine", "break down", or "plan" for an issue.
 invocation: /refine
 ---
 
@@ -14,9 +14,9 @@ This skill bridges high-level issues and actionable implementation work. It:
 1. **Deeply researches** the codebase to understand existing patterns, dependencies, and affected areas
 2. **Decomposes** work into single-file-focused tasks that Claude can complete in one session
 3. **Identifies dependencies** between tasks to establish blocking relationships
-4. **Creates sub-tasks** as children of the parent issue with proper blocking order
+4. **Writes sub-tasks locally** as JSON files in `.mobius/issues/{id}/tasks/` with proper blocking order
 
-Sub-tasks are designed for autonomous execution - each should be completable without needing to reference other sub-tasks or gather additional context.
+Sub-tasks are ALWAYS local files, regardless of backend mode. The backend only determines where the parent issue is fetched from. Sub-tasks are designed for autonomous execution - each should be completable without needing to reference other sub-tasks or gather additional context.
 </context>
 
 <backend_detection>
@@ -25,18 +25,22 @@ Sub-tasks are designed for autonomous execution - each should be completable wit
 **Auto-detection from issue ID**:
 - Linear format: `MOB-123`, `VRZ-456` (typically 2-4 letter prefix)
 - Jira format: `PROJ-123` (typically longer project key)
+- Local format: `LOC-001`, `LOC-002` (auto-incremented local IDs)
 
 If the format is ambiguous, use AskUserQuestion:
 
-Question: "Which issue tracker are you using?"
+Question: "Which backend are you using?"
 
 Options:
-1. **Linear** - Use Linear MCP tools
-2. **Jira** - Use Jira/Atlassian MCP tools
+1. **Linear** - Fetch parent from Linear, write sub-tasks locally
+2. **Jira** - Fetch parent from Jira, write sub-tasks locally
+3. **Local** - Read parent from local file, write sub-tasks locally
 
-Store the selection to use appropriate MCP tools throughout the skill.
+Store the selection to use appropriate tools throughout the skill.
 
 **Default**: If not specified, default to `linear`.
+
+**Important**: Regardless of backend, sub-tasks are ALWAYS written as local JSON files to `.mobius/issues/{id}/tasks/`. The backend only affects how the parent issue is loaded.
 </backend_detection>
 
 <input_validation>
@@ -54,11 +58,29 @@ Did you mean to use a different backend, or is this a valid issue ID?
 </input_validation>
 
 <parent_issue_loading>
-**Fetch parent issue details using MCP tools.**
+**Fetch parent issue details based on backend mode.**
 
-Use MCP tools to load the parent issue directly.
+The backend determines where the parent issue is loaded from:
 
-**For Linear** - use `mcp__plugin_linear_linear__get_issue`:
+**For `backend: local`** - read from local file:
+
+```bash
+cat .mobius/issues/{issue-id}/parent.json
+```
+
+The local `parent.json` file is created by `/define` in local mode and contains:
+- **Title and description**: What needs to be implemented
+- **Acceptance criteria**: Checklist of requirements
+- **Labels**: Bug/Feature/Improvement for context
+- **Priority**: Urgency level for task ordering
+
+If `parent.json` does not exist, report the error:
+```
+No local parent file found at .mobius/issues/{issue-id}/parent.json
+Run /define {issue-id} first to create the issue spec, or check the issue ID.
+```
+
+**For `backend: linear`** - use `mcp__plugin_linear_linear__get_issue`:
 
 ```
 mcp__plugin_linear_linear__get_issue:
@@ -75,7 +97,7 @@ mcp__plugin_linear_linear__get_issue:
 - **Existing relationships**: blockedBy, blocks, relatedTo
 - **URL**: For reference in sub-tasks
 
-**For Jira** - use `mcp__atlassian__getJiraIssue`:
+**For `backend: jira`** - use `mcp__atlassian__getJiraIssue`:
 
 ```
 mcp__atlassian__getJiraIssue:
@@ -90,130 +112,138 @@ mcp__atlassian__getJiraIssue:
 - **Project key**: For sub-task inheritance
 - **Issue links**: blocks, is blocked by relationships
 
-**If MCP tool fails**:
+**After loading (all backends)**: Write or update the local parent file for use by later skills:
+
+```bash
+mkdir -p .mobius/issues/{parent-id}
+```
+
+```
+Write tool:
+  file_path: .mobius/issues/{parent-id}/parent.json
+  content: {parent issue JSON}
+```
+
+**If MCP tool fails** (linear/jira backends):
 1. Report the error to the user
 2. Check if the issue ID is valid
 3. Verify API permissions
 4. Offer to retry or use a different issue ID
 </parent_issue_loading>
 
-<subtask_creation_mcp>
-**Create sub-tasks directly using MCP tools after user approval.**
+<subtask_creation_local>
+**Write sub-tasks as local JSON files after user approval.**
 
-This skill creates sub-tasks directly via MCP tools - no structured YAML output needed.
+Sub-tasks are ALWAYS written locally to `.mobius/issues/{id}/tasks/` — never pushed to Linear/Jira. This applies to ALL backend modes (local, linear, jira).
 
-**Creation order**: Create sub-tasks in dependency order (leaf tasks first):
-1. Create tasks with no blockers first
-2. Capture returned issue IDs
-3. Create dependent tasks with `blockedBy` referencing created issue IDs
+**Directory setup**: Before writing files, ensure the tasks directory exists:
 
-**For Linear** - use `mcp__plugin_linear_linear__create_issue`:
-
-```
-mcp__plugin_linear_linear__create_issue:
-  title: "[{parent-id}] {sub-task title}"
-  team: "{team from parent}"
-  description: |
-    ## Summary
-    {Brief description of what this task accomplishes}
-
-    ## Context
-    Part of {parent-id}: {parent title}
-
-    ## Target File(s)
-    `{file-path}` ({Create/Modify})
-
-    ## Action
-    {Specific implementation guidance}
-
-    ## Avoid
-    - Do NOT {anti-pattern} because {reason}
-
-    ## Acceptance Criteria
-    - [ ] {Criterion 1}
-      * **Verification**: {how to verify}
-    - [ ] {Criterion 2}
-
-    ## Verify Command
-    ```bash
-    {executable verification command}
-    ```
-  parentId: "{parent issue UUID}"  # Links as sub-task
-  blockedBy: ["{blocker-id-1}", "{blocker-id-2}"]  # Issue IDs from earlier creations
-  labels: ["{inherited-labels}"]
+```bash
+mkdir -p .mobius/issues/{parent-id}/tasks
 ```
 
-**Verification Gate creation**:
-```
-mcp__plugin_linear_linear__create_issue:
-  title: "[{parent-id}] Verification Gate"
-  team: "{team from parent}"
-  description: |
-    Runs verify to validate implementation meets acceptance criteria.
+**File naming**: Sub-task files use `task-{NNN}.json` format with zero-padded 3-digit numbers:
+- `task-001.json`, `task-002.json`, ..., `task-010.json`
+- Verification gate uses: `task-VG.json`
 
-    **Blocked by**: ALL implementation sub-tasks
-    **Action**: Run `/verify {parent-id}` after all implementation tasks complete
-  parentId: "{parent issue UUID}"
-  blockedBy: ["{all-implementation-task-ids}"]  # ALL created sub-task IDs
-```
+**Creation order**: Write sub-tasks in dependency order (leaf tasks first):
+1. Write tasks with no blockers first
+2. Use `task-{NNN}` identifiers for blocking references
+3. Write dependent tasks with `blockedBy` referencing earlier task identifiers
 
-**For Jira** - use `mcp__atlassian__createJiraIssue`:
+**Sub-task JSON schema**:
 
-```
-mcp__atlassian__createJiraIssue:
-  cloudId: "{cloud-id}"
-  projectKey: "{project-key}"
-  issueTypeName: "Sub-task"
-  summary: "[{parent-id}] {sub-task title}"
-  description: |
-    ## Summary
-    {Brief description of what this task accomplishes}
-
-    ## Context
-    Part of {parent-id}: {parent title}
-
-    ## Target File(s)
-    `{file-path}` ({Create/Modify})
-
-    ## Action
-    {Specific implementation guidance}
-
-    ## Acceptance Criteria
-    - [ ] {Criterion 1}
-      * **Verification**: {how to verify}
-  parentId: "{parent-issue-key}"  # Links as sub-task
+```json
+{
+  "id": "task-001",
+  "title": "[{parent-id}] {sub-task title}",
+  "description": "## Summary\n{Brief description}\n\n## Context\nPart of {parent-id}: {parent title}\n\n## Target File(s)\n`{file-path}` ({Create/Modify})\n\n## Action\n{Specific implementation guidance}\n\n## Avoid\n- Do NOT {anti-pattern} because {reason}\n\n## Acceptance Criteria\n- [ ] {Criterion 1}\n  * **Verification**: {how to verify}\n- [ ] {Criterion 2}\n\n## Verify Command\n```bash\n{executable verification command}\n```",
+  "status": "pending",
+  "blockedBy": [],
+  "blocks": ["task-002", "task-003"],
+  "labels": ["{inherited-labels}"],
+  "parentId": "{parent-id}"
+}
 ```
 
-**Verification Gate for Jira**:
-```
-mcp__atlassian__createJiraIssue:
-  cloudId: "{cloud-id}"
-  projectKey: "{project-key}"
-  issueTypeName: "Sub-task"
-  summary: "[{parent-id}] Verification Gate"
-  description: |
-    Runs verify to validate implementation meets acceptance criteria.
+**Write each sub-task using the Write tool**:
 
-    **Blocked by**: ALL implementation sub-tasks
-    **Action**: Run `/verify {parent-id}` after all implementation tasks complete
-  parentId: "{parent-issue-key}"
+```
+Write tool:
+  file_path: .mobius/issues/{parent-id}/tasks/task-001.json
+  content: {JSON content}
 ```
 
-**Track created issues**: Maintain a mapping of order numbers to created issue IDs for proper blocking relationships.
+**Verification Gate creation** (always the last file):
+
+```json
+{
+  "id": "task-VG",
+  "title": "[{parent-id}] Verification Gate",
+  "description": "Runs verify to validate implementation meets acceptance criteria.\n\n**Blocked by**: ALL implementation sub-tasks\n**Action**: Run `/verify {parent-id}` after all implementation tasks complete",
+  "status": "pending",
+  "blockedBy": ["task-001", "task-002", "task-003"],
+  "blocks": [],
+  "labels": [],
+  "parentId": "{parent-id}"
+}
+```
+
+Write as: `.mobius/issues/{parent-id}/tasks/task-VG.json`
+
+**Also update the context file** after writing all tasks:
+
+```
+Edit tool:
+  file_path: .mobius/issues/{parent-id}/context.json
+  # Update subTasks array with all created task references
+```
+
+Or if no context.json exists, create one:
+
+```json
+{
+  "parent": {
+    "id": "{parent-uuid}",
+    "identifier": "{parent-id}",
+    "title": "{parent title}",
+    "description": "{parent description}",
+    "status": "In Progress",
+    "labels": ["{labels}"],
+    "url": "{parent url}"
+  },
+  "subTasks": [
+    {
+      "id": "task-001",
+      "identifier": "task-001",
+      "title": "[{parent-id}] {sub-task title}",
+      "status": "pending",
+      "blockedBy": [],
+      "blocks": ["task-002"]
+    }
+  ],
+  "metadata": {
+    "backend": "{linear|jira|local}",
+    "fetchedAt": "{ISO-8601 timestamp}",
+    "updatedAt": "{ISO-8601 timestamp}"
+  }
+}
+```
 
 **Error handling**:
-- If a sub-task creation fails, report the error and ask user how to proceed
-- Offer to retry the failed creation or skip and continue
-- Report which sub-tasks were successfully created
-</subtask_creation_mcp>
+- If file write fails (e.g., permission error), report and ask user to check directory permissions
+- If directory creation fails, offer to create `.mobius/` manually
+- All writes are atomic per-file so partial failure is safe
+</subtask_creation_local>
 
 <quick_start>
 <invocation>
 The skill expects an issue identifier as argument:
 
 ```
-/refine MOB-123    # Linear issue
-/refine PROJ-456   # Jira issue
+/refine MOB-123    # Linear issue (parent fetched from Linear, sub-tasks written locally)
+/refine PROJ-456   # Jira issue (parent fetched from Jira, sub-tasks written locally)
+/refine LOC-001    # Local issue (parent read from local file, sub-tasks written locally)
 ```
 
 Or invoke programmatically:
@@ -224,22 +254,30 @@ Args: MOB-123
 </invocation>
 
 <workflow>
-1. **Fetch parent issue** - Load parent issue via MCP tools (e.g., `mcp__plugin_linear_linear__get_issue`)
-2. **Detect backend** - Infer from issue ID format or ask user
+1. **Detect backend** - Infer from issue ID format or ask user
+2. **Fetch parent issue** - Load parent issue via MCP tools (linear/jira) or local file (local mode)
 3. **Phase 1: Initial exploration** - Single Explore agent identifies affected areas, patterns, dependencies
 4. **Phase 2: Identify work units** - Main agent groups affected files into sub-task-sized work units
 5. **Phase 3: Per-task subagent research** - Spawn `feature-dev:code-architect` subagents (batched 3 at a time) to deep-dive and write complete sub-task descriptions
 6. **Phase 4: Aggregate & present** - Collect subagent write-ups, establish dependency ordering, add verification gate, present full breakdown
 7. **Gather feedback** - Use AskUserQuestion for refinement
-8. **Phase 5: Create sub-tasks via MCP** - Create sub-tasks directly using MCP tools in dependency order
+8. **Phase 5: Write sub-tasks locally** - Write sub-task JSON files to `.mobius/issues/{id}/tasks/` directory
 </workflow>
 </quick_start>
 
 <research_phase>
-<load_parent_via_mcp>
-Fetch the parent issue using MCP tools:
+<load_parent_issue>
+Fetch the parent issue based on detected backend:
 
-**For Linear**:
+**For `backend: local`** - read from local file:
+
+```bash
+cat .mobius/issues/{issue-id}/parent.json
+```
+
+Extract from the JSON: title, description, acceptance criteria, labels, priority.
+
+**For `backend: linear`**:
 ```
 mcp__plugin_linear_linear__get_issue:
   id: "{issue-id}"  # e.g., "MOB-123"
@@ -255,7 +293,7 @@ mcp__plugin_linear_linear__get_issue:
 - **Existing relationships**: blockedBy, blocks (to maintain)
 - **URL**: For linking back to parent
 
-**For Jira** - use `mcp__atlassian__getJiraIssue`:
+**For `backend: jira`** - use `mcp__atlassian__getJiraIssue`:
 
 ```
 mcp__atlassian__getJiraIssue:
@@ -270,7 +308,19 @@ mcp__atlassian__getJiraIssue:
 - **Project key**: For sub-task inheritance (use same project for all sub-tasks)
 - **Issue links**: blocks, is blocked by (to maintain)
 - **URL**: For linking back to parent
-</load_parent_via_mcp>
+
+**After loading (all backends)**: Save parent data locally for use by execute/verify skills:
+
+```bash
+mkdir -p .mobius/issues/{parent-id}
+```
+
+```
+Write tool:
+  file_path: .mobius/issues/{parent-id}/parent.json
+  content: {parent issue JSON}
+```
+</load_parent_issue>
 
 <deep_exploration>
 Use the Task tool with Explore agent to thoroughly analyze the codebase:
@@ -715,72 +765,76 @@ Loop back to presentation after each refinement until user approves.
 </presentation_phase>
 
 <output_phase>
-<mcp_creation_process>
-After user approval, create sub-tasks directly using MCP tools.
+<local_creation_process>
+After user approval, write sub-task JSON files to `.mobius/issues/{parent-id}/tasks/`.
 
 **Creation sequence**:
 
-1. **Create leaf tasks first** (tasks with no blockers)
-2. **Track created issue IDs** in a mapping: `{ order: issueId }`
-3. **Create dependent tasks** using tracked IDs for `blockedBy`
-4. **Create Verification Gate last** with all implementation task IDs as blockers
-5. **Report progress** as each sub-task is created
+1. **Ensure directory exists**: `mkdir -p .mobius/issues/{parent-id}/tasks`
+2. **Write leaf tasks first** (tasks with no blockers) as `task-001.json`, `task-002.json`, etc.
+3. **Write dependent tasks** with `blockedBy` referencing earlier `task-{NNN}` identifiers
+4. **Write Verification Gate last** as `task-VG.json` with all implementation task IDs as blockers
+5. **Write context.json** with full parent + subTasks array for execute/verify skills
+6. **Report progress** as each file is written
 
 **Example creation flow**:
 ```
-Creating sub-task 1/4: "Define TypeScript types"...
-  -> Created MOB-201
+Writing sub-task 1/4: "Define TypeScript types"...
+  -> Wrote .mobius/issues/MOB-100/tasks/task-001.json
 
-Creating sub-task 2/4: "Implement feature service" (blocked by MOB-201)...
-  -> Created MOB-202
+Writing sub-task 2/4: "Implement feature service" (blocked by task-001)...
+  -> Wrote .mobius/issues/MOB-100/tasks/task-002.json
 
-Creating sub-task 3/4: "Add useFeature hook" (blocked by MOB-201)...
-  -> Created MOB-203
+Writing sub-task 3/4: "Add useFeature hook" (blocked by task-001)...
+  -> Wrote .mobius/issues/MOB-100/tasks/task-003.json
 
-Creating sub-task 4/4: "Verification Gate" (blocked by MOB-201, MOB-202, MOB-203)...
-  -> Created MOB-204
+Writing Verification Gate (blocked by task-001, task-002, task-003)...
+  -> Wrote .mobius/issues/MOB-100/tasks/task-VG.json
 
-All sub-tasks created successfully!
+Writing context.json...
+  -> Wrote .mobius/issues/MOB-100/context.json
+
+All sub-tasks written successfully!
 ```
-</mcp_creation_process>
+</local_creation_process>
 
 <completion_summary>
-After creating all sub-tasks via MCP, provide a summary with URLs:
+After writing all sub-task files locally, provide a summary:
 
 ```markdown
 ## Breakdown Complete: {parent issue ID}
 
 **Sub-tasks created**: {count}
 **Verification gate**: Included
+**Location**: `.mobius/issues/{parent-id}/tasks/`
 
-| ID | Title | Blocked By | URL |
-|----|-------|------------|-----|
-| MOB-201 | Define types | - | https://linear.app/... |
-| MOB-202 | Implement service | MOB-201 | https://linear.app/... |
-| MOB-203 | Add hook | MOB-201 | https://linear.app/... |
-| MOB-204 | Verification Gate | MOB-201, MOB-202, MOB-203 | https://linear.app/... |
+| ID | Title | Blocked By | File |
+|----|-------|------------|------|
+| task-001 | Define types | - | `tasks/task-001.json` |
+| task-002 | Implement service | task-001 | `tasks/task-002.json` |
+| task-003 | Add hook | task-001 | `tasks/task-003.json` |
+| task-VG | Verification Gate | task-001, task-002, task-003 | `tasks/task-VG.json` |
 
-**Ready to start**: MOB-201
-**Parallel opportunities**: After MOB-201, MOB-202 and MOB-203 can run simultaneously
+**Ready to start**: task-001
+**Parallel opportunities**: After task-001, task-002 and task-003 can run simultaneously
 
 **Dependency Graph**:
 ```mermaid
 graph TD
-    A[MOB-201: Define types] --> B[MOB-202: Implement service]
-    A --> C[MOB-203: Add hook]
-    B --> D[MOB-204: Verification Gate]
+    A[task-001: Define types] --> B[task-002: Implement service]
+    A --> C[task-003: Add hook]
+    B --> D[task-VG: Verification Gate]
     C --> D
 ```
 
-Would you like to:
-- Start execution with `/execute MOB-201`
-- View the parent issue in Linear
+Run `mobius loop {parent-id}` to begin execution, or `/execute {parent-id}` for a single task.
 ```
 </completion_summary>
 
 <post_creation_comment>
-Optionally post the dependency graph as a comment on the parent issue:
+Optionally post the dependency graph as a comment on the parent issue (backend modes only):
 
+**For `backend: linear`**:
 ```
 mcp__plugin_linear_linear__create_comment:
   issueId: "{parent-issue-uuid}"
@@ -789,15 +843,16 @@ mcp__plugin_linear_linear__create_comment:
 
     | ID | Title | Blocked By |
     |----|-------|------------|
-    | MOB-201 | Define types | - |
-    | MOB-202 | Implement service | MOB-201 |
-    | MOB-203 | Add hook | MOB-201 |
-    | MOB-204 | Verification Gate | MOB-201, MOB-202, MOB-203 |
+    | task-001 | Define types | - |
+    | task-002 | Implement service | task-001 |
+    | task-003 | Add hook | task-001 |
+    | task-VG | Verification Gate | task-001, task-002, task-003 |
 
-    **Ready to start**: MOB-201
+    **Ready to start**: task-001
+    **Local files**: `.mobius/issues/{parent-id}/tasks/`
 ```
 
-**For Jira** - use `mcp__atlassian__addCommentToJiraIssue`:
+**For `backend: jira`** - use `mcp__atlassian__addCommentToJiraIssue`:
 
 ```
 mcp__atlassian__addCommentToJiraIssue:
@@ -808,13 +863,16 @@ mcp__atlassian__addCommentToJiraIssue:
 
     | ID | Title | Blocked By |
     |----|-------|------------|
-    | PROJ-201 | Define types | - |
-    | PROJ-202 | Implement service | PROJ-201 |
-    | PROJ-203 | Add hook | PROJ-201 |
-    | PROJ-204 | Verification Gate | PROJ-201, PROJ-202, PROJ-203 |
+    | task-001 | Define types | - |
+    | task-002 | Implement service | task-001 |
+    | task-003 | Add hook | task-001 |
+    | task-VG | Verification Gate | task-001, task-002, task-003 |
 
-    **Ready to start**: PROJ-201
+    **Ready to start**: task-001
+    **Local files**: `.mobius/issues/{parent-id}/tasks/`
 ```
+
+**For `backend: local`**: No comment posted (no remote issue tracker). The summary is displayed to the user in the terminal.
 </post_creation_comment>
 </output_phase>
 
@@ -840,52 +898,33 @@ If parent issue fetch via MCP fails:
 **Recovery**: Ask user if they want to retry, use a different issue ID, or provide details manually.
 </mcp_fetch_failure>
 
-<mcp_creation_failure>
-If sub-task creation via MCP fails:
+<local_file_write_failure>
+If sub-task file creation fails:
 
-1. **Partial creation**: Some sub-tasks may have been created before the failure
-   - Report which sub-tasks were successfully created (with IDs)
-   - Ask user how to proceed with remaining sub-tasks
+1. **Directory creation failed**:
+   - `.mobius/` directory may not be writable
+   - Check file system permissions
+   - Offer to create the directory manually
 
-2. **Permission errors**:
-   - Check if user has permission to create issues in the team
-   - Verify API token has write access
+2. **File write failed**:
+   - Disk may be full
+   - Path may be invalid
+   - Report which files were successfully written and which failed
 
-3. **Validation errors**:
-   - Check if required fields are missing
-   - Verify team name exists
-   - Check if labels are valid for the workspace
-
-4. **Rate limiting**:
-   - MCP tool may be rate-limited
-   - Wait and retry, or create remaining sub-tasks manually
+3. **Partial write**:
+   - Some task files may have been written before the failure
+   - Report which files exist and which are missing
+   - Offer to retry the failed writes
 
 **Recovery options via AskUserQuestion**:
 ```
-Question: "Sub-task creation failed. How would you like to proceed?"
+Question: "Sub-task file creation failed. How would you like to proceed?"
 Options:
-1. **Retry failed** - Attempt to create failed sub-tasks again
-2. **Skip and continue** - Mark failed ones and proceed with rest
-3. **Create manually** - I'll create the remaining sub-tasks myself
-4. **Cancel** - Don't create any more sub-tasks
+1. **Retry failed** - Attempt to write failed task files again
+2. **Check permissions** - Verify .mobius/ directory is writable
+3. **Cancel** - Don't write any more task files
 ```
-</mcp_creation_failure>
-
-<relationship_errors>
-If blocking relationship creation fails:
-
-1. **Issue ID not found**:
-   - The blocker issue ID may be invalid
-   - Verify the ID was captured correctly during creation
-
-2. **Self-reference**:
-   - An issue cannot block itself
-   - Check for circular references in the dependency graph
-
-3. **Jira link type unavailable**:
-   - "Blocks" link type may not be configured in Jira
-   - Ask admin to enable the link type, or use "relates to" as fallback
-</relationship_errors>
+</local_file_write_failure>
 </error_handling>
 
 <examples>
@@ -1026,42 +1065,59 @@ This task triggers the verify skill to validate all implementation sub-tasks mee
 - [4], [5], [6], [7] can all run in parallel after [3]
 - [8] runs after ALL other tasks complete
 
-**After user approval, create via MCP**:
+**After user approval, write local task files**:
+
+```bash
+# Ensure directory exists
+mkdir -p .mobius/issues/MOB-100/tasks
+```
 
 ```
-# Step 1: Create leaf task (no blockers)
-mcp__plugin_linear_linear__create_issue:
-  title: "[MOB-100] Define theme types"
-  team: "Engineering"
-  parentId: "{parent-uuid}"
-  description: |
-    ## Summary
-    Create TypeScript type definitions for the theme system...
-    [full description]
-  -> Returns: MOB-101
+# Step 1: Write leaf task (no blockers)
+Write tool:
+  file_path: .mobius/issues/MOB-100/tasks/task-001.json
+  content: {
+    "id": "task-001",
+    "title": "[MOB-100] Define theme types",
+    "description": "## Summary\nCreate TypeScript type definitions...\n[full description]",
+    "status": "pending",
+    "blockedBy": [],
+    "blocks": ["task-002", "task-003"],
+    "parentId": "MOB-100"
+  }
 
-# Step 2: Create task blocked by MOB-101
-mcp__plugin_linear_linear__create_issue:
-  title: "[MOB-100] Create ThemeProvider context"
-  team: "Engineering"
-  parentId: "{parent-uuid}"
-  blockedBy: ["MOB-101"]
-  description: |
-    ## Summary
-    Create React context provider for theme state management...
-  -> Returns: MOB-102
+# Step 2: Write task blocked by task-001
+Write tool:
+  file_path: .mobius/issues/MOB-100/tasks/task-002.json
+  content: {
+    "id": "task-002",
+    "title": "[MOB-100] Create ThemeProvider context",
+    "description": "## Summary\nCreate React context provider...",
+    "status": "pending",
+    "blockedBy": ["task-001"],
+    "blocks": ["task-003"],
+    "parentId": "MOB-100"
+  }
 
 # Continue for all sub-tasks...
 
-# Final: Create Verification Gate blocked by ALL
-mcp__plugin_linear_linear__create_issue:
-  title: "[MOB-100] Verification Gate"
-  team: "Engineering"
-  parentId: "{parent-uuid}"
-  blockedBy: ["MOB-101", "MOB-102", "MOB-103", "MOB-104", "MOB-105", "MOB-106", "MOB-107"]
-  description: |
-    Runs verify to validate implementation meets acceptance criteria.
-  -> Returns: MOB-108
+# Final: Write Verification Gate blocked by ALL
+Write tool:
+  file_path: .mobius/issues/MOB-100/tasks/task-VG.json
+  content: {
+    "id": "task-VG",
+    "title": "[MOB-100] Verification Gate",
+    "description": "Runs verify to validate implementation meets acceptance criteria.",
+    "status": "pending",
+    "blockedBy": ["task-001", "task-002", "task-003", "task-004", "task-005", "task-006", "task-007"],
+    "blocks": [],
+    "parentId": "MOB-100"
+  }
+
+# Write context.json with full parent + subTasks array
+Write tool:
+  file_path: .mobius/issues/MOB-100/context.json
+  content: { "parent": {...}, "subTasks": [...], "metadata": {...} }
 ```
 
 **Report result to user**:
@@ -1069,15 +1125,18 @@ mcp__plugin_linear_linear__create_issue:
 "## Breakdown Complete: MOB-100
 
 **Sub-tasks created**: 8
+**Location**: `.mobius/issues/MOB-100/tasks/`
 
-| ID | Title | Blocked By | URL |
-|----|-------|------------|-----|
-| MOB-101 | Define theme types | - | https://linear.app/... |
-| MOB-102 | Create ThemeProvider | MOB-101 | https://linear.app/... |
+| ID | Title | Blocked By | File |
+|----|-------|------------|------|
+| task-001 | Define theme types | - | `tasks/task-001.json` |
+| task-002 | Create ThemeProvider | task-001 | `tasks/task-002.json` |
 | ... | ... | ... | ... |
-| MOB-108 | Verification Gate | MOB-101-107 | https://linear.app/... |
+| task-VG | Verification Gate | task-001 through task-007 | `tasks/task-VG.json` |
 
-**Ready to start**: MOB-101"
+**Ready to start**: task-001
+
+Run `mobius loop MOB-100` to begin execution."
 </example_breakdown>
 </examples>
 
@@ -1110,8 +1169,8 @@ mcp__plugin_linear_linear__create_issue:
 <success_criteria>
 A successful refinement produces:
 
-- [ ] Parent issue fetched via MCP tool (e.g., `mcp__plugin_linear_linear__get_issue`)
 - [ ] Backend detected from issue ID format or user input
+- [ ] Parent issue fetched via MCP tool (linear/jira) or local file (local mode)
 - [ ] All affected files identified through deep exploration
 - [ ] Each sub-task targets exactly one file (or source + test pair)
 - [ ] Every sub-task has clear, verifiable acceptance criteria
@@ -1120,12 +1179,12 @@ A successful refinement produces:
 - [ ] No circular dependencies exist
 - [ ] Parallel opportunities are maximized
 - [ ] Ready tasks (no blockers) are clearly identified
-- [ ] **Verification Gate included as final task**
+- [ ] **Verification Gate included as final task** (`task-VG.json`)
 - [ ] Verification Gate blocked by ALL implementation sub-tasks
 - [ ] User approved breakdown before creation
-- [ ] Sub-tasks created via MCP tools in dependency order
-- [ ] Blocking relationships established correctly via MCP
-- [ ] All created issue URLs returned to user
+- [ ] Sub-task files written to `.mobius/issues/{id}/tasks/` as `task-{NNN}.json`
+- [ ] `context.json` written with full parent + subTasks array
+- [ ] Blocking relationships captured in JSON `blockedBy`/`blocks` arrays
 - [ ] Summary with dependency graph provided
 </success_criteria>
 
@@ -1135,42 +1194,23 @@ A successful refinement produces:
 <verification_steps>
 After running `/refine {issue-id}`, verify the results.
 
-<mcp_operation_verification>
-**MCP tool verification**:
+<local_file_verification>
+**Local file verification**:
 
-1. **Parent issue fetch**: Verify `mcp__plugin_linear_linear__get_issue` returns expected data
-2. **Sub-task creation**: Each `mcp__plugin_linear_linear__create_issue` call succeeds
-3. **Blocking relationships**: `blockedBy` arrays are correctly set on creation
-4. **Created issue URLs**: All URLs are returned and accessible
-</mcp_operation_verification>
+1. **Directory exists**: `.mobius/issues/{parent-id}/tasks/` directory was created
+2. **Task files written**: Each `task-{NNN}.json` file contains valid JSON
+3. **Verification gate**: `task-VG.json` exists and is blocked by all implementation tasks
+4. **Context file**: `.mobius/issues/{parent-id}/context.json` exists with correct subTasks array
+5. **Blocking relationships**: Each task's `blockedBy` array references valid task IDs
+</local_file_verification>
 
-<linear_verification>
-**Linear verification steps** (after skill creates sub-tasks via MCP):
+<parent_fetch_verification>
+**Parent issue fetch verification** (backend-dependent):
 
-1. **Open parent issue** in Linear web UI
-2. **Check sub-tasks list**: All created sub-tasks should appear as children
-3. **Open each sub-task**: Verify the "Blocked by" section shows correct dependencies
-4. **Check issue relations**: The blocking relationships should appear in the issue detail view
-
-**Expected behavior**:
-- Sub-tasks appear nested under parent issue
-- "Blocked by" relationships visible on each sub-task
-- URLs returned by skill match actual Linear URLs
-</linear_verification>
-
-<jira_verification>
-**Jira verification steps** (if Jira MCP tools available):
-
-1. **Open parent issue** in Jira web UI
-2. **Check sub-tasks section**: All created sub-tasks should appear linked to parent
-3. **Open each sub-task**: Click on the sub-task to view its detail page
-4. **Check "is blocked by" links**: Verify relationships are correct
-
-**Expected behavior**:
-- Sub-tasks appear in parent's sub-task section
-- Each sub-task's "Issue Links" section shows "is blocked by: PROJ-XXX"
-- URLs returned by skill match actual Jira URLs
-</jira_verification>
+- **Local mode**: Verify `.mobius/issues/{id}/parent.json` was read successfully
+- **Linear mode**: Verify `mcp__plugin_linear_linear__get_issue` returned expected data
+- **Jira mode**: Verify `mcp__atlassian__getJiraIssue` returned expected data
+</parent_fetch_verification>
 </verification_steps>
 
 <troubleshooting>
@@ -1204,49 +1244,48 @@ Error: Issue MOB-999 not found
 3. Verify API token has access to the project/team
 </issue_not_found>
 
-<creation_failed>
-**Sub-task creation failed**
+<file_write_failed>
+**Sub-task file write failed**
 ```
-Error: Failed to create issue
+Error: Failed to write file .mobius/issues/{id}/tasks/task-001.json
 ```
 
-**Cause**: Permission issue, invalid data, or API error.
+**Cause**: Permission issue, missing directory, or disk full.
 
 **Solution**:
-1. Check API token has write permissions
-2. Verify team name exists in workspace
-3. Check if labels are valid for the workspace
+1. Check `.mobius/` directory exists and is writable
+2. Verify disk space is available
+3. Try creating the directory manually: `mkdir -p .mobius/issues/{id}/tasks`
 4. Review the error message for specific details
-</creation_failed>
+</file_write_failed>
 </troubleshooting>
 
 <end_to_end_test>
 **Complete end-to-end verification checklist**:
 
 1. **Setup**:
-   - [ ] Linear MCP server configured and running
-   - [ ] Test parent issue exists in Linear
+   - [ ] Backend configured (linear, jira, or local)
+   - [ ] For linear/jira: MCP server configured and running
+   - [ ] Test parent issue exists (in tracker or as local file)
 
 2. **Run refine**:
    - [ ] Execute `/refine {test-issue-id}` on a test issue
-   - [ ] Observe parent issue fetched via MCP
+   - [ ] Observe parent issue fetched (via MCP or local file)
    - [ ] Review the breakdown presentation
    - [ ] Validate each sub-task scope via AskUserQuestion (if prompted)
    - [ ] Approve the breakdown when prompted
 
-3. **Verify MCP creation**:
-   - [ ] Each sub-task creation via MCP succeeds
-   - [ ] Progress reported as sub-tasks are created
-   - [ ] Blocking relationships established correctly
-   - [ ] All issue URLs returned in summary
+3. **Verify local file creation**:
+   - [ ] `.mobius/issues/{id}/tasks/` directory exists
+   - [ ] Each `task-{NNN}.json` file contains valid JSON with correct schema
+   - [ ] `task-VG.json` exists as Verification Gate
+   - [ ] `context.json` written with correct subTasks array
+   - [ ] Blocking relationships (`blockedBy`/`blocks`) are consistent
+   - [ ] Progress reported as files are written
 
-4. **Verify in Linear**:
-   - [ ] All sub-tasks appear under parent issue
-   - [ ] Blocking relationships visible on each sub-task
-   - [ ] Verification Gate is blocked by all implementation tasks
-
-5. **Verify execution**:
-   - [ ] `/execute {first-task-id}` works correctly
+4. **Verify execution compatibility**:
+   - [ ] `mobius loop {parent-id}` or `/execute {parent-id}` reads local task files
    - [ ] Blocked tasks cannot start until blockers complete
+   - [ ] Verification Gate executes last after all implementation tasks
 </end_to_end_test>
 </testing>
