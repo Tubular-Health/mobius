@@ -47,8 +47,8 @@ declare -A BACKEND_SKILLS=(
 )
 
 declare -A BACKEND_ID_PATTERNS=(
-    [linear]='^[A-Z]+-[0-9]+$'
-    [jira]='^[A-Z]+-[0-9]+$'
+    [linear]='^[A-Z][A-Z0-9]*-[0-9]+$'
+    [jira]='^[A-Z][A-Z0-9]*-[0-9]+$'
 )
 
 # Parse YAML config file (basic parser for simple key: value pairs)
@@ -506,8 +506,8 @@ delegate_to_sandbox() {
 extract_completed_subtask() {
     local output="$1"
     # Look for EXECUTION_COMPLETE: followed by task ID
-    if echo "$output" | grep -qE 'EXECUTION_COMPLETE:[[:space:]]*[A-Z]+-[0-9]+'; then
-        echo "$output" | grep -oE 'EXECUTION_COMPLETE:[[:space:]]*[A-Z]+-[0-9]+' | head -1 | sed 's/EXECUTION_COMPLETE:[[:space:]]*//'
+    if echo "$output" | grep -qE 'EXECUTION_COMPLETE:[[:space:]]*[A-Z][A-Z0-9]*-[0-9]+'; then
+        echo "$output" | grep -oE 'EXECUTION_COMPLETE:[[:space:]]*[A-Z][A-Z0-9]*-[0-9]+' | head -1 | sed 's/EXECUTION_COMPLETE:[[:space:]]*//'
         return 0
     fi
     return 1
@@ -648,11 +648,11 @@ run_loop() {
 
         # Extract completed sub-task ID if present (from "EXECUTION_COMPLETE: MOB-XX")
         local completed_id
-        completed_id=$(grep -oE "EXECUTION_COMPLETE: [A-Z]+-[0-9]+" "$output_file" 2>/dev/null | tail -1 | cut -d' ' -f2 || true)
+        completed_id=$(grep -oE "EXECUTION_COMPLETE: [A-Z][A-Z0-9]*-[0-9]+" "$output_file" 2>/dev/null | tail -1 | cut -d' ' -f2 || true)
 
         # Extract failed sub-task ID if present (from "Sub-task Failed: MOB-XX")
         local failed_id
-        failed_id=$(grep -oE "Sub-task Failed: [A-Z]+-[0-9]+" "$output_file" 2>/dev/null | head -1 | sed 's/Sub-task Failed: //' || true)
+        failed_id=$(grep -oE "Sub-task Failed: [A-Z][A-Z0-9]*-[0-9]+" "$output_file" 2>/dev/null | head -1 | sed 's/Sub-task Failed: //' || true)
 
         # Clean up temp file
         rm -f "$output_file"

@@ -327,9 +327,11 @@ export async function generateContext(
 
   // Write individual task files
   for (const task of subTaskContexts) {
+    const identifier = task.identifier ?? task.id;
+    if (!identifier) continue; // skip tasks with no usable identifier
     writeFileSync(
-      getTaskContextPath(parentIdentifier, task.identifier),
-      JSON.stringify(task, null, 2),
+      getTaskContextPath(parentIdentifier, identifier),
+      JSON.stringify({ ...task, identifier }, null, 2),
       'utf-8'
     );
   }

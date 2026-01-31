@@ -282,8 +282,10 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       // Get ready tasks (combine fresh ready tasks with retry queue)
       const readyTasks = getReadyTasks(graph);
 
-      // Add retry tasks to ready queue if they're not already there
+      // Add retry tasks to ready queue if they're not already there and not done
       for (const retryTask of retryQueue) {
+        const currentTask = graph.tasks.get(retryTask.id);
+        if (currentTask?.status === 'done') continue; // skip done tasks
         if (!readyTasks.some((t) => t.id === retryTask.id)) {
           readyTasks.push(retryTask);
         }
