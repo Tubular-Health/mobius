@@ -21,7 +21,7 @@ The backend determines the output format for issue specifications.
 </backend_detection>
 
 <local_mode>
-**When `backend: local` is detected, skip all MCP tool calls and write issue specs directly to the project-local `.mobius/` directory.**
+**When `backend: local` is detected, skip all CLI calls and write issue specs directly to the project-local `.mobius/` directory.**
 
 <local_mode_detection>
 Check the config file for `backend: local`:
@@ -31,7 +31,7 @@ Check the config file for `backend: local`:
 backend: local
 ```
 
-If the backend is `local`, the entire MCP-based creation flow is bypassed. The Socratic questioning workflow remains identical — only the final output step changes.
+If the backend is `local`, the entire CLI-based creation flow is bypassed. The Socratic questioning workflow remains identical — only the final output step changes.
 </local_mode_detection>
 
 <local_id_generation>
@@ -135,9 +135,9 @@ Also create the context.json wrapper file:
 </local_issue_creation>
 
 <local_approval_workflow>
-**The approval workflow for local mode mirrors the MCP flow, but outputs to files instead of API calls.**
+**The approval workflow for local mode mirrors the CLI flow, but outputs to files instead of API calls.**
 
-After Socratic questioning is complete, present the issue for approval (same as MCP flow):
+After Socratic questioning is complete, present the issue for approval (same as CLI flow):
 
 "Here is the issue I'll create:
 
@@ -170,7 +170,7 @@ Would you like to:
 
 <local_mode_constraints>
 **What changes in local mode**:
-- No MCP tool calls (no `mcp__plugin_linear_linear__*` or `mcp__atlassian__*`)
+- No CLI calls (no `linear` or `acli` commands)
 - No workspace context fetching (teams, labels, projects) — ask user directly
 - No relationship linking to backend issues (relationships tracked locally if needed)
 - Issue spec written to `.mobius/issues/LOC-{N}/parent.json`
@@ -215,31 +215,54 @@ jira:
 </jira>
 </backend_context>
 
-<context_gathering_mcp>
-**Use MCP tools to gather workspace context dynamically.**
+<context_gathering_config>
+**Read workspace context from `mobius.config.yaml` defaults.**
 
-Before presenting options to the user, fetch available teams, labels, and projects using MCP tools.
+Before presenting options to the user, read team, project, and label defaults from the config file.
 
-**For Linear backend**:
-- `mcp__plugin_linear_linear__list_teams` - Get available teams
-- `mcp__plugin_linear_linear__list_issue_labels` - Get available labels
-- `mcp__plugin_linear_linear__list_projects` - Get available projects
-- `mcp__plugin_linear_linear__list_users` - Get assignable users
+**For Linear backend** — read from config:
+```yaml
+linear:
+  team: Engineering
+  project: My Project
+  default_labels: [Bug, Feature, Improvement]
+```
 
-**For Jira backend** (via Atlassian MCP):
-- `mcp__atlassian__searchJiraIssuesUsingJql` - Search for issues and get project context
-- `mcp__atlassian__getJiraProjectIssueTypesMetadata` - Get available issue types
-- `mcp__atlassian__getJiraIssueTypeMetaWithFields` - Get required fields for issue type
-- Fall back to asking user directly if MCP tools unavailable
+**For Jira backend** — read from config:
+```yaml
+jira:
+  base_url: https://yourcompany.atlassian.net
+  project_key: PROJ
+  default_labels: [bug, story, task]
+```
 
 **Workflow**:
 1. Detect backend from config file (default: linear)
-2. Use MCP tools to fetch workspace metadata
-3. Present validated options in AskUserQuestion dialogs
-4. If MCP tools fail, gracefully fall back to asking user directly
+2. Read workspace defaults (team, project, labels) from config
+3. Present config-based options in AskUserQuestion dialogs
+4. If config values are missing, ask user directly as fallback
 
-This enables presenting real team/project/label options to the user.
-</context_gathering_mcp>
+**CLI availability check** (run once at start):
+```bash
+# For Linear backend
+command -v linear >/dev/null 2>&1 || echo "linear-cli not found. Install via: brew install schpet/tap/linear"
+
+# For Jira backend
+command -v acli >/dev/null 2>&1 || echo "acli not found. See: https://developer.atlassian.com/cloud/acli/"
+```
+
+**For searching related issues** (when user mentions related work):
+
+```bash
+# Linear: search for related issues
+linear issue list --filter "title:search terms" --json
+
+# Jira: search for related issues
+acli jira workitem search --jql "summary ~ 'search terms' AND project = PROJ"
+```
+
+This approach avoids runtime metadata fetching and uses config defaults instead.
+</context_gathering_config>
 
 <quick_start>
 <initial_gate>
@@ -265,7 +288,7 @@ Options:
 6. **Identify relationships** - What blocks this? What does this block?
 7. **Set priority and metadata** - Priority, labels/issue type, project
 8. **Present for approval** - Show complete issue before creating
-9. **Create issue via MCP** - Create issue directly using MCP tools after approval
+9. **Create issue via CLI** - Create issue directly using CLI commands after approval
 </workflow>
 </quick_start>
 
@@ -553,21 +576,28 @@ The agent executing dependent tasks should read the checkpoint's decision before
 
 <context_gathering>
 <gathering_approach>
-Use MCP tools to fetch workspace context dynamically, then present options to the user.
+Read workspace context from `mobius.config.yaml`, then present options to the user.
 
 **Gathering workflow**:
-1. Call `mcp__plugin_linear_linear__list_teams` to get available teams
-2. Present team options via AskUserQuestion
-3. Call `mcp__plugin_linear_linear__list_issue_labels` to get labels for selected team
-4. Present label options via AskUserQuestion
-5. Optionally call `mcp__plugin_linear_linear__list_projects` for project assignment
+1. Read `team`, `project`, and `default_labels` from config `linear:` section
+2. Present team/project as defaults via AskUserQuestion (user can override)
+3. Present label options from `default_labels` via AskUserQuestion
+4. If config values are missing, ask user directly
 
 **For Jira**:
-1. Use `mcp__atlassian__getJiraProjectIssueTypesMetadata` to get issue types
-2. Use `mcp__atlassian__searchJiraIssuesUsingJql` to find related issues
-3. Present options via AskUserQuestion
+1. Read `project_key` and `default_labels` from config `jira:` section
+2. Present issue type options from `default_labels` via AskUserQuestion
+3. If config values are missing, ask user directly
 
-**For related issues**: Ask the user if they know of related issues, or use `mcp__plugin_linear_linear__list_issues` (Linear) / `mcp__atlassian__searchJiraIssuesUsingJql` (Jira) to search for potentially related issues.
+**For related issues**: Ask the user if they know of related issues, or use CLI to search:
+
+```bash
+# Linear: search for related issues
+linear issue list --filter "title:search terms" --json
+
+# Jira: search for related issues
+acli jira workitem search --jql "summary ~ 'search terms' AND project = PROJ"
+```
 </gathering_approach>
 
 <relationship_discovery>
@@ -640,54 +670,46 @@ Use AskUserQuestion:
 - **Cancel** - Don't create this issue
 </before_output>
 
-<mcp_creation>
-After approval, create the issue directly using MCP tools.
+<cli_creation>
+After approval, create the issue using CLI commands via Bash.
 
-**For Linear**:
-```
-mcp__plugin_linear_linear__create_issue:
-  title: "{issue title}"
-  team: "{team name}"
-  description: "{full description with acceptance criteria}"
-  priority: {1-4}
-  state: "{initial state}"
-  labels: ["{label1}", "{label2}"]
-  # Optional relationships
-  blocks: ["{issue-id}"]
-  blockedBy: ["{issue-id}"]
-  relatedTo: ["{issue-id}"]
+**For Linear** — use `linear issue create`:
+```bash
+linear issue create \
+  --title "{issue title}" \
+  --team "{team from config}" \
+  --description "{full description with acceptance criteria}" \
+  --priority {1-4} \
+  --state "{initial state}" \
+  --label "{label1}" \
+  --label "{label2}" \
+  --json
 ```
 
-**For Jira** - use `mcp__atlassian__createJiraIssue`:
-
-```
-mcp__atlassian__createJiraIssue:
-  cloudId: "{cloud-id}"
-  projectKey: "{project-key}"
-  issueTypeName: "Bug"  # or "Story", "Task"
-  summary: "{issue title}"
-  description: |
-    ## Summary
-    {description content}
-
-    ## Acceptance Criteria
-    - [ ] Criterion 1
-      - **Verification**: test command or manual step
-  additional_fields:
-    priority:
-      name: "{High/Medium/Low}"
+**For Jira** — use `acli jira workitem create`:
+```bash
+acli jira workitem create \
+  --project "{project_key from config}" \
+  --type "{Bug|Story|Task}" \
+  --summary "{issue title}" \
+  --description "{full description with acceptance criteria}" \
+  --priority "{High|Medium|Low}"
 ```
 
-After creation, the MCP tool returns the created issue details including the URL.
-</mcp_creation>
+After creation, parse the JSON output to extract the issue ID and URL.
+
+**If CLI is not installed**, report a clear error:
+- Linear: "linear-cli not found. Install via: `brew install schpet/tap/linear`"
+- Jira: "acli not found. See: https://developer.atlassian.com/cloud/acli/"
+</cli_creation>
 
 <after_creation>
-After creating the issue via MCP:
+After creating the issue via CLI:
 
 "Issue created successfully!
 
 **{Issue ID}**: {Issue Title}
-**URL**: {issue URL from MCP response}
+**URL**: {issue URL from CLI output}
 
 Would you like to:
 - Define related issues
@@ -728,39 +750,39 @@ Users receive HTTP 500 error when deactivating schedules.
 
 Ready to create this issue?"
 
-**After approval, create via MCP**:
+**After approval, create via CLI**:
 
-```
-mcp__plugin_linear_linear__create_issue:
-  title: "Schedule deactivation throws 500 error"
-  team: "Engineering"
-  description: |
-    ## Summary
-    Users receive HTTP 500 error when deactivating schedules.
+```bash
+linear issue create \
+  --title "Schedule deactivation throws 500 error" \
+  --team "Engineering" \
+  --description "## Summary
+Users receive HTTP 500 error when deactivating schedules.
 
-    ## Current Behavior
-    Clicking 'Deactivate' shows error toast and schedule remains active.
+## Current Behavior
+Clicking 'Deactivate' shows error toast and schedule remains active.
 
-    ## Expected Behavior
-    Schedule deactivates successfully with confirmation message.
+## Expected Behavior
+Schedule deactivates successfully with confirmation message.
 
-    ## Reproduction Steps
-    1. Navigate to Schedule Settings
-    2. Click 'Deactivate Schedule'
-    3. Observe 500 error in toast
+## Reproduction Steps
+1. Navigate to Schedule Settings
+2. Click 'Deactivate Schedule'
+3. Observe 500 error in toast
 
-    ## Acceptance Criteria
-    - [ ] User can deactivate schedule without error
-      - **Verification**: Manual test - click Deactivate, observe success toast
-    - [ ] Schedule status updates to 'inactive'
-      - **Verification**: `npm test -- --grep 'schedule deactivation'`
-    - [ ] Team members see schedule status change
-      - **Verification**: Manual test - check team view after deactivation
-    - [ ] Error logs capture root cause for monitoring
-      - **Verification**: Observable - check logs after fix deployment
-  priority: 1
-  state: "Todo"
-  labels: ["Bug"]
+## Acceptance Criteria
+- [ ] User can deactivate schedule without error
+  - **Verification**: Manual test - click Deactivate, observe success toast
+- [ ] Schedule status updates to 'inactive'
+  - **Verification**: \`npm test -- --grep 'schedule deactivation'\`
+- [ ] Team members see schedule status change
+  - **Verification**: Manual test - check team view after deactivation
+- [ ] Error logs capture root cause for monitoring
+  - **Verification**: Observable - check logs after fix deployment" \
+  --priority 1 \
+  --state "Todo" \
+  --label "Bug" \
+  --json
 ```
 
 **Report result to user**:
@@ -789,43 +811,43 @@ User: "We need to add dark mode"
    - Question: "How should we verify the feature works?"
    - Options: Automated visual regression, Manual QA checklist, Accessibility audit, All of the above
 
-**After gathering all details and approval, create via MCP**:
+**After gathering all details and approval, create via CLI**:
 
-```
-mcp__plugin_linear_linear__create_issue:
-  title: "Add dark mode theme support"
-  team: "Engineering"
-  description: |
-    ## Summary
-    Add dark mode support with system preference detection and manual toggle.
+```bash
+linear issue create \
+  --title "Add dark mode theme support" \
+  --team "Engineering" \
+  --description "## Summary
+Add dark mode support with system preference detection and manual toggle.
 
-    ## Expected Behavior
-    - App detects system dark mode preference on launch
-    - User can manually toggle between light/dark/system
-    - All screens render correctly in both modes
+## Expected Behavior
+- App detects system dark mode preference on launch
+- User can manually toggle between light/dark/system
+- All screens render correctly in both modes
 
-    ## Scope
-    **In scope**: All core screens, settings, navigation
-    **Out of scope**: Admin dashboard (separate issue)
+## Scope
+**In scope**: All core screens, settings, navigation
+**Out of scope**: Admin dashboard (separate issue)
 
-    ## Acceptance Criteria
-    - [ ] Theme follows system preference by default
-      - **Verification**: `npm test -- --grep 'theme system preference'`
-    - [ ] Settings screen has theme toggle (Light/Dark/System)
-      - **Verification**: Manual test - navigate to Settings, verify toggle exists
-    - [ ] All text maintains 4.5:1 contrast ratio in both modes
-      - **Verification**: `npm run test:a11y` or Lighthouse accessibility audit
-    - [ ] Theme preference persists across app restarts
-      - **Verification**: Manual test - set theme, restart app, verify theme persists
-    - [ ] No flash of wrong theme on app launch
-      - **Verification**: Observable - launch app in dark mode, no white flash
+## Acceptance Criteria
+- [ ] Theme follows system preference by default
+  - **Verification**: \`npm test -- --grep 'theme system preference'\`
+- [ ] Settings screen has theme toggle (Light/Dark/System)
+  - **Verification**: Manual test - navigate to Settings, verify toggle exists
+- [ ] All text maintains 4.5:1 contrast ratio in both modes
+  - **Verification**: \`npm run test:a11y\` or Lighthouse accessibility audit
+- [ ] Theme preference persists across app restarts
+  - **Verification**: Manual test - set theme, restart app, verify theme persists
+- [ ] No flash of wrong theme on app launch
+  - **Verification**: Observable - launch app in dark mode, no white flash
 
-    ## Edge Cases
-    - If localStorage is unavailable, default to system preference
-    - If system preference API unavailable, default to light mode
-  priority: 3
-  state: "Backlog"
-  labels: ["Feature"]
+## Edge Cases
+- If localStorage is unavailable, default to system preference
+- If system preference API unavailable, default to light mode" \
+  --priority 3 \
+  --state "Backlog" \
+  --label "Feature" \
+  --json
 ```
 
 **Report result to user**:
@@ -839,63 +861,69 @@ This is a larger feature. Would you like to break it down into sub-tasks (/refin
 </feature_example>
 </examples>
 
-<issue_creation_mcp>
-**Create the issue directly using MCP tools after user approval.**
+<issue_creation_cli>
+**Create the issue using CLI commands via Bash after user approval.**
 
-This skill creates issues directly via MCP tools - no structured YAML output needed.
+This skill creates issues directly via CLI — no structured YAML output needed.
 
-**For Linear** - use `mcp__plugin_linear_linear__create_issue`:
+**For Linear** — use `linear issue create`:
 
+```bash
+# Write description to a temp file for multi-line content
+DESCRIPTION=$(cat <<'DESC'
+## Summary
+{description content}
+
+## Acceptance Criteria
+- [ ] Criterion 1
+  - **Verification**: test command or manual step
+DESC
+)
+
+linear issue create \
+  --title "{issue title}" \
+  --team "{team from config}" \
+  --description "$DESCRIPTION" \
+  --priority {1-4} \
+  --state "{initial state}" \
+  --label "{label1}" \
+  --label "{label2}" \
+  --json
 ```
-mcp__plugin_linear_linear__create_issue:
-  title: "{issue title}"
-  team: "{team name}"
-  description: |
-    ## Summary
-    {description content}
 
-    ## Acceptance Criteria
-    - [ ] Criterion 1
-      - **Verification**: test command or manual step
-  priority: {1-4}  # 1=Urgent, 2=High, 3=Normal, 4=Low
-  state: "{initial state}"  # Backlog, Todo, In Progress, Done
-  labels: ["{label1}", "{label2}"]
-  # Optional relationships
-  blocks: ["{issue-id}"]
-  blockedBy: ["{issue-id}"]
-  relatedTo: ["{issue-id}"]
-  duplicateOf: "{issue-id}"  # if marking as duplicate
-```
+**For Jira** — use `acli jira workitem create`:
 
-**For Jira** - use `mcp__atlassian__createJiraIssue`:
+```bash
+DESCRIPTION=$(cat <<'DESC'
+## Summary
+{description content}
 
-```
-mcp__atlassian__createJiraIssue:
-  cloudId: "{cloud-id}"
-  projectKey: "{project-key}"
-  issueTypeName: "Bug"  # or "Story", "Task"
-  summary: "{issue title}"
-  description: |
-    ## Summary
-    {description content}
+## Acceptance Criteria
+- [ ] Criterion 1
+  - **Verification**: test command or manual step
+DESC
+)
 
-    ## Acceptance Criteria
-    - [ ] Criterion 1
-      - **Verification**: test command or manual step
-  additional_fields:
-    priority:
-      name: "{High/Medium/Low}"
+acli jira workitem create \
+  --project "{project_key from config}" \
+  --type "{Bug|Story|Task}" \
+  --summary "{issue title}" \
+  --description "$DESCRIPTION" \
+  --priority "{High|Medium|Low}"
 ```
 
 **After successful creation**:
-1. Extract the issue ID and URL from the MCP response
+1. Parse the JSON output to extract the issue ID and URL
 2. Report the created issue to the user
 3. Offer next steps (refine, create related issues)
 
-**If MCP tool fails**:
+**If CLI command fails**:
 1. Report the error to the user
-2. Suggest troubleshooting steps (check API token, permissions)
-3. Offer to retry or save issue details for manual creation
+2. If CLI not found, show install instructions:
+   - Linear: `brew install schpet/tap/linear`
+   - Jira: See https://developer.atlassian.com/cloud/acli/
+3. If auth error, suggest checking CLI authentication
+4. Offer to retry or save issue details for manual creation
 
 **Relationship handling**:
 - `blocks`: Issues that cannot start until this one completes
@@ -905,13 +933,13 @@ mcp__atlassian__createJiraIssue:
 
 **Backend-specific field mappings**:
 
-| Field | Linear | Jira (via Atlassian MCP) |
-|-------|--------|--------------------------|
-| `team` / `projectKey` | Team name | Project key |
-| `priority` | 1=Urgent, 2=High, 3=Normal, 4=Low | Highest/High/Medium/Low/Lowest |
-| `state` / `status` | Backlog, Todo, In Progress, Done | To Do, In Progress, Done |
-| `labels` / `issueTypeName` | Labels array | Issue type name (Bug/Story/Task) |
-</issue_creation_mcp>
+| Field | Linear (CLI) | Jira (acli) |
+|-------|--------------|-------------|
+| `team` / `project` | `--team` flag | `--project` flag |
+| `priority` | `--priority {1-4}` | `--priority {High/Medium/Low}` |
+| `state` / `status` | `--state` flag | N/A (uses workflow default) |
+| `labels` / `type` | `--label` flag (repeatable) | `--type` flag |
+</issue_creation_cli>
 
 <anti_patterns>
 **Don't accept vague requirements**:
@@ -956,6 +984,6 @@ An issue is ready when:
 - [ ] Edge cases are documented with expected behavior
 - [ ] Scope is bounded (what's in AND what's out)
 - [ ] User has approved before creating
-- [ ] Issue created successfully via MCP tool
+- [ ] Issue created successfully via CLI command
 - [ ] Created issue URL returned to user
 </success_criteria>

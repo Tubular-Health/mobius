@@ -83,17 +83,22 @@ export interface ExecutionConfig {
   tui?: TuiConfig;
   // Quality gate verification settings
   verification?: VerificationConfig;
-  // Tool filtering - patterns to disable specific MCP tools
-  // Supports glob patterns: "mcp__linear__*", "mcp__atlassian__*"
+  // Tool filtering - patterns to disable specific Claude tools during agent execution
+  // Supports glob patterns passed to --disallowedTools flag
   disallowed_tools?: string[];
 }
 
-export type LinearConfig = Record<string, never>;
+export interface LinearConfig {
+  team?: string;
+  project?: string;
+  default_labels?: string[];
+}
 
 export interface JiraConfig {
   base_url?: string;
   project_key?: string;
   auth_method?: 'api_token' | 'oauth';
+  default_labels?: string[];
 }
 
 export interface LoopConfig {

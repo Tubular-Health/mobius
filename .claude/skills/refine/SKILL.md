@@ -80,12 +80,11 @@ No local parent file found at .mobius/issues/{issue-id}/parent.json
 Run /define {issue-id} first to create the issue spec, or check the issue ID.
 ```
 
-**For `backend: linear`** - use `mcp__plugin_linear_linear__get_issue`:
+**For `backend: linear`** — use `linear issue get` CLI:
 
-```
-mcp__plugin_linear_linear__get_issue:
-  id: "MOB-123"  # The issue identifier (e.g., "MOB-123")
-  includeRelations: true  # To get blocking relationships
+```bash
+# Fetch issue details as JSON
+linear issue get MOB-123 --json
 ```
 
 **Extract from the response**:
@@ -97,12 +96,11 @@ mcp__plugin_linear_linear__get_issue:
 - **Existing relationships**: blockedBy, blocks, relatedTo
 - **URL**: For reference in sub-tasks
 
-**For `backend: jira`** - use `mcp__atlassian__getJiraIssue`:
+**For `backend: jira`** — use `acli jira workitem show`:
 
-```
-mcp__atlassian__getJiraIssue:
-  cloudId: "{cloud-id}"
-  issueIdOrKey: "PROJ-123"
+```bash
+# Fetch issue details
+acli jira workitem show PROJ-123
 ```
 
 **Extract from the response**:
@@ -124,11 +122,14 @@ Write tool:
   content: {parent issue JSON}
 ```
 
-**If MCP tool fails** (linear/jira backends):
+**If CLI command fails** (linear/jira backends):
 1. Report the error to the user
-2. Check if the issue ID is valid
-3. Verify API permissions
-4. Offer to retry or use a different issue ID
+2. If CLI not found, show install instructions:
+   - Linear: `brew install schpet/tap/linear`
+   - Jira: See https://developer.atlassian.com/cloud/acli/
+3. Check if the issue ID is valid
+4. Verify API permissions/authentication
+5. Offer to retry or use a different issue ID
 </parent_issue_loading>
 
 <subtask_creation_local>
@@ -255,7 +256,7 @@ Args: MOB-123
 
 <workflow>
 1. **Detect backend** - Infer from issue ID format or ask user
-2. **Fetch parent issue** - Load parent issue via MCP tools (linear/jira) or local file (local mode)
+2. **Fetch parent issue** - Load parent issue via CLI commands (linear/jira) or local file (local mode)
 3. **Phase 1: Initial exploration** - Single Explore agent identifies affected areas, patterns, dependencies
 4. **Phase 2: Identify work units** - Main agent groups affected files into sub-task-sized work units
 5. **Phase 3: Per-task subagent research** - Spawn `feature-dev:code-architect` subagents (batched 3 at a time) to deep-dive and write complete sub-task descriptions
@@ -277,11 +278,11 @@ cat .mobius/issues/{issue-id}/parent.json
 
 Extract from the JSON: title, description, acceptance criteria, labels, priority.
 
-**For `backend: linear`**:
-```
-mcp__plugin_linear_linear__get_issue:
-  id: "{issue-id}"  # e.g., "MOB-123"
-  includeRelations: true
+**For `backend: linear`** — use `linear issue get` CLI:
+
+```bash
+# Fetch issue details as JSON
+linear issue get {issue-id} --json  # e.g., "MOB-123"
 ```
 
 **Extract from response**:
@@ -293,12 +294,11 @@ mcp__plugin_linear_linear__get_issue:
 - **Existing relationships**: blockedBy, blocks (to maintain)
 - **URL**: For linking back to parent
 
-**For `backend: jira`** - use `mcp__atlassian__getJiraIssue`:
+**For `backend: jira`** — use `acli jira workitem show`:
 
-```
-mcp__atlassian__getJiraIssue:
-  cloudId: "{cloud-id}"
-  issueIdOrKey: "PROJ-123"
+```bash
+# Fetch issue details
+acli jira workitem show PROJ-123
 ```
 
 **Extract from response**:
@@ -834,42 +834,46 @@ Run `mobius loop {parent-id}` to begin execution, or `/execute {parent-id}` for 
 <post_creation_comment>
 Optionally post the dependency graph as a comment on the parent issue (backend modes only):
 
-**For `backend: linear`**:
+**For `backend: linear`** — use `linear comment create`:
+
+```bash
+COMMENT_BODY=$(cat <<'COMMENT'
+## Sub-task Breakdown
+
+| ID | Title | Blocked By |
+|----|-------|------------|
+| task-001 | Define types | - |
+| task-002 | Implement service | task-001 |
+| task-003 | Add hook | task-001 |
+| task-VG | Verification Gate | task-001, task-002, task-003 |
+
+**Ready to start**: task-001
+**Local files**: `.mobius/issues/{parent-id}/tasks/`
+COMMENT
+)
+
+linear comment create --issue "{parent-issue-id}" --body "$COMMENT_BODY"
 ```
-mcp__plugin_linear_linear__create_comment:
-  issueId: "{parent-issue-uuid}"
-  body: |
-    ## Sub-task Breakdown
 
-    | ID | Title | Blocked By |
-    |----|-------|------------|
-    | task-001 | Define types | - |
-    | task-002 | Implement service | task-001 |
-    | task-003 | Add hook | task-001 |
-    | task-VG | Verification Gate | task-001, task-002, task-003 |
+**For `backend: jira`** — use `acli jira workitem comment add`:
 
-    **Ready to start**: task-001
-    **Local files**: `.mobius/issues/{parent-id}/tasks/`
-```
+```bash
+COMMENT_BODY=$(cat <<'COMMENT'
+## Sub-task Breakdown
 
-**For `backend: jira`** - use `mcp__atlassian__addCommentToJiraIssue`:
+| ID | Title | Blocked By |
+|----|-------|------------|
+| task-001 | Define types | - |
+| task-002 | Implement service | task-001 |
+| task-003 | Add hook | task-001 |
+| task-VG | Verification Gate | task-001, task-002, task-003 |
 
-```
-mcp__atlassian__addCommentToJiraIssue:
-  cloudId: "{cloud-id}"
-  issueIdOrKey: "{parent-issue-key}"
-  commentBody: |
-    ## Sub-task Breakdown
+**Ready to start**: task-001
+**Local files**: `.mobius/issues/{parent-id}/tasks/`
+COMMENT
+)
 
-    | ID | Title | Blocked By |
-    |----|-------|------------|
-    | task-001 | Define types | - |
-    | task-002 | Implement service | task-001 |
-    | task-003 | Add hook | task-001 |
-    | task-VG | Verification Gate | task-001, task-002, task-003 |
-
-    **Ready to start**: task-001
-    **Local files**: `.mobius/issues/{parent-id}/tasks/`
+acli jira workitem comment add --issue "{parent-issue-key}" --body "$COMMENT_BODY"
 ```
 
 **For `backend: local`**: No comment posted (no remote issue tracker). The summary is displayed to the user in the terminal.
@@ -877,8 +881,8 @@ mcp__atlassian__addCommentToJiraIssue:
 </output_phase>
 
 <error_handling>
-<mcp_fetch_failure>
-If parent issue fetch via MCP fails:
+<cli_fetch_failure>
+If parent issue fetch via CLI fails:
 
 1. **Issue not found**:
    - Verify the issue ID is correct
@@ -886,17 +890,17 @@ If parent issue fetch via MCP fails:
    - Try with the full identifier (e.g., "MOB-123" not just "123")
 
 2. **Permission denied**:
-   - MCP tool may not have access to this issue
+   - CLI may not be authenticated or may lack access to this issue
    - Check API token permissions in Linear/Jira settings
    - Verify the issue is not in a restricted project
 
-3. **MCP tool unavailable**:
-   - Linear MCP tools (`mcp__plugin_linear_linear__*`) or Atlassian MCP tools (`mcp__atlassian__*`) may not be configured
-   - Ask user to verify the appropriate MCP server is running
+3. **CLI not installed**:
+   - Linear CLI (`linear`) not found — install via: `brew install schpet/tap/linear`
+   - Jira CLI (`acli`) not found — see: https://developer.atlassian.com/cloud/acli/
    - Fall back to asking user to provide issue details manually
 
 **Recovery**: Ask user if they want to retry, use a different issue ID, or provide details manually.
-</mcp_fetch_failure>
+</cli_fetch_failure>
 
 <local_file_write_failure>
 If sub-task file creation fails:
@@ -1170,7 +1174,7 @@ Run `mobius loop MOB-100` to begin execution."
 A successful refinement produces:
 
 - [ ] Backend detected from issue ID format or user input
-- [ ] Parent issue fetched via MCP tool (linear/jira) or local file (local mode)
+- [ ] Parent issue fetched via CLI command (linear/jira) or local file (local mode)
 - [ ] All affected files identified through deep exploration
 - [ ] Each sub-task targets exactly one file (or source + test pair)
 - [ ] Every sub-task has clear, verifiable acceptance criteria
@@ -1208,27 +1212,28 @@ After running `/refine {issue-id}`, verify the results.
 **Parent issue fetch verification** (backend-dependent):
 
 - **Local mode**: Verify `.mobius/issues/{id}/parent.json` was read successfully
-- **Linear mode**: Verify `mcp__plugin_linear_linear__get_issue` returned expected data
-- **Jira mode**: Verify `mcp__atlassian__getJiraIssue` returned expected data
+- **Linear mode**: Verify `linear issue get` CLI returned expected data
+- **Jira mode**: Verify `acli jira workitem show` CLI returned expected data
 </parent_fetch_verification>
 </verification_steps>
 
 <troubleshooting>
 **Common errors and solutions**:
 
-<mcp_tool_unavailable>
-**MCP tool not available**
+<cli_not_installed>
+**CLI tool not available**
 ```
-Error: Tool mcp__plugin_linear_linear__get_issue not found
+Error: linear: command not found
 ```
 
-**Cause**: Linear MCP server not configured or not running.
+**Cause**: Linear CLI or Jira CLI not installed.
 
 **Solution**:
-1. Verify Linear MCP server is configured in Claude settings
-2. Check that the MCP server is running
-3. Restart Claude Code to refresh MCP connections
-</mcp_tool_unavailable>
+1. Install Linear CLI: `brew install schpet/tap/linear`
+2. Install Jira CLI: See https://developer.atlassian.com/cloud/acli/
+3. Verify installation with `command -v linear` or `command -v acli`
+4. Ensure CLI is authenticated (e.g., `linear auth`)
+</cli_not_installed>
 
 <issue_not_found>
 **Issue not found**
@@ -1265,12 +1270,12 @@ Error: Failed to write file .mobius/issues/{id}/tasks/task-001.json
 
 1. **Setup**:
    - [ ] Backend configured (linear, jira, or local)
-   - [ ] For linear/jira: MCP server configured and running
+   - [ ] For linear/jira: CLI tools installed and authenticated
    - [ ] Test parent issue exists (in tracker or as local file)
 
 2. **Run refine**:
    - [ ] Execute `/refine {test-issue-id}` on a test issue
-   - [ ] Observe parent issue fetched (via MCP or local file)
+   - [ ] Observe parent issue fetched (via CLI or local file)
    - [ ] Review the breakdown presentation
    - [ ] Validate each sub-task scope via AskUserQuestion (if prompted)
    - [ ] Approve the breakdown when prompted
