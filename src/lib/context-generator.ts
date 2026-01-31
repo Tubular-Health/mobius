@@ -2,8 +2,8 @@
  * Context generator module for local issue context
  *
  * Generates and manages local context files for skills. Fetches issue data
- * via SDK and writes to ~/.mobius/issues/{parentId}/. Supports both Linear
- * and Jira backends based on configuration.
+ * via SDK and writes to project-local .mobius/issues/{parentId}/. Supports
+ * Linear, Jira, and local backends based on configuration.
  */
 
 import {
@@ -37,13 +37,18 @@ import { readConfig } from './config.js';
 import { debugLog } from './debug-logger.js';
 import { fetchJiraIssue, fetchJiraSubTasks } from './jira.js';
 import { fetchLinearIssue, fetchLinearSubTasks } from './linear.js';
+import { ensureProjectMobiusDir, getProjectMobiusPath } from './local-state.js';
 import { mapLinearStatus } from './task-graph.js';
 
 /**
  * Get the base path for all mobius context storage
+ *
+ * Returns the project-local .mobius/ directory path (in the git repo root)
+ * instead of the legacy ~/.mobius/ path. All derived path functions use this
+ * as their base, so they automatically inherit the new behavior.
  */
 export function getMobiusBasePath(): string {
-  return join(homedir(), '.mobius');
+  return getProjectMobiusPath();
 }
 
 /**
@@ -148,10 +153,50 @@ export function detectBackend(projectPath?: string): Backend {
   return 'linear';
 }
 
+/** Set of parentIds that have already triggered a legacy warning */
+const _legacyWarnings = new Set<string>();
+
+/**
+ * Check if legacy ~/.mobius/issues/{parentId} exists and emit a one-time
+ * warning to stderr when the project-local .mobius/issues/{parentId} does not.
+ */
+function checkLegacyPath(parentId: string): void {
+  if (_legacyWarnings.has(parentId)) return;
+
+  const legacyPath = join(homedir(), '.mobius', 'issues', parentId);
+  const localPath = join(getMobiusBasePath(), 'issues', parentId);
+
+  if (existsSync(legacyPath) && !existsSync(localPath)) {
+    console.warn(
+      `[mobius] Legacy context found at ~/.mobius/issues/${parentId}. ` +
+        `New context will be stored in project-local .mobius/issues/${parentId}. ` +
+        `Legacy data will not be migrated automatically.`
+    );
+    _legacyWarnings.add(parentId);
+  }
+}
+
+/**
+ * Reset legacy warning state (for testing)
+ */
+export function _resetLegacyWarnings(): void {
+  _legacyWarnings.clear();
+}
+
 /**
  * Ensure the context directory structure exists
+ *
+ * Calls ensureProjectMobiusDir() from local-state.ts first to create the
+ * project-local .mobius/ directory with .gitignore, then creates the
+ * issue-specific subdirectories.
  */
 function ensureContextDirectories(parentId: string): void {
+  // Ensure .mobius/ exists with .gitignore
+  ensureProjectMobiusDir();
+
+  // Check for legacy ~/.mobius/ data and warn if needed
+  checkLegacyPath(parentId);
+
   const contextPath = getContextPath(parentId);
   const tasksPath = getTasksDirectoryPath(parentId);
 
@@ -260,7 +305,7 @@ async function fetchJiraSubTaskContexts(parentKey: string): Promise<SubTaskConte
  * Generate local context files for an issue
  *
  * Fetches issue data from the configured backend (Linear or Jira) via SDK
- * and writes to ~/.mobius/issues/{parentId}/.
+ * and writes to project-local .mobius/issues/{parentId}/.
  *
  * Creates:
  * - parent.json: Parent issue details
@@ -355,7 +400,7 @@ export async function generateContext(
 /**
  * Read context from local files
  *
- * Loads the issue context from ~/.mobius/issues/{parentId}/.
+ * Loads the issue context from project-local .mobius/issues/{parentId}/.
  * Returns null if context doesn't exist or is invalid.
  *
  * @param parentIdentifier - The parent issue identifier (e.g., "MOB-161")

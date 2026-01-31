@@ -1,4 +1,4 @@
-export type Backend = 'linear' | 'jira';
+export type Backend = 'linear' | 'jira' | 'local';
 export type Model = 'opus' | 'sonnet' | 'haiku';
 
 /**
@@ -148,9 +148,11 @@ export const DEFAULT_CONFIG: LoopConfig = {
 export const BACKEND_SKILLS: Record<Backend, string> = {
   linear: '/execute',
   jira: '/execute',
+  local: '/execute',
 };
 
 export const BACKEND_ID_PATTERNS: Record<Backend, RegExp> = {
   linear: /^[A-Z]+-[0-9]+$/,
   jira: /^[A-Z]+-[0-9]+$/,
+  local: /^LOC-[0-9]+$/,
 };

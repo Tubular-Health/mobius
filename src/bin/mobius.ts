@@ -110,11 +110,13 @@ program
   .option('-b, --backend <backend>', 'Backend: linear or jira')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
   .option('-d, --draft', 'Create as draft PR')
+  .option('--skip-status-update', 'Skip automatic status update to "In Review" after PR creation')
   .action(async (taskId: string | undefined, options) => {
     await submit(taskId, {
       backend: options.backend as Backend | undefined,
       model: options.model as Model | undefined,
       draft: options.draft,
+      skipStatusUpdate: options.skipStatusUpdate,
     });
   });
 
@@ -124,11 +126,13 @@ program
   .option('-b, --backend <backend>', 'Backend: linear or jira')
   .option('--dry-run', 'Show pending changes without pushing')
   .option('-a, --all', 'Push all issues with pending updates')
+  .option('--summary', 'Generate and push loop execution summary')
   .action(async (parentId: string | undefined, options) => {
     await push(parentId, {
       backend: options.backend as Backend | undefined,
       dryRun: options.dryRun,
       all: options.all,
+      summary: options.summary,
     });
   });
 

@@ -42,7 +42,7 @@ The loop script handles iteration. This skill handles ONE task.
 
 The skill receives context through:
 1. `MOBIUS_CONTEXT_FILE` environment variable - path to the context JSON file
-2. Local files at `~/.mobius/issues/{parentId}/`
+2. Local files at `.mobius/issues/{parentId}/`
 
 **Context file structure** (at `MOBIUS_CONTEXT_FILE` path):
 
@@ -83,9 +83,9 @@ The skill receives context through:
 # Context file path from environment
 CONTEXT_FILE="$MOBIUS_CONTEXT_FILE"
 
-# Or read directly from local storage
-cat ~/.mobius/issues/MOB-161/parent.json
-cat ~/.mobius/issues/MOB-161/tasks/MOB-177.json
+# Or read directly from project-local storage
+cat .mobius/issues/MOB-161/parent.json
+cat .mobius/issues/MOB-161/tasks/MOB-177.json
 ```
 
 **Sub-task status values**: `pending`, `in_progress`, `done`
@@ -384,9 +384,10 @@ When running in parallel mode, each agent receives a specific subtask ID to prev
 9. **Fix if needed** - Attempt automatic fixes on verification failures
 10. **Verify sub-task** - Execute `### Verify` command from sub-task if present (with safety checks)
 11. **Commit and push** - Create commit with conventional message, push
-12. **Update local context** - Update `~/.mobius/issues/{parentId}/` files with new status
-13. **Update status** - Move sub-task to "Done" if all criteria met
-14. **Report completion** - Show what was done and what's next
+12. **Update local context** - Update `.mobius/issues/{parentId}/` files with new status
+13. **Write iteration data** - Append iteration entry to `.mobius/issues/{parentId}/execution/iterations.json`
+14. **Update status** - Move sub-task to "Done" if all criteria met
+15. **Report completion** - Show what was done and what's next
 </workflow>
 </quick_start>
 
@@ -1025,10 +1026,10 @@ The local context files must be updated so that `mobius sync` can push changes t
 
 **Files to update**:
 
-1. **Task-specific file**: `~/.mobius/issues/{parentId}/tasks/{subtaskId}.json`
+1. **Task-specific file**: `.mobius/issues/{parentId}/tasks/{subtaskId}.json`
    - Change `"status": "pending"` or `"status": "in_progress"` to `"status": "done"`
 
-2. **Main context file**: `~/.mobius/issues/{parentId}/context.json`
+2. **Main context file**: `.mobius/issues/{parentId}/context.json`
    - Find the subtask in the `subTasks` array by identifier
    - Change its `"status"` to `"done"`
    - Update `metadata.updatedAt` to current ISO-8601 timestamp
@@ -1037,17 +1038,17 @@ The local context files must be updated so that `mobius sync` can push changes t
 
 ```
 # Update task file
-Edit ~/.mobius/issues/MOB-161/tasks/MOB-184.json
+Edit .mobius/issues/MOB-161/tasks/MOB-184.json
   old_string: "status": "pending"
   new_string: "status": "done"
 
 # Update context.json - find the subtask entry and update status
-Edit ~/.mobius/issues/MOB-161/context.json
+Edit .mobius/issues/MOB-161/context.json
   old_string: [find the subtask block with matching identifier and "status": "pending"]
   new_string: [same block with "status": "done"]
 
 # Update the updatedAt timestamp
-Edit ~/.mobius/issues/MOB-161/context.json
+Edit .mobius/issues/MOB-161/context.json
   old_string: "updatedAt": "2026-01-28T19:05:00.000Z"
   new_string: "updatedAt": "{current ISO-8601 timestamp}"
 ```
@@ -1061,6 +1062,83 @@ Edit ~/.mobius/issues/MOB-161/context.json
 - Update status to `"in_progress"` instead of `"done"`
 - Still update the `updatedAt` timestamp
 </update_local_context>
+
+<iteration_tracking>
+**After updating local context, write iteration data to the execution log.**
+
+Each sub-task execution is tracked as an iteration in `.mobius/issues/{parentId}/execution/iterations.json`. This file accumulates data across loop invocations to provide a full execution history.
+
+**Iteration data structure**:
+
+```json
+{
+  "iterations": [
+    {
+      "subtaskId": "MOB-177",
+      "startedAt": "2026-01-28T14:30:00Z",
+      "completedAt": "2026-01-28T14:45:00Z",
+      "commitHash": "abc1234",
+      "duration": "PT15M",
+      "status": "complete",
+      "filesModified": ["src/lib/feature.ts", "src/lib/feature.test.ts"],
+      "verificationResults": {
+        "typecheck": "PASS",
+        "tests": "PASS",
+        "lint": "PASS",
+        "subtaskVerify": "PASS"
+      }
+    }
+  ]
+}
+```
+
+**Writing iteration data**:
+
+1. Read existing `.mobius/issues/{parentId}/execution/iterations.json` (create if missing)
+2. Append a new entry to the `iterations` array with:
+   - `subtaskId`: The sub-task identifier (e.g., "MOB-177")
+   - `startedAt`: ISO-8601 timestamp when execution began
+   - `completedAt`: ISO-8601 timestamp when execution finished
+   - `commitHash`: The git commit hash (or `null` if no commit)
+   - `duration`: ISO-8601 duration (e.g., "PT15M" for 15 minutes)
+   - `status`: One of `"complete"`, `"partial"`, `"failed"`
+   - `filesModified`: Array of modified file paths
+   - `verificationResults`: Object with typecheck/tests/lint/subtaskVerify results
+3. Write the updated JSON back to the file
+
+**Ensure the execution directory exists**:
+
+```bash
+mkdir -p .mobius/issues/{parentId}/execution
+```
+
+**For failed iterations**, still record the entry with `status: "failed"` and include error details:
+
+```json
+{
+  "subtaskId": "MOB-178",
+  "startedAt": "2026-01-28T15:00:00Z",
+  "completedAt": "2026-01-28T15:20:00Z",
+  "commitHash": null,
+  "duration": "PT20M",
+  "status": "failed",
+  "filesModified": ["src/lib/feature.ts"],
+  "verificationResults": {
+    "typecheck": "PASS",
+    "tests": "FAIL",
+    "lint": "PASS",
+    "subtaskVerify": "N/A"
+  },
+  "error": "Test failed: expected 2 but got 3"
+}
+```
+
+**Why this matters**:
+- Provides full execution history for debugging and analysis
+- Enables timing analysis across the loop lifecycle
+- Powers the summary generation at loop completion
+- Tracks retry patterns and common failure modes
+</iteration_tracking>
 
 <update_subtask_status_done>
 After successful commit with all acceptance criteria met, include status update in your structured output.
@@ -1326,7 +1404,7 @@ Consider creating separate issues for these.
 - GOOD: Update status and add completion comment
 
 **Don't skip local context updates**:
-- BAD: Only output structured YAML without updating `~/.mobius/issues/` files
+- BAD: Only output structured YAML without updating `.mobius/issues/` files
 - BAD: Commit and push but forget to update task JSON files
 - GOOD: Update both task-specific JSON and main context.json after commit
 - GOOD: Update `metadata.updatedAt` timestamp when modifying context
@@ -1360,7 +1438,7 @@ A successful execution achieves:
 - [ ] Sub-task verify command passes (if present in description)
 - [ ] Commit created with conventional message
 - [ ] Changes pushed to remote
-- [ ] **Local context files updated** (`~/.mobius/issues/{parentId}/` task and context.json)
+- [ ] **Local context files updated** (`.mobius/issues/{parentId}/` task and context.json)
 - [ ] Sub-task moved to "Done" (if fully complete)
 - [ ] Or: Sub-task kept "In Progress" with progress comment (if partial)
 - [ ] Completion report output with STATUS marker

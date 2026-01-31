@@ -70,7 +70,7 @@ The verify skill is designed to run end-to-end autonomously. User interaction is
 
 The skill receives context through:
 1. `MOBIUS_CONTEXT_FILE` environment variable - path to the context JSON file
-2. Local files at `~/.mobius/issues/{parentId}/`
+2. Local files at `.mobius/issues/{parentId}/`
 
 **Context file structure** (at `MOBIUS_CONTEXT_FILE` path):
 
@@ -118,8 +118,8 @@ The skill receives context through:
 CONTEXT_FILE="$MOBIUS_CONTEXT_FILE"
 
 # Or read directly from local storage
-cat ~/.mobius/issues/MOB-161/parent.json
-cat ~/.mobius/issues/MOB-161/tasks/MOB-177.json
+cat .mobius/issues/MOB-161/parent.json
+cat .mobius/issues/MOB-161/tasks/MOB-177.json
 ```
 
 **Sub-task status values**: `pending`, `in_progress`, `done`
@@ -237,7 +237,7 @@ criteriaResults:
       evidence: "No MCP tool references in skills"
     - criterion: "Local file system stores issue context"
       status: PASS
-      evidence: "~/.mobius/issues/ directory created"
+      evidence: ".mobius/issues/ directory created"
 verificationChecks:
   tests: PASS
   typecheck: PASS
@@ -461,8 +461,8 @@ cat "$MOBIUS_CONTEXT_FILE" | jq '.subTasks[]'
 
 Or from local files:
 ```bash
-ls ~/.mobius/issues/{parentId}/tasks/
-cat ~/.mobius/issues/{parentId}/tasks/{taskId}.json
+ls .mobius/issues/{parentId}/tasks/
+cat .mobius/issues/{parentId}/tasks/{taskId}.json
 ```
 
 Verify:
@@ -1044,14 +1044,14 @@ The local context files must be updated so that `mobius sync` can push changes t
 
 **Files to update**:
 
-1. **Verification task file**: `~/.mobius/issues/{parentId}/tasks/{verificationTaskId}.json`
+1. **Verification task file**: `.mobius/issues/{parentId}/tasks/{verificationTaskId}.json`
    - On PASS/PASS_WITH_NOTES: Change `"status": "in_progress"` to `"status": "done"`
    - On NEEDS_WORK/FAIL: Keep `"status": "in_progress"`
 
-2. **Failing sub-task files** (on NEEDS_WORK/FAIL): `~/.mobius/issues/{parentId}/tasks/{failingTaskId}.json`
+2. **Failing sub-task files** (on NEEDS_WORK/FAIL): `.mobius/issues/{parentId}/tasks/{failingTaskId}.json`
    - Change `"status": "done"` back to `"status": "pending"` for each failing sub-task
 
-3. **Main context file**: `~/.mobius/issues/{parentId}/context.json`
+3. **Main context file**: `.mobius/issues/{parentId}/context.json`
    - Update the `verificationTask.status` field accordingly
    - For failing sub-tasks, update their status in the `subTasks` array to `"pending"`
    - Update `metadata.updatedAt` to current ISO-8601 timestamp
@@ -1060,17 +1060,17 @@ The local context files must be updated so that `mobius sync` can push changes t
 
 ```
 # Update verification task file
-Edit ~/.mobius/issues/MOB-161/tasks/MOB-186.json
+Edit .mobius/issues/MOB-161/tasks/MOB-186.json
   old_string: "status": "in_progress"
   new_string: "status": "done"
 
 # Update context.json - verification task status
-Edit ~/.mobius/issues/MOB-161/context.json
+Edit .mobius/issues/MOB-161/context.json
   old_string: [find verificationTask block with "status": "in_progress"]
   new_string: [same block with "status": "done"]
 
 # Update the updatedAt timestamp
-Edit ~/.mobius/issues/MOB-161/context.json
+Edit .mobius/issues/MOB-161/context.json
   old_string: "updatedAt": "2026-01-28T19:05:00.000Z"
   new_string: "updatedAt": "{current ISO-8601 timestamp}"
 ```
@@ -1079,17 +1079,17 @@ Edit ~/.mobius/issues/MOB-161/context.json
 
 ```
 # Reopen failing sub-task files
-Edit ~/.mobius/issues/MOB-161/tasks/MOB-177.json
+Edit .mobius/issues/MOB-161/tasks/MOB-177.json
   old_string: "status": "done"
   new_string: "status": "pending"
 
 # Update context.json - reopen failing sub-tasks in subTasks array
-Edit ~/.mobius/issues/MOB-161/context.json
+Edit .mobius/issues/MOB-161/context.json
   old_string: [find the failing subtask block with "status": "done"]
   new_string: [same block with "status": "pending"]
 
 # Update the updatedAt timestamp
-Edit ~/.mobius/issues/MOB-161/context.json
+Edit .mobius/issues/MOB-161/context.json
   old_string: "updatedAt": "2026-01-28T19:05:00.000Z"
   new_string: "updatedAt": "{current ISO-8601 timestamp}"
 ```
@@ -1271,7 +1271,7 @@ All criteria met. Ready to close.
 - GOOD: Verify all sub-tasks are complete before overall review
 
 **Don't skip local context updates**:
-- BAD: Only output structured YAML without updating `~/.mobius/issues/` files
+- BAD: Only output structured YAML without updating `.mobius/issues/` files
 - BAD: Mark verification complete but forget to update task JSON files
 - BAD: Reopen failing sub-tasks in output but not in local files
 - GOOD: Update both task-specific JSON and main context.json after verification
@@ -1334,7 +1334,7 @@ A successful verification achieves:
 - [ ] Parent issue unblocked for completion (no longer blocked by verification sub-task)
 
 **Local Context Updates**:
-- [ ] **Local context files updated** (`~/.mobius/issues/{parentId}/` task and context.json)
+- [ ] **Local context files updated** (`.mobius/issues/{parentId}/` task and context.json)
 - [ ] Verification task status updated in local files (to "done" on PASS, stays "in_progress" on FAIL)
 - [ ] Failing sub-task statuses reverted to "pending" in local files (on NEEDS_WORK/FAIL)
 - [ ] `metadata.updatedAt` timestamp updated in context.json
