@@ -21,6 +21,7 @@ import { DEFAULT_CONFIG } from '../types.js';
 
 export interface SetupOptions {
   updateSkills?: boolean;
+  install?: boolean;
 }
 
 export async function setup(options: SetupOptions = {}): Promise<void> {
