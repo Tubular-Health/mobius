@@ -31,8 +31,14 @@ import {
   hasPermamentFailures,
   processResults,
 } from '../lib/execution-tracker.js';
-import { fetchJiraIssue, fetchJiraSubTasks } from '../lib/jira.js';
-import { fetchLinearIssue, fetchLinearSubTasks, type ParentIssue } from '../lib/linear.js';
+import { fetchJiraIssue } from '../lib/jira.js';
+import { fetchLinearIssue, type ParentIssue } from '../lib/linear.js';
+import {
+  type IterationLogEntry,
+  readParentSpec,
+  readSubTasks,
+  writeIterationLog,
+} from '../lib/local-state.js';
 import {
   extractStatus,
   isTerminalStatus,
@@ -53,6 +59,7 @@ import {
   getReadyTasks,
   getTaskByIdentifier,
   getVerificationTask,
+  type LinearIssue,
   type TaskGraph,
   updateTaskStatus,
 } from '../lib/task-graph.js';
@@ -195,8 +202,8 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
     process.exit(1);
   }
 
-  // Build initial task graph
-  let graph = await buildInitialGraph(taskId, parentIssue, backend);
+  // Build initial task graph from local sub-task files
+  let graph = buildInitialGraph(taskId, parentIssue);
   if (!graph) {
     console.error(chalk.red('Error: Failed to build task graph'));
     await destroySession(session);
@@ -260,8 +267,8 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
     while (iteration < maxIterations) {
       iteration++;
 
-      // Re-sync task graph from backend to pick up external status changes
-      graph = await syncGraphFromBackend(graph, parentIssue, backend);
+      // Re-sync task graph from local state to pick up status changes
+      graph = syncGraphFromLocal(graph, parentIssue, taskId);
 
       // Check if verification task is complete - exit early with success
       const verificationTask = getVerificationTask(graph);
@@ -498,6 +505,25 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
         break;
       }
 
+      // Write iteration log entries to execution/iterations.json
+      const iterationTimestamp = new Date().toISOString();
+      for (const result of verifiedResults) {
+        const entry: IterationLogEntry = {
+          subtaskId: result.identifier,
+          attempt: iteration,
+          startedAt: iterationTimestamp,
+          completedAt: new Date().toISOString(),
+          status:
+            result.success && result.linearVerified
+              ? 'success'
+              : result.shouldRetry
+                ? 'partial'
+                : 'failed',
+          ...(result.error && { error: result.error }),
+        };
+        writeIterationLog(taskId, entry);
+      }
+
       // Re-render ASCII tree with updated status
       console.log('');
       console.log(renderFullTreeOutput(graph));
@@ -570,7 +596,7 @@ async function checkTmuxAvailable(): Promise<boolean> {
 }
 
 /**
- * Fetch parent issue from Linear or Jira
+ * Fetch parent issue from Linear, Jira, or local state
  */
 async function fetchParentIssue(taskId: string, backend: Backend): Promise<ParentIssue | null> {
   if (backend === 'linear') {
@@ -579,30 +605,64 @@ async function fetchParentIssue(taskId: string, backend: Backend): Promise<Paren
   if (backend === 'jira') {
     return fetchJiraIssue(taskId);
   }
+  if (backend === 'local') {
+    const spec = readParentSpec(taskId);
+    if (!spec) {
+      return null;
+    }
+    return {
+      id: spec.id,
+      identifier: spec.identifier,
+      title: spec.title,
+      gitBranchName: spec.gitBranchName,
+    };
+  }
   console.error(chalk.red(`Backend ${backend} not supported`));
   return null;
 }
 
 /**
- * Re-sync the task graph from the backend with fresh status data
+ * Convert local SubTaskContext[] to LinearIssue[] for buildTaskGraph()
  *
- * This enables the loop to see external status changes (e.g., from verify agents).
- * On fetch failure, returns the existing graph (graceful degradation).
+ * Reads sub-task specs from .mobius/issues/{id}/tasks/*.json and converts
+ * them to the LinearIssue format expected by the task graph builder.
  */
-async function syncGraphFromBackend(
-  graph: TaskGraph,
-  parentIssue: ParentIssue,
-  backend: Backend
-): Promise<TaskGraph> {
+function readLocalSubTasks(taskId: string): LinearIssue[] {
+  const localTasks = readSubTasks(taskId);
+  debugLog('task_state_change', 'loop', taskId, {
+    event: 'read_local_subtasks',
+    count: localTasks.length,
+  });
+  console.log(chalk.gray(`Reading sub-tasks from local state (${localTasks.length} found)`));
+
+  return localTasks.map((task) => ({
+    id: task.id,
+    identifier: task.identifier,
+    title: task.title,
+    status: task.status,
+    gitBranchName: task.gitBranchName,
+    relations: {
+      blockedBy: task.blockedBy,
+      blocks: task.blocks,
+    },
+  }));
+}
+
+/**
+ * Re-sync the task graph from local state files
+ *
+ * Sub-tasks are now stored locally in .mobius/issues/{id}/tasks/*.json.
+ * This reads fresh status from those files instead of fetching from API.
+ * On read failure, returns the existing graph (graceful degradation).
+ */
+function syncGraphFromLocal(graph: TaskGraph, parentIssue: ParentIssue, taskId: string): TaskGraph {
   try {
-    const subTasks = await fetchSubTasks(parentIssue.id, parentIssue.identifier, backend);
-    if (!subTasks || subTasks.length === 0) {
-      // No sub-tasks returned, keep existing graph
+    const localIssues = readLocalSubTasks(taskId);
+    if (localIssues.length === 0) {
       return graph;
     }
-    return buildTaskGraph(parentIssue.id, parentIssue.identifier, subTasks);
+    return buildTaskGraph(parentIssue.id, parentIssue.identifier, localIssues);
   } catch (error) {
-    // Graceful degradation: return existing graph on fetch failure
     console.log(
       chalk.gray(
         `Graph sync failed, using cached state: ${error instanceof Error ? error.message : String(error)}`
@@ -613,41 +673,20 @@ async function syncGraphFromBackend(
 }
 
 /**
- * Fetch sub-tasks from Linear or Jira
+ * Build the initial task graph from local sub-task files
+ *
+ * Reads sub-tasks from .mobius/issues/{id}/tasks/*.json instead of
+ * fetching from Linear/Jira API.
  */
-async function fetchSubTasks(
-  parentId: string,
-  parentIdentifier: string,
-  backend: Backend
-): Promise<ReturnType<typeof fetchLinearSubTasks>> {
-  if (backend === 'linear') {
-    return fetchLinearSubTasks(parentId);
-  }
-  if (backend === 'jira') {
-    // For Jira, use the identifier (key) instead of internal ID
-    return fetchJiraSubTasks(parentIdentifier);
-  }
-  return null;
-}
-
-/**
- * Build the initial task graph from Linear or Jira sub-tasks
- */
-async function buildInitialGraph(
-  taskId: string,
-  parentIssue: ParentIssue,
-  backend: Backend
-): Promise<TaskGraph | null> {
+function buildInitialGraph(taskId: string, parentIssue: ParentIssue): TaskGraph | null {
   try {
-    // Fetch sub-tasks using the appropriate backend
-    const subTasks = await fetchSubTasks(parentIssue.id, parentIssue.identifier, backend);
-    if (!subTasks || subTasks.length === 0) {
+    const localIssues = readLocalSubTasks(taskId);
+    if (localIssues.length === 0) {
       console.log(chalk.yellow(`No sub-tasks found for ${taskId}`));
       return null;
     }
 
-    // Build the graph
-    return buildTaskGraph(parentIssue.id, parentIssue.identifier, subTasks);
+    return buildTaskGraph(parentIssue.id, parentIssue.identifier, localIssues);
   } catch (error) {
     console.error(
       chalk.gray(
