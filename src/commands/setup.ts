@@ -3,6 +3,12 @@ import { dirname, join } from 'node:path';
 import { confirm, input, select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import {
+  detectCli,
+  getInstallInstructions,
+  promptAutoInstall,
+  showCliStatus,
+} from '../lib/cli-installer.js';
+import {
   configExists,
   copyAgentsTemplate,
   copyCommands,
@@ -16,6 +22,7 @@ import {
   getPathsForType,
   resolvePaths,
 } from '../lib/paths.js';
+import { getPlatform } from '../lib/platform-detect.js';
 import type { Backend, LoopConfig, Model } from '../types.js';
 import { DEFAULT_CONFIG } from '../types.js';
 
@@ -111,6 +118,11 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
     choices: [
       { value: 'linear', name: 'Linear', description: 'Recommended - native MCP integration' },
       { value: 'jira', name: 'Jira', description: 'Coming soon' },
+      {
+        value: 'local',
+        name: 'Local',
+        description: 'No external issue tracker — issues stored in .mobius/',
+      },
     ],
   });
 
@@ -190,6 +202,33 @@ export async function setup(options: SetupOptions = {}): Promise<void> {
   }
 
   console.log(chalk.green('\n✓ Setup complete!\n'));
+
+  // CLI detection (skip for local backend)
+  if (backend !== 'local') {
+    const cliResult = await detectCli(backend);
+    showCliStatus(cliResult);
+
+    if (!cliResult.installed) {
+      if (options.install) {
+        await promptAutoInstall(backend);
+      } else {
+        const platform = getPlatform();
+        const instructions = getInstallInstructions(backend, platform);
+        if (instructions.length > 0) {
+          console.log(chalk.bold('\n  Install the CLI to enable full functionality:'));
+          for (const method of instructions) {
+            if (method.command) {
+              console.log(`    ${chalk.cyan(method.method)}: ${method.command}`);
+            }
+            if (method.url) {
+              console.log(`    ${chalk.cyan(method.method)}: ${chalk.underline(method.url)}`);
+            }
+          }
+        }
+      }
+    }
+    console.log('');
+  }
 
   console.log(chalk.bold('Next steps:'));
   console.log(`  1. Run ${chalk.cyan('mobius doctor')} to verify installation`);
