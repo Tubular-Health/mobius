@@ -39,7 +39,7 @@ export async function submit(taskId: string | undefined, options: SubmitOptions)
     if (!pattern.test(taskId)) {
       console.error(chalk.red(`Error: Invalid task ID format for ${backend}: ${taskId}`));
       console.error(chalk.gray('Expected format: PREFIX-NUMBER (e.g., VER-159)'));
-      process.exit(1);
+      throw new Error(`Invalid task ID format for ${backend}: ${taskId}`);
     }
   }
 
@@ -80,7 +80,7 @@ export async function submit(taskId: string | undefined, options: SubmitOptions)
     if (error instanceof Error) {
       console.error(chalk.red(`Error: ${error.message}`));
     }
-    process.exit(1);
+    throw error;
   }
 
   // After successful PR creation, update parent issue status to "In Review"

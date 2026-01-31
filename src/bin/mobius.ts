@@ -68,7 +68,9 @@ program
   .command('run <task-id> [max-iterations]')
   .description('Execute sub-tasks sequentially (use "loop" for parallel execution)')
   .option('--no-sandbox', 'Bypass container sandbox, run directly on host')
-  .addOption(new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp())
+  .addOption(
+    new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp()
+  )
   .option('-b, --backend <backend>', 'Backend: linear, jira, or local')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
   .option('-d, --delay <seconds>', 'Delay between iterations', parseInt)
@@ -89,7 +91,9 @@ program
   .command('loop <task-id>')
   .description('Execute sub-tasks with parallel execution and worktree isolation')
   .option('--no-sandbox', 'Bypass container sandbox, run directly on host')
-  .addOption(new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp())
+  .addOption(
+    new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp()
+  )
   .option('-b, --backend <backend>', 'Backend: linear, jira, or local')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
   .option('-p, --parallel <count>', 'Max parallel agents (overrides config)', parseInt)
@@ -99,6 +103,7 @@ program
     '--debug [verbosity]',
     'Enable debug mode for state drift diagnostics (minimal|normal|verbose)'
   )
+  .option('--no-submit', 'Skip automatic PR submission after successful completion')
   .action(async (taskId: string, options) => {
     if (options.local) {
       console.warn('Warning: --local is deprecated, use --no-sandbox instead');
@@ -110,6 +115,7 @@ program
       maxIterations: options.maxIterations,
       fresh: options.fresh,
       debug: options.debug,
+      noSubmit: !options.submit,
     });
   });
 
@@ -188,7 +194,9 @@ program
 program
   .argument('[task-id]', 'Task ID to execute (uses parallel loop by default)')
   .option('--no-sandbox', 'Bypass container sandbox, run directly on host')
-  .addOption(new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp())
+  .addOption(
+    new Option('-l, --local', 'Bypass container sandbox (deprecated, use --no-sandbox)').hideHelp()
+  )
   .option('-b, --backend <backend>', 'Backend: linear, jira, or local')
   .option('-m, --model <model>', 'Model: opus, sonnet, or haiku')
   .option('-s, --sequential', 'Use sequential execution instead of parallel')
@@ -201,6 +209,7 @@ program
     '--debug [verbosity]',
     'Enable debug mode for state drift diagnostics (minimal|normal|verbose)'
   )
+  .option('--no-submit', 'Skip automatic PR submission after successful completion')
   .action(async (taskId: string | undefined, options) => {
     // If no task ID, show help
     if (!taskId) {
@@ -264,6 +273,7 @@ program
         maxIterations: options.maxIterations,
         fresh: options.fresh,
         debug: options.debug,
+        noSubmit: !options.submit,
       });
       return;
     }
@@ -278,6 +288,7 @@ program
     if (options.maxIterations) loopArgs.push('--max-iterations', String(options.maxIterations));
     if (options.fresh) loopArgs.push('--fresh');
     if (options.debug) loopArgs.push('--debug', options.debug === true ? 'normal' : options.debug);
+    if (!options.submit) loopArgs.push('--no-submit');
 
     // Spawn the loop process in the background
     const loopProcess = spawn(process.execPath, [join(__dirname, 'mobius.js'), ...loopArgs], {
