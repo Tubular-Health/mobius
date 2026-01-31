@@ -6,9 +6,11 @@ import { DEFAULT_CONFIG } from '../types.js';
 import {
   getAgentsTemplatePath,
   getBundledCommandsDir,
+  getBundledShortcutsPath,
   getBundledSkillsDir,
   getDefaultConfigPath,
   getGlobalCommandsDir,
+  getShortcutsInstallPath,
 } from './paths.js';
 
 /**
@@ -97,6 +99,45 @@ export function copyCommands(paths: PathConfig): void {
   }
 
   cpSync(bundledDir, targetDir, { recursive: true });
+}
+
+/**
+ * Copy shortcuts script from package to global config directory
+ */
+export function copyShortcuts(): void {
+  const bundledPath = getBundledShortcutsPath();
+
+  if (!existsSync(bundledPath)) {
+    throw new Error(`Bundled shortcuts script not found at ${bundledPath}`);
+  }
+
+  const installPath = getShortcutsInstallPath();
+  const dir = dirname(installPath);
+
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+
+  cpSync(bundledPath, installPath);
+}
+
+/**
+ * Append source line for shortcuts to a shell rc file (idempotent)
+ */
+export function addShortcutsSourceLine(rcFilePath: string): void {
+  const sourceLine = `source "${getShortcutsInstallPath()}"`;
+  let content = '';
+
+  if (existsSync(rcFilePath)) {
+    content = readFileSync(rcFilePath, 'utf-8');
+  }
+
+  if (content.includes(sourceLine)) {
+    return;
+  }
+
+  const newline = content.length > 0 && !content.endsWith('\n') ? '\n' : '';
+  writeFileSync(rcFilePath, `${content}${newline}${sourceLine}\n`, 'utf-8');
 }
 
 /**
