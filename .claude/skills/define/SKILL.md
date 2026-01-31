@@ -245,7 +245,7 @@ jira:
 **CLI availability check** (run once at start):
 ```bash
 # For Linear backend
-command -v linear >/dev/null 2>&1 || echo "linear-cli not found. Install via: brew install schpet/tap/linear"
+command -v linearis >/dev/null 2>&1 || echo "linearis not found. Install via: npm install -g linearis"
 
 # For Jira backend
 command -v acli >/dev/null 2>&1 || echo "acli not found. See: https://developer.atlassian.com/cloud/acli/"
@@ -255,7 +255,7 @@ command -v acli >/dev/null 2>&1 || echo "acli not found. See: https://developer.
 
 ```bash
 # Linear: search for related issues
-linear issue list --filter "title:search terms" --json
+linearis issues search "search terms"
 
 # Jira: search for related issues
 acli jira workitem search --jql "summary ~ 'search terms' AND project = PROJ"
@@ -593,7 +593,7 @@ Read workspace context from `mobius.config.yaml`, then present options to the us
 
 ```bash
 # Linear: search for related issues
-linear issue list --filter "title:search terms" --json
+linearis issues search "search terms"
 
 # Jira: search for related issues
 acli jira workitem search --jql "summary ~ 'search terms' AND project = PROJ"
@@ -673,17 +673,14 @@ Use AskUserQuestion:
 <cli_creation>
 After approval, create the issue using CLI commands via Bash.
 
-**For Linear** — use `linear issue create`:
+**For Linear** — use `linearis issues create`:
 ```bash
-linear issue create \
-  --title "{issue title}" \
+linearis issues create "{issue title}" \
   --team "{team from config}" \
   --description "{full description with acceptance criteria}" \
   --priority {1-4} \
   --state "{initial state}" \
-  --label "{label1}" \
-  --label "{label2}" \
-  --json
+  --labels "{label1},{label2}"
 ```
 
 **For Jira** — use `acli jira workitem create`:
@@ -699,7 +696,7 @@ acli jira workitem create \
 After creation, parse the JSON output to extract the issue ID and URL.
 
 **If CLI is not installed**, report a clear error:
-- Linear: "linear-cli not found. Install via: `brew install schpet/tap/linear`"
+- Linear: "linearis not found. Install via: `npm install -g linearis`"
 - Jira: "acli not found. See: https://developer.atlassian.com/cloud/acli/"
 </cli_creation>
 
@@ -753,8 +750,7 @@ Ready to create this issue?"
 **After approval, create via CLI**:
 
 ```bash
-linear issue create \
-  --title "Schedule deactivation throws 500 error" \
+linearis issues create "Schedule deactivation throws 500 error" \
   --team "Engineering" \
   --description "## Summary
 Users receive HTTP 500 error when deactivating schedules.
@@ -781,8 +777,7 @@ Schedule deactivates successfully with confirmation message.
   - **Verification**: Observable - check logs after fix deployment" \
   --priority 1 \
   --state "Todo" \
-  --label "Bug" \
-  --json
+  --labels "Bug"
 ```
 
 **Report result to user**:
@@ -814,8 +809,7 @@ User: "We need to add dark mode"
 **After gathering all details and approval, create via CLI**:
 
 ```bash
-linear issue create \
-  --title "Add dark mode theme support" \
+linearis issues create "Add dark mode theme support" \
   --team "Engineering" \
   --description "## Summary
 Add dark mode support with system preference detection and manual toggle.
@@ -846,8 +840,7 @@ Add dark mode support with system preference detection and manual toggle.
 - If system preference API unavailable, default to light mode" \
   --priority 3 \
   --state "Backlog" \
-  --label "Feature" \
-  --json
+  --labels "Feature"
 ```
 
 **Report result to user**:
@@ -866,7 +859,7 @@ This is a larger feature. Would you like to break it down into sub-tasks (/refin
 
 This skill creates issues directly via CLI — no structured YAML output needed.
 
-**For Linear** — use `linear issue create`:
+**For Linear** — use `linearis issues create`:
 
 ```bash
 # Write description to a temp file for multi-line content
@@ -880,15 +873,12 @@ DESCRIPTION=$(cat <<'DESC'
 DESC
 )
 
-linear issue create \
-  --title "{issue title}" \
+linearis issues create "{issue title}" \
   --team "{team from config}" \
   --description "$DESCRIPTION" \
   --priority {1-4} \
   --state "{initial state}" \
-  --label "{label1}" \
-  --label "{label2}" \
-  --json
+  --labels "{label1},{label2}"
 ```
 
 **For Jira** — use `acli jira workitem create`:
@@ -920,7 +910,7 @@ acli jira workitem create \
 **If CLI command fails**:
 1. Report the error to the user
 2. If CLI not found, show install instructions:
-   - Linear: `brew install schpet/tap/linear`
+   - Linear: `npm install -g linearis`
    - Jira: See https://developer.atlassian.com/cloud/acli/
 3. If auth error, suggest checking CLI authentication
 4. Offer to retry or save issue details for manual creation
@@ -938,7 +928,7 @@ acli jira workitem create \
 | `team` / `project` | `--team` flag | `--project` flag |
 | `priority` | `--priority {1-4}` | `--priority {High/Medium/Low}` |
 | `state` / `status` | `--state` flag | N/A (uses workflow default) |
-| `labels` / `type` | `--label` flag (repeatable) | `--type` flag |
+| `labels` / `type` | `--labels` flag (comma-separated) | `--type` flag |
 </issue_creation_cli>
 
 <anti_patterns>

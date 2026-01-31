@@ -17,9 +17,9 @@ export interface ParentIssue {
  * Get a Linear client instance
  */
 export function getLinearClient(): LinearClient | null {
-  const apiKey = process.env.LINEAR_API_KEY;
+  const apiKey = process.env.LINEAR_API_KEY || process.env.LINEAR_API_TOKEN;
   if (!apiKey) {
-    console.error(chalk.red('LINEAR_API_KEY environment variable is not set'));
+    console.error(chalk.red('LINEAR_API_KEY or LINEAR_API_TOKEN environment variable is not set'));
     return null;
   }
   return new LinearClient({ apiKey });
@@ -151,7 +151,7 @@ export async function createLinearIssue(
 ): Promise<LinearOperationResult> {
   const client = getLinearClient();
   if (!client) {
-    return { success: false, error: 'LINEAR_API_KEY not set' };
+    return { success: false, error: 'LINEAR_API_KEY/LINEAR_API_TOKEN not set' };
   }
 
   try {
@@ -207,7 +207,7 @@ export async function updateLinearIssueStatus(
 ): Promise<LinearOperationResult> {
   const client = getLinearClient();
   if (!client) {
-    return { success: false, error: 'LINEAR_API_KEY not set' };
+    return { success: false, error: 'LINEAR_API_KEY/LINEAR_API_TOKEN not set' };
   }
 
   try {
@@ -265,7 +265,7 @@ export async function addLinearComment(
 ): Promise<LinearOperationResult> {
   const client = getLinearClient();
   if (!client) {
-    return { success: false, error: 'LINEAR_API_KEY not set' };
+    return { success: false, error: 'LINEAR_API_KEY/LINEAR_API_TOKEN not set' };
   }
 
   try {

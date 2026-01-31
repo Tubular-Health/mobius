@@ -5,7 +5,7 @@ import type { Backend, CliDetectionResult, InstallMethod, Platform } from '../ty
 import { getPlatform, hasCommand } from './platform-detect.js';
 
 const CLI_COMMANDS: Record<Exclude<Backend, 'local'>, string> = {
-  linear: 'linear',
+  linear: 'linearis',
   jira: 'acli',
 };
 
@@ -40,25 +40,17 @@ export function getInstallInstructions(backend: Backend, platform: Platform): In
 function getLinearInstallMethods(platform: Platform): InstallMethod[] {
   const methods: InstallMethod[] = [];
 
-  if (platform === 'darwin') {
-    methods.push({
-      platform,
-      method: 'Homebrew',
-      command: 'brew install schpet/tap/linear',
-    });
-  }
-
   methods.push({
     platform,
     method: 'npm',
-    command: 'npm install -g @linear/cli',
+    command: 'npm install -g linearis',
   });
 
   methods.push({
     platform,
-    method: 'GitHub Releases',
+    method: 'GitHub',
     command: '',
-    url: 'https://github.com/linear/linear-cli/releases',
+    url: 'https://github.com/czottmann/linearis',
   });
 
   return methods;

@@ -80,11 +80,11 @@ No local parent file found at .mobius/issues/{issue-id}/parent.json
 Run /define {issue-id} first to create the issue spec, or check the issue ID.
 ```
 
-**For `backend: linear`** — use `linear issue get` CLI:
+**For `backend: linear`** — use `linearis issues read` CLI:
 
 ```bash
 # Fetch issue details as JSON
-linear issue get MOB-123 --json
+linearis issues read MOB-123
 ```
 
 **Extract from the response**:
@@ -125,7 +125,7 @@ Write tool:
 **If CLI command fails** (linear/jira backends):
 1. Report the error to the user
 2. If CLI not found, show install instructions:
-   - Linear: `brew install schpet/tap/linear`
+   - Linear: `npm install -g linearis`
    - Jira: See https://developer.atlassian.com/cloud/acli/
 3. Check if the issue ID is valid
 4. Verify API permissions/authentication
@@ -278,11 +278,11 @@ cat .mobius/issues/{issue-id}/parent.json
 
 Extract from the JSON: title, description, acceptance criteria, labels, priority.
 
-**For `backend: linear`** — use `linear issue get` CLI:
+**For `backend: linear`** — use `linearis issues read` CLI:
 
 ```bash
 # Fetch issue details as JSON
-linear issue get {issue-id} --json  # e.g., "MOB-123"
+linearis issues read {issue-id}  # e.g., "MOB-123"
 ```
 
 **Extract from response**:
@@ -834,7 +834,7 @@ Run `mobius loop {parent-id}` to begin execution, or `/execute {parent-id}` for 
 <post_creation_comment>
 Optionally post the dependency graph as a comment on the parent issue (backend modes only):
 
-**For `backend: linear`** — use `linear comment create`:
+**For `backend: linear`** — use `linearis comments create`:
 
 ```bash
 COMMENT_BODY=$(cat <<'COMMENT'
@@ -852,7 +852,7 @@ COMMENT_BODY=$(cat <<'COMMENT'
 COMMENT
 )
 
-linear comment create --issue "{parent-issue-id}" --body "$COMMENT_BODY"
+linearis comments create {parent-issue-id} --body "$COMMENT_BODY"
 ```
 
 **For `backend: jira`** — use `acli jira workitem comment add`:
@@ -895,7 +895,7 @@ If parent issue fetch via CLI fails:
    - Verify the issue is not in a restricted project
 
 3. **CLI not installed**:
-   - Linear CLI (`linear`) not found — install via: `brew install schpet/tap/linear`
+   - Linearis CLI (`linearis`) not found — install via: `npm install -g linearis`
    - Jira CLI (`acli`) not found — see: https://developer.atlassian.com/cloud/acli/
    - Fall back to asking user to provide issue details manually
 
@@ -1212,7 +1212,7 @@ After running `/refine {issue-id}`, verify the results.
 **Parent issue fetch verification** (backend-dependent):
 
 - **Local mode**: Verify `.mobius/issues/{id}/parent.json` was read successfully
-- **Linear mode**: Verify `linear issue get` CLI returned expected data
+- **Linear mode**: Verify `linearis issues read` CLI returned expected data
 - **Jira mode**: Verify `acli jira workitem show` CLI returned expected data
 </parent_fetch_verification>
 </verification_steps>
@@ -1223,16 +1223,16 @@ After running `/refine {issue-id}`, verify the results.
 <cli_not_installed>
 **CLI tool not available**
 ```
-Error: linear: command not found
+Error: linearis: command not found
 ```
 
-**Cause**: Linear CLI or Jira CLI not installed.
+**Cause**: Linearis CLI or Jira CLI not installed.
 
 **Solution**:
-1. Install Linear CLI: `brew install schpet/tap/linear`
+1. Install Linearis CLI: `npm install -g linearis`
 2. Install Jira CLI: See https://developer.atlassian.com/cloud/acli/
-3. Verify installation with `command -v linear` or `command -v acli`
-4. Ensure CLI is authenticated (e.g., `linear auth`)
+3. Verify installation with `command -v linearis` or `command -v acli`
+4. Ensure CLI is authenticated (set `LINEAR_API_TOKEN` env var)
 </cli_not_installed>
 
 <issue_not_found>

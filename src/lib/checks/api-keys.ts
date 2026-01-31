@@ -20,16 +20,16 @@ export async function checkApiKeys(backend: Backend): Promise<CheckResult> {
 
 function checkLinearApiKey(): CheckResult {
   const name = 'Linear API Key';
-  const apiKey = process.env.LINEAR_API_KEY;
+  const apiKey = process.env.LINEAR_API_KEY || process.env.LINEAR_API_TOKEN;
 
   if (!apiKey) {
     return {
       name,
       status: 'warn',
-      message: 'LINEAR_API_KEY not set',
+      message: 'LINEAR_API_KEY / LINEAR_API_TOKEN not set',
       required: false,
       details:
-        'Set: export LINEAR_API_KEY="lin_api_xxxxx" - Get key from https://linear.app/settings/api',
+        'Set: export LINEAR_API_KEY="lin_api_xxxxx" (or LINEAR_API_TOKEN) - Get key from https://linear.app/settings/api',
     };
   }
 
@@ -38,7 +38,7 @@ function checkLinearApiKey(): CheckResult {
     return {
       name,
       status: 'warn',
-      message: 'LINEAR_API_KEY may be invalid format',
+      message: 'LINEAR_API_KEY / LINEAR_API_TOKEN may be invalid format',
       required: false,
       details: 'Linear API keys typically start with "lin_api_"',
     };
