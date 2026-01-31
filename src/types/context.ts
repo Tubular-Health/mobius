@@ -37,12 +37,42 @@ export interface SubTaskContext {
 }
 
 /**
+ * Local-only issue specification for issues not backed by Linear/Jira
+ */
+export interface LocalIssueSpec {
+  localId: string; // LOC-{N} format identifier
+  title: string;
+  description: string;
+  status: TaskStatus;
+}
+
+/**
+ * Summary of a single execution iteration in the loop
+ */
+export interface IterationSummary {
+  iterationNumber: number;
+  startedAt: string; // ISO timestamp
+  completedAt: string; // ISO timestamp
+  tasksCompleted: string[]; // Task identifiers completed in this iteration
+  keyChanges: string[]; // Summary of significant changes made
+  nextSteps: string[]; // Recommended actions for next iteration
+}
+
+/**
+ * Counter for generating LOC-{N} local issue identifiers
+ */
+export interface LocalCounter {
+  nextTaskNumber: number;
+  lastUpdated: string; // ISO timestamp
+}
+
+/**
  * Metadata about the local context
  */
 export interface ContextMetadata {
   fetchedAt: string; // ISO timestamp when context was fetched from backend
   updatedAt: string; // ISO timestamp when context was last modified locally
-  backend: 'linear' | 'jira';
+  backend: 'linear' | 'jira' | 'local';
   syncedAt?: string; // ISO timestamp of last successful sync
 }
 
@@ -55,7 +85,7 @@ export interface ContextMetadata {
  */
 export interface SessionInfo {
   parentId: string; // Parent issue identifier (e.g., "MOB-161")
-  backend: 'linear' | 'jira';
+  backend: 'linear' | 'jira' | 'local';
   startedAt: string; // ISO timestamp when session started
   worktreePath?: string; // Path to worktree if created
   status: 'active' | 'completed' | 'failed' | 'paused';
