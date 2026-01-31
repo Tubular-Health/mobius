@@ -207,6 +207,33 @@ function validateVerificationConfig(config: LoopConfig): string[] {
 }
 
 /**
+ * Validate Linear-specific configuration
+ */
+function validateLinearConfig(config: LoopConfig): string[] {
+  const errors: string[] = [];
+
+  if (config.backend === 'linear' && config.linear) {
+    if (config.linear.team !== undefined && typeof config.linear.team !== 'string') {
+      errors.push('linear.team must be a string');
+    }
+
+    if (config.linear.project !== undefined && typeof config.linear.project !== 'string') {
+      errors.push('linear.project must be a string');
+    }
+
+    if (config.linear.default_labels !== undefined) {
+      if (!Array.isArray(config.linear.default_labels)) {
+        errors.push('linear.default_labels must be an array of strings');
+      } else if (config.linear.default_labels.some((l) => typeof l !== 'string')) {
+        errors.push('linear.default_labels must be an array of strings');
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Validate Jira-specific configuration
  */
 function validateJiraConfig(config: LoopConfig): string[] {
@@ -227,6 +254,14 @@ function validateJiraConfig(config: LoopConfig): string[] {
 
     if (config.jira?.auth_method && !['api_token', 'oauth'].includes(config.jira.auth_method)) {
       errors.push('jira.auth_method must be "api_token" or "oauth"');
+    }
+
+    if (config.jira?.default_labels !== undefined) {
+      if (!Array.isArray(config.jira.default_labels)) {
+        errors.push('jira.default_labels must be an array of strings');
+      } else if (config.jira.default_labels.some((l) => typeof l !== 'string')) {
+        errors.push('jira.default_labels must be an array of strings');
+      }
     }
   }
 
@@ -296,6 +331,9 @@ export function validateConfig(config: LoopConfig): { valid: boolean; errors: st
       }
     }
   }
+
+  // Validate Linear configuration when backend is 'linear'
+  errors.push(...validateLinearConfig(config));
 
   // Validate Jira configuration when backend is 'jira'
   errors.push(...validateJiraConfig(config));

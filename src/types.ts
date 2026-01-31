@@ -88,12 +88,17 @@ export interface ExecutionConfig {
   disallowed_tools?: string[];
 }
 
-export type LinearConfig = Record<string, never>;
+export interface LinearConfig {
+  team?: string;
+  project?: string;
+  default_labels?: string[];
+}
 
 export interface JiraConfig {
   base_url?: string;
   project_key?: string;
   auth_method?: 'api_token' | 'oauth';
+  default_labels?: string[];
 }
 
 export interface LoopConfig {
