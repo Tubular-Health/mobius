@@ -5,10 +5,11 @@
  * config wizard and only updates skills/commands.
  */
 
-import { describe, it, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { SetupOptions } from './setup.js';
 
 // We need to test the setup function behavior, so we'll use integration-style tests
 // that verify the actual file operations
@@ -22,7 +23,10 @@ describe('setup command', () => {
 
     beforeEach(() => {
       // Create a unique temp directory for each test
-      testDir = join(tmpdir(), `mobius-setup-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      testDir = join(
+        tmpdir(),
+        `mobius-setup-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+      );
       mkdirSync(testDir, { recursive: true });
       originalCwd = process.cwd();
 
@@ -174,6 +178,28 @@ execution:
       options.updateSkills = false;
       expect(options.updateSkills).toBe(false);
     });
+
+    it('accepts install option', () => {
+      // Verify the interface allows install as an optional boolean
+      const options: SetupOptions = {};
+      expect(options.install).toBeUndefined();
+
+      options.install = true;
+      expect(options.install).toBe(true);
+
+      options.install = false;
+      expect(options.install).toBe(false);
+    });
+
+    it('accepts both updateSkills and install options together', () => {
+      // Verify SetupOptions accepts both flags simultaneously
+      const options: SetupOptions = {
+        updateSkills: true,
+        install: true,
+      };
+      expect(options.updateSkills).toBe(true);
+      expect(options.install).toBe(true);
+    });
   });
 });
 
@@ -186,7 +212,10 @@ describe('setup command: --update-skills global config', () => {
 
   beforeEach(() => {
     // Create a unique temp directory for each test
-    testDir = join(tmpdir(), `mobius-setup-global-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(
+      tmpdir(),
+      `mobius-setup-global-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
     mkdirSync(testDir, { recursive: true });
     originalCwd = process.cwd();
     originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
@@ -276,7 +305,10 @@ describe('setup command: config file unchanged', () => {
   let consoleLogSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    testDir = join(tmpdir(), `mobius-setup-hash-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(
+      tmpdir(),
+      `mobius-setup-hash-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
     mkdirSync(testDir, { recursive: true });
     originalCwd = process.cwd();
 
@@ -345,7 +377,10 @@ describe('setup command: AGENTS.md not touched', () => {
   let consoleLogSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    testDir = join(tmpdir(), `mobius-setup-agents-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(
+      tmpdir(),
+      `mobius-setup-agents-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
     mkdirSync(testDir, { recursive: true });
     originalCwd = process.cwd();
 
@@ -403,7 +438,10 @@ describe('setup command: --update-skills with no config anywhere', () => {
   let processExitSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    testDir = join(tmpdir(), `mobius-setup-noconfig-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    testDir = join(
+      tmpdir(),
+      `mobius-setup-noconfig-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
     mkdirSync(testDir, { recursive: true });
     originalCwd = process.cwd();
     originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
@@ -469,5 +507,64 @@ describe('setup command: CLI integration', () => {
 
     // We verify the behavior works end-to-end in the tests above
     expect(true).toBe(true);
+  });
+});
+
+describe('setup command: install option', () => {
+  let testDir: string;
+  let originalCwd: string;
+  let consoleLogSpy: ReturnType<typeof spyOn>;
+  let consoleOutput: string[];
+
+  beforeEach(() => {
+    testDir = join(
+      tmpdir(),
+      `mobius-setup-install-test-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    );
+    mkdirSync(testDir, { recursive: true });
+    originalCwd = process.cwd();
+
+    consoleOutput = [];
+    consoleLogSpy = spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      consoleOutput.push(args.map(String).join(' '));
+    });
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    process.chdir(originalCwd);
+    if (existsSync(testDir)) {
+      rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('setup function accepts install option without error', async () => {
+    // Create a local mobius config
+    const configPath = join(testDir, 'mobius.config.yaml');
+    writeFileSync(configPath, 'backend: linear\n');
+    process.chdir(testDir);
+
+    const { setup } = await import('./setup.js');
+
+    // Calling with install option should not throw
+    // The updateSkills path bypasses the wizard, so install has no effect here
+    // but the function signature must accept it
+    await setup({ updateSkills: true, install: true });
+
+    const output = consoleOutput.join('\n');
+    expect(output).toContain('Skills and commands updated');
+  });
+
+  it('setup function accepts install: false without error', async () => {
+    const configPath = join(testDir, 'mobius.config.yaml');
+    writeFileSync(configPath, 'backend: linear\n');
+    process.chdir(testDir);
+
+    const { setup } = await import('./setup.js');
+
+    await setup({ updateSkills: true, install: false });
+
+    const output = consoleOutput.join('\n');
+    expect(output).toContain('Skills and commands updated');
   });
 });

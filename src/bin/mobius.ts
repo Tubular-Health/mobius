@@ -32,8 +32,9 @@ program
   .command('setup')
   .description('Interactive setup wizard')
   .option('-u, --update-skills', 'Update skills/commands only (skip config wizard)')
-  .action(async (options: { updateSkills?: boolean }) => {
-    await setup({ updateSkills: options.updateSkills });
+  .option('-i, --install', 'Auto-install CLI tools with confirmation')
+  .action(async (options: { updateSkills?: boolean; install?: boolean }) => {
+    await setup({ updateSkills: options.updateSkills, install: options.install });
   });
 
 program
