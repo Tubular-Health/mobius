@@ -9,15 +9,17 @@ backend: linear
 
 # Backend-specific settings
 linear:
-  # Uses Linear MCP tools (auto-configured via Claude Code)
-  # No additional configuration required
+  # Workspace context - used by skills as defaults
+  # team: Engineering
+  # project: My Project
+  # default_labels: [Bug, Feature, Improvement]
 
 jira:
-  # Future Jira integration
   # Uncomment and configure when using Jira backend:
   # base_url: https://yourcompany.atlassian.net
   # project_key: PROJ
   # auth_method: api_token  # api_token | oauth
+  # default_labels: [bug, story, task]
 
 # Execution settings
 execution:
