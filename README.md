@@ -136,3 +136,151 @@ mobius submit ABC-123
 ```
 
 ---
+
+## How It Works
+
+Mobius uses a **local-first state model** — all issue data, sub-tasks, and execution history live in your repository under `.mobius/`.
+
+```
+.mobius/
+  issues/
+    MOB-248/
+      context.json          # Parent issue + sub-tasks + metadata
+      tasks/
+        task-001.json       # Sub-task: one file, one concern
+        task-002.json
+        task-VG.json        # Verification gate (final check)
+      execution/
+        iterations.json     # Commit hashes, timing, verification results
+```
+
+### Sub-task decomposition
+
+During refinement, Mobius analyzes your codebase and breaks each issue into **single-file sub-tasks** with explicit blocking dependencies. Each sub-task:
+
+- Targets exactly one file (or a source + test pair)
+- Has clear acceptance criteria
+- Declares what it blocks and what blocks it
+- Fits within a single context window
+
+This structure means agents never need your entire codebase — only the file they're modifying and the context from completed dependencies.
+
+### Git worktrees for isolation
+
+When running in parallel, each agent operates in its own **git worktree** — a separate working directory backed by the same repository. Worktrees prevent agents from stepping on each other's uncommitted changes while sharing the same commit history.
+
+```
+your-repo/                          # Main working directory
+../your-repo-worktrees/
+  task-001/                         # Agent 1's isolated worktree
+  task-002/                         # Agent 2's isolated worktree
+```
+
+### Recovery
+
+Every completed sub-task is committed and pushed independently. If an agent fails or is interrupted, the loop resumes from the last successful sub-task — no work is lost.
+
+---
+
+## The 4 Skills
+
+Mobius provides four skills that map to the issue lifecycle. Each is invoked through Claude Code.
+
+### Define
+
+Create issues with clear acceptance criteria through Socratic questioning. Mobius asks clarifying questions until the spec is unambiguous.
+
+```bash
+claude "/define"              # Local mode — stored in .mobius/
+claude "/define MOB-123"      # Linear/Jira — updates existing issue
+```
+
+### Refine
+
+Explore your codebase, identify affected files, and decompose the issue into focused sub-tasks with a dependency graph.
+
+```bash
+claude "/refine MOB-123"
+```
+
+Spawns architecture agents in parallel to deep-dive each work unit. Produces sub-task files in `.mobius/issues/{id}/tasks/` and creates a verification gate as the final sub-task.
+
+### Execute
+
+Implement exactly one sub-task per invocation: load context from dependencies, modify the target file, verify (typecheck + tests + lint), commit, and push.
+
+```bash
+claude "/execute MOB-123"     # Executes next ready sub-task
+mobius loop MOB-123           # Runs execute in a loop until done
+```
+
+The loop handles iteration — each invocation picks up the next unblocked sub-task automatically.
+
+### Verify
+
+Multi-agent review against the original acceptance criteria. Spawns parallel review agents covering bugs, code quality, performance, security, and test coverage.
+
+```bash
+claude "/verify MOB-123"
+```
+
+If verification fails, affected sub-tasks are reopened with feedback and the loop continues with rework.
+
+---
+
+## Parallel Execution
+
+Mobius can run **up to 10 concurrent agents**, each in its own git worktree. The dependency graph determines which sub-tasks are ready — tasks whose blockers are all complete execute simultaneously.
+
+```bash
+mobius loop MOB-123                   # Parallel (uses config default)
+mobius loop MOB-123 --parallel=5      # 5 concurrent agents
+mobius MOB-123 --sequential           # One at a time
+```
+
+Configure the default in `mobius.config.yaml`:
+
+```yaml
+execution:
+  max_parallel_agents: 3              # 1–10 concurrent agents
+  worktree_path: "../<repo>-worktrees/"
+  cleanup_on_success: true            # Remove worktree after completion
+```
+
+Or via environment variables:
+
+```bash
+export MOBIUS_MAX_PARALLEL_AGENTS=5
+export MOBIUS_WORKTREE_PATH="../worktrees/"
+```
+
+Each agent independently implements, verifies, commits, and pushes its sub-task. The loop monitors progress and feeds newly unblocked tasks to available agents.
+
+---
+
+## Shell Shortcuts
+
+Source `scripts/shortcuts.sh` to get single-letter commands for the full workflow:
+
+```bash
+source scripts/shortcuts.sh     # Or add to .bashrc/.zshrc
+```
+
+| Command | Action | Equivalent |
+|---------|--------|------------|
+| `md` | Define a new issue | `claude "/define $MOBIUS_TASK_ID"` |
+| `mr` | Refine into sub-tasks | `claude "/refine $MOBIUS_TASK_ID"` |
+| `me` | Execute sub-tasks | `mobius $MOBIUS_TASK_ID` |
+| `ms` | Submit PR | `mobius submit $MOBIUS_TASK_ID` |
+
+All commands use `MOBIUS_TASK_ID` from your shell environment. If unset, you'll be prompted to enter it.
+
+```bash
+md                    # Define issue → sets MOBIUS_TASK_ID
+mr                    # Refine into sub-tasks
+me                    # Execute (default parallelism)
+me --parallel=3       # Execute with 3 agents
+ms                    # Submit PR
+```
+
+---
