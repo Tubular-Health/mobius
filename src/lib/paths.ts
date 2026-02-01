@@ -121,6 +121,16 @@ export function getBundledCommandsDir(): string {
   return join(getPackageRoot(), '.claude', 'commands');
 }
 
+/** Bundled shortcuts script path (scripts/shortcuts.sh in package) */
+export function getBundledShortcutsPath(): string {
+  return join(getPackageRoot(), 'scripts', 'shortcuts.sh');
+}
+
+/** Installed shortcuts script path (~/.config/mobius/shortcuts.sh) */
+export function getShortcutsInstallPath(): string {
+  return join(getGlobalConfigDir(), 'shortcuts.sh');
+}
+
 /**
  * Get default config template path
  */

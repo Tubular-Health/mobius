@@ -13,6 +13,7 @@ import { push } from '../commands/push.js';
 import { run } from '../commands/run.js';
 import { setId } from '../commands/set-id.js';
 import { setup } from '../commands/setup.js';
+import { shortcuts } from '../commands/shortcuts.js';
 import { submit } from '../commands/submit.js';
 import { tree } from '../commands/tree.js';
 import type { Backend, Model } from '../types.js';
@@ -32,9 +33,23 @@ program
   .command('setup')
   .description('Interactive setup wizard')
   .option('-u, --update-skills', 'Update skills/commands only (skip config wizard)')
+  .option('--update-shortcuts', 'Update shortcuts script only (skip config wizard)')
   .option('-i, --install', 'Auto-install CLI tools with confirmation')
-  .action(async (options: { updateSkills?: boolean; install?: boolean }) => {
-    await setup({ updateSkills: options.updateSkills, install: options.install });
+  .action(
+    async (options: { updateSkills?: boolean; updateShortcuts?: boolean; install?: boolean }) => {
+      await setup({
+        updateSkills: options.updateSkills,
+        updateShortcuts: options.updateShortcuts,
+        install: options.install,
+      });
+    }
+  );
+
+program
+  .command('shortcuts')
+  .description('Install shortcut scripts (md/mr/me/ms)')
+  .action(async () => {
+    await shortcuts();
   });
 
 program
@@ -221,6 +236,7 @@ program
     if (
       [
         'setup',
+        'shortcuts',
         'doctor',
         'config',
         'tree',
