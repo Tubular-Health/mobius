@@ -21,31 +21,29 @@
 #   ms                    # Submit PR
 
 task() {
-  if [ -z "${$MOBIUS_TASK_ID:-}" ]; then
+  if [ -z "${MOBIUS_TASK_ID:-}" ]; then
     printf "Enter issue ID: "
     read -r issue_id
     export MOBIUS_TASK_ID="$issue_id"
   fi
 }
-  
-}
 
 md() {
-  task()
+  task
   claude "/define $MOBIUS_TASK_ID"
 }
 
 mr() {
-  task()
+  task
   claude "/refine $MOBIUS_TASK_ID"
 }
 
 me() {
-  task()
+  task
   mobius "$MOBIUS_TASK_ID" "$@"
 }
 
 ms() {
-  task()
+  task
   mobius submit "$MOBIUS_TASK_ID" "$@"
 }
