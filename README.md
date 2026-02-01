@@ -57,7 +57,7 @@ Most AI coding tools feed entire codebases into a single context window. Mobius 
 
 ## Quick Start
 
-### Local mode (no account needed)
+### Local mode — no account needed
 
 Get started in under a minute with zero external dependencies:
 
@@ -72,7 +72,7 @@ During setup, select **local** as your backend. Then define your first issue:
 claude "/define"
 ```
 
-Mobius will walk you through creating a well-structured issue, break it into sub-tasks, and execute them — all stored locally in `.mobius/`.
+Mobius walks you through creating a well-structured issue, breaks it into sub-tasks, and executes them. All state is stored locally in `.mobius/`.
 
 ### With Linear or Jira
 
@@ -487,3 +487,121 @@ mobius set-id ABC-123                # Set current task ID
 ```
 
 ---
+
+## Troubleshooting
+
+<details>
+<summary><strong>Claude CLI not found</strong></summary>
+
+The `claude` command must be available on your PATH. Install Claude Code from [claude.ai/code](https://claude.ai/code) and verify:
+
+```bash
+claude --version
+```
+
+</details>
+
+<details>
+<summary><strong>Git not configured</strong></summary>
+
+Ensure your repository has a remote configured:
+
+```bash
+git remote -v
+```
+
+If no remote is listed, add one:
+
+```bash
+git remote add origin <your-repo-url>
+```
+
+</details>
+
+<details>
+<summary><strong>tmux not found</strong></summary>
+
+Parallel execution requires tmux. Install it for your platform:
+
+```bash
+# macOS
+brew install tmux
+
+# Ubuntu/Debian
+sudo apt install tmux
+
+# Fedora
+sudo dnf install tmux
+```
+
+If you cannot install tmux, use sequential mode:
+
+```bash
+mobius loop ABC-123 --sequential
+```
+
+</details>
+
+<details>
+<summary><strong>Worktree already exists</strong></summary>
+
+If a previous run was interrupted, stale worktrees may remain. Clean them up:
+
+```bash
+git worktree list                    # List active worktrees
+git worktree remove <path>           # Remove a specific worktree
+git worktree prune                   # Remove stale worktree references
+```
+
+</details>
+
+<details>
+<summary><strong>linearis not found</strong></summary>
+
+The Linear backend requires the `linearis` CLI:
+
+```bash
+npm install -g linearis
+```
+
+</details>
+
+<details>
+<summary><strong>acli not found</strong></summary>
+
+The Jira backend requires the Atlassian CLI:
+
+```bash
+npm install -g acli
+```
+
+</details>
+
+<details>
+<summary><strong>Docker sandbox fails</strong></summary>
+
+Verify Docker is running:
+
+```bash
+docker info
+```
+
+If Docker is unavailable or unnecessary, bypass the sandbox:
+
+```bash
+mobius loop ABC-123 --no-sandbox
+```
+
+</details>
+
+---
+
+<div align="center">
+
+**MIT License** — see [LICENSE](LICENSE) for details.
+
+```bash
+npm install -g mobius-ai && mobius setup
+```
+
+</div>
