@@ -284,3 +284,206 @@ ms                    # Submit PR
 ```
 
 ---
+
+## Backend Setup
+
+Mobius supports three backends. Choose the one that fits your workflow.
+
+### Local
+
+No external tools or accounts required. Issues are stored as JSON files in `.mobius/` within your repository.
+
+```bash
+mobius setup    # Select "local" when prompted
+```
+
+That's it. Start defining issues immediately with `claude "/define"`.
+
+<details>
+<summary><strong>Linear</strong></summary>
+
+#### 1. Install the CLI
+
+```bash
+npm install -g linearis
+```
+
+#### 2. Set your API key
+
+```bash
+export LINEAR_API_KEY=lin_api_xxxxxxxx
+```
+
+Generate a key at **Settings > API > Personal API Keys** in Linear.
+
+#### 3. Configure Mobius
+
+```bash
+mobius setup    # Select "linear" when prompted
+```
+
+Or set the backend manually in `mobius.config.yaml`:
+
+```yaml
+backend: linear
+linear:
+  team: Engineering
+  project: My Project
+```
+
+</details>
+
+<details>
+<summary><strong>Jira</strong></summary>
+
+#### 1. Install the CLI
+
+```bash
+npm install -g acli
+```
+
+#### 2. Set your credentials
+
+```bash
+export JIRA_API_TOKEN=your_api_token
+export JIRA_EMAIL=you@company.com
+```
+
+Generate a token at **Atlassian Account > Security > API tokens**.
+
+#### 3. Configure Mobius
+
+```bash
+mobius setup    # Select "jira" when prompted
+```
+
+Or set the backend manually in `mobius.config.yaml`:
+
+```yaml
+backend: jira
+jira:
+  base_url: https://yourcompany.atlassian.net
+  project_key: PROJ
+```
+
+</details>
+
+---
+
+## Configuration
+
+Mobius reads configuration from `mobius.config.yaml` in your project root.
+
+```yaml
+backend: local                        # linear | jira | local
+
+execution:
+  delay_seconds: 3                    # Pause between loop iterations
+  max_iterations: 50                  # 0 = unlimited
+  model: opus                         # opus | sonnet | haiku
+  sandbox: true                       # Docker sandbox for safety
+  max_parallel_agents: 3              # 1-10 concurrent agents
+  auto_submit: true                   # Create PR after loop completes
+  worktree_path: "../<repo>-worktrees/"
+  cleanup_on_success: true            # Remove worktrees after completion
+  base_branch: "main"
+```
+
+### Environment variable overrides
+
+Any config value can be overridden with an environment variable:
+
+```bash
+export MOBIUS_BACKEND=linear
+export MOBIUS_MAX_PARALLEL_AGENTS=5
+export MOBIUS_MODEL=sonnet
+export MOBIUS_SANDBOX=false
+```
+
+### Manage configuration
+
+```bash
+mobius config          # Display current configuration
+mobius config --edit   # Open config in your editor
+```
+
+---
+
+## Requirements
+
+| Dependency | Required | Notes |
+|---|---|---|
+| **Node.js 18+** | Yes | Runtime |
+| **Claude Code CLI** | Yes | `claude` must be available on PATH |
+| **Git** | Yes | Version control and worktree support |
+| **linearis** | Linear only | `npm install -g linearis` |
+| **acli** | Jira only | `npm install -g acli` |
+| **tmux** | Optional | Required for parallel execution; use `--sequential` as fallback |
+| **Docker** | Optional | Required for sandbox mode; use `--no-sandbox` to bypass |
+
+### Environment variables
+
+| Variable | Backend | Purpose |
+|---|---|---|
+| `LINEAR_API_KEY` | Linear | API authentication |
+| `JIRA_API_TOKEN` | Jira | API authentication |
+| `JIRA_EMAIL` | Jira | Account email for API requests |
+
+Run `mobius doctor` to verify all requirements are met.
+
+---
+
+## Comparison
+
+| Feature | Mobius | Cursor | Copilot Workspace | Devin | Cline | Aider |
+|---|---|---|---|---|---|---|
+| **Parallel agents** | Up to 10 | No | No | No | No | No |
+| **Issue tracker integration** | Linear, Jira, Local | No | GitHub Issues | No | No | No |
+| **Sub-task decomposition** | Automatic with dependency graph | No | No | No | No | No |
+| **Verification gates** | Typecheck + tests + lint per sub-task | No | No | Partial | No | No |
+| **Git worktree isolation** | Yes | No | No | No | No | No |
+| **Resume on failure** | From last successful sub-task | No | No | Partial | No | No |
+
+**Cursor** is an AI code editor focused on single-file edits within a GUI. It lacks issue tracking, parallel execution, and structured decomposition.
+
+**GitHub Copilot Workspace** generates PR-level code suggestions from issues but does not run an autonomous execution loop or decompose work into independent sub-tasks.
+
+**Devin** runs a single autonomous agent in a cloud sandbox. It does not support parallel agents, team-visible sub-task tracking, or local-first state.
+
+**Cline** is a VS Code extension for chat-based coding. It does not provide structured workflows, verification gates, or issue tracker integration.
+
+**Aider** is a CLI pair-programming tool. It excels at interactive code changes but does not integrate with issue trackers, run parallel agents, or decompose tasks with dependency graphs.
+
+---
+
+## CLI Reference
+
+```bash
+# Execution
+mobius loop ABC-123                  # Parallel execution (default)
+mobius loop ABC-123 --parallel=5     # Override max agents
+mobius ABC-123                       # Alias for parallel loop
+mobius ABC-123 --sequential          # Sequential execution
+mobius ABC-123 --no-sandbox          # Bypass Docker sandbox
+mobius ABC-123 --model=sonnet        # Use specific model
+
+# PR and submission
+mobius submit ABC-123                # Create pull request
+mobius submit ABC-123 --draft        # Create draft PR
+mobius submit ABC-123 --no-submit    # Skip auto-submit
+
+# Setup and diagnostics
+mobius setup                         # Interactive setup wizard
+mobius config                        # Show configuration
+mobius config --edit                 # Edit configuration
+mobius doctor                        # Check requirements
+mobius shortcuts                     # Install shell shortcuts
+
+# Context management
+mobius tree ABC-123                  # Display sub-task dependency tree
+mobius pull ABC-123                  # Fetch fresh context from backend
+mobius push ABC-123                  # Push local changes to backend
+mobius set-id ABC-123                # Set current task ID
+```
+
+---
