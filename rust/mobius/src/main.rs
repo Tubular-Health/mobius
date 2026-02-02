@@ -4,6 +4,7 @@ pub mod executor;
 pub mod git_lock;
 pub mod jira;
 pub mod local_state;
+pub mod loop_command;
 pub mod mermaid_renderer;
 pub mod tmux;
 pub mod tracker;
@@ -315,7 +316,34 @@ fn main() {
             Command::Clean { .. } => todo!("clean command"),
             Command::Tree { .. } => todo!("tree command"),
             Command::Run { .. } => todo!("run command"),
-            Command::Loop { .. } => todo!("loop command"),
+            Command::Loop {
+                task_id,
+                no_sandbox,
+                local,
+                backend,
+                model,
+                parallel,
+                max_iterations,
+                fresh,
+                debug,
+                no_submit,
+            } => {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                if let Err(e) = rt.block_on(loop_command::run_loop(loop_command::LoopOptions {
+                    task_id,
+                    no_sandbox: no_sandbox || local,
+                    backend,
+                    model,
+                    parallel,
+                    max_iterations,
+                    fresh,
+                    debug,
+                    no_submit,
+                })) {
+                    eprintln!("Loop failed: {e}");
+                    std::process::exit(1);
+                }
+            }
             Command::Submit { .. } => todo!("submit command"),
             Command::Push { .. } => todo!("push command"),
             Command::Pull { .. } => todo!("pull command"),
@@ -363,8 +391,23 @@ fn main() {
             }
         },
         None => {
-            if let Some(_task_id) = cli.task_id {
-                todo!("default command: auto-route to loop+TUI")
+            if let Some(task_id) = cli.task_id {
+                // Auto-route: `mobius <task_id>` behaves like `mobius loop <task_id>`
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                if let Err(e) = rt.block_on(loop_command::run_loop(loop_command::LoopOptions {
+                    task_id,
+                    no_sandbox: cli.no_sandbox || cli.local,
+                    backend: cli.backend,
+                    model: cli.model,
+                    parallel: cli.parallel,
+                    max_iterations: cli.max_iterations,
+                    fresh: cli.fresh,
+                    debug: cli.debug,
+                    no_submit: cli.no_submit,
+                })) {
+                    eprintln!("Loop failed: {e}");
+                    std::process::exit(1);
+                }
             } else {
                 // No command and no task ID - show help
                 use clap::CommandFactory;
