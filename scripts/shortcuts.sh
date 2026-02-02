@@ -12,6 +12,8 @@
 #   mr          - Refine the current issue into sub-tasks
 #   me [args]   - Execute sub-tasks for the current issue
 #   ms [args]   - Submit/PR the current issue
+#   ml          - List all local issues
+#   mc [args]   - Clean completed issues from local storage
 #
 # Workflow:
 #   md                    # Define issue, sets MOBIUS_TASK_ID
@@ -46,4 +48,12 @@ me() {
 ms() {
   task
   mobius submit "$MOBIUS_TASK_ID" "$@"
+}
+
+ml() {
+  mobius list
+}
+
+mc() {
+  mobius clean "$@"
 }
