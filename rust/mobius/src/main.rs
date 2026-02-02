@@ -1,6 +1,9 @@
+pub mod git_lock;
 pub mod jira;
 pub mod local_state;
+pub mod tmux;
 pub mod types;
+pub mod worktree;
 
 use clap::{Parser, Subcommand};
 
