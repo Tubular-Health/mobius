@@ -12,10 +12,15 @@ pub struct ParentIssueContext {
     pub id: String,
     pub identifier: String,
     pub title: String,
+    #[serde(default)]
     pub description: String,
+    #[serde(default)]
     pub git_branch_name: String,
+    #[serde(alias = "state")]
     pub status: String,
+    #[serde(default)]
     pub labels: Vec<String>,
+    #[serde(default)]
     pub url: String,
 }
 
