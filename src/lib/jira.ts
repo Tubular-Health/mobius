@@ -110,6 +110,36 @@ export async function fetchJiraIssue(taskId: string): Promise<ParentIssue | null
 }
 
 /**
+ * Fetch the current status name for a Jira issue.
+ *
+ * Used by the `clean` command to verify backend completion status.
+ *
+ * @param issueIdOrKey - The issue key (e.g., "PROJ-123") or ID
+ * @returns The status name string (e.g., "Done", "Closed", "In Progress") or null on failure
+ */
+export async function fetchJiraIssueStatus(issueIdOrKey: string): Promise<string | null> {
+  const client = getJiraClient();
+  if (!client) {
+    return null;
+  }
+
+  try {
+    const issue = await client.issues.getIssue({
+      issueIdOrKey,
+    });
+
+    return (issue.fields?.status as { name?: string })?.name ?? null;
+  } catch (error) {
+    console.error(
+      chalk.gray(
+        `Failed to fetch Jira issue status: ${error instanceof Error ? error.message : String(error)}`
+      )
+    );
+    return null;
+  }
+}
+
+/**
  * Fetch Jira sub-tasks (children) of a parent issue
  *
  * In Jira, sub-tasks can be:
