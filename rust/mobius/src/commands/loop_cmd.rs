@@ -135,11 +135,15 @@ pub fn run(
     }
     let parent_issue = parent_issue.unwrap();
 
+    // Derive branch name with fallback when Linear/backend doesn't provide one
+    let branch_name = if parent_issue.git_branch_name.is_empty() {
+        format!("feat/{}", task_id.to_lowercase())
+    } else {
+        parent_issue.git_branch_name.clone()
+    };
+
     println!("{}", format!("Issue: {}", parent_issue.title).dimmed());
-    println!(
-        "{}",
-        format!("Branch: {}", parent_issue.git_branch_name).dimmed()
-    );
+    println!("{}", format!("Branch: {}", branch_name).dimmed());
 
     // Create or resume worktree
     let worktree_config = WorktreeConfig {
@@ -148,7 +152,7 @@ pub fn run(
     };
     let worktree_info = rt.block_on(create_worktree(
         task_id,
-        &parent_issue.git_branch_name,
+        &branch_name,
         &worktree_config,
     ))?;
 
