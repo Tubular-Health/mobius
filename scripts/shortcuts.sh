@@ -51,7 +51,12 @@ ms() {
 }
 
 ml() {
-  mobius list
+  local selected
+  selected=$(mobius list)
+  if [ -n "$selected" ]; then
+    export MOBIUS_TASK_ID="$selected"
+    echo "MOBIUS_TASK_ID=$selected"
+  fi
 }
 
 mc() {

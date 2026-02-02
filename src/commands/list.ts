@@ -19,16 +19,16 @@ export async function list(): Promise<void> {
   try {
     entries = readdirSync(issuesPath, { withFileTypes: true });
   } catch {
-    console.log(chalk.yellow('No local issues found.'));
-    console.log(chalk.gray('Run `mobius refine <issue-id>` to create local issue state.'));
+    console.error(chalk.yellow('No local issues found.'));
+    console.error(chalk.gray('Run `mobius refine <issue-id>` to create local issue state.'));
     return;
   }
 
   const dirs = entries.filter((e) => e.isDirectory());
 
   if (dirs.length === 0) {
-    console.log(chalk.yellow('No local issues found.'));
-    console.log(chalk.gray('Run `mobius refine <issue-id>` to create local issue state.'));
+    console.error(chalk.yellow('No local issues found.'));
+    console.error(chalk.gray('Run `mobius refine <issue-id>` to create local issue state.'));
     return;
   }
 
@@ -51,15 +51,15 @@ export async function list(): Promise<void> {
   }
 
   if (choices.length === 0) {
-    console.log(chalk.yellow('No valid local issues found.'));
-    console.log(chalk.gray('Issue directories exist but parent specs could not be read.'));
+    console.error(chalk.yellow('No valid local issues found.'));
+    console.error(chalk.gray('Issue directories exist but parent specs could not be read.'));
     return;
   }
 
-  const selected = await select({
-    message: 'Select an issue:',
-    choices,
-  });
+  const selected = await select(
+    { message: 'Select an issue:', choices },
+    { output: process.stderr },
+  );
 
   console.log(selected);
 }
