@@ -15,7 +15,7 @@ export async function shortcuts(): Promise<void> {
 
   // Prompt to add source line to shell rc file
   const addSourceLine = await confirm({
-    message: 'Add source line to your shell rc file? (enables md/mr/me/ms shortcuts)',
+    message: 'Add source line to your shell rc file? (enables md/mr/me/ms/ml/mc shortcuts)',
     default: true,
   });
 
@@ -44,5 +44,7 @@ export async function shortcuts(): Promise<void> {
   console.log(`  ${chalk.cyan('mr')}  - Refine the current issue into sub-tasks`);
   console.log(`  ${chalk.cyan('me')}  - Execute sub-tasks for the current issue`);
   console.log(`  ${chalk.cyan('ms')}  - Submit/PR the current issue`);
+  console.log(`  ${chalk.cyan('ml')}  - List all local issues`);
+  console.log(`  ${chalk.cyan('mc')}  - Clean completed issues from local storage`);
   console.log('');
 }
