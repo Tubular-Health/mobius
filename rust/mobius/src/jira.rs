@@ -11,48 +11,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
-// ---------------------------------------------------------------------------
-// Types used by the Jira module (will move to types/ when that module exists)
-// ---------------------------------------------------------------------------
-
-/// A parent issue fetched from the backend.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParentIssue {
-    pub id: String,
-    pub identifier: String,
-    pub title: String,
-    #[serde(rename = "gitBranchName")]
-    pub git_branch_name: String,
-}
-
-/// A relation reference (blocker / blocked).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Relation {
-    pub id: String,
-    pub identifier: String,
-}
-
-/// Issue relations.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Relations {
-    #[serde(default, rename = "blockedBy")]
-    pub blocked_by: Vec<Relation>,
-    #[serde(default)]
-    pub blocks: Vec<Relation>,
-}
-
-/// An issue in the "LinearIssue" shape used by the task graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LinearIssue {
-    pub id: String,
-    pub identifier: String,
-    pub title: String,
-    pub status: String,
-    #[serde(rename = "gitBranchName")]
-    pub git_branch_name: Option<String>,
-    #[serde(default)]
-    pub relations: Option<Relations>,
-}
+use crate::types::task_graph::{LinearIssue, ParentIssue, Relation, Relations};
 
 /// Options for creating a Jira issue.
 #[derive(Debug, Clone)]
@@ -422,7 +381,7 @@ impl JiraClient {
                         .and_then(|f| f.status.as_ref())
                         .and_then(|s| s.name.clone())
                         .unwrap_or_else(|| "To Do".to_string()),
-                    git_branch_name: Some(branch_name),
+                    git_branch_name: branch_name,
                     relations: Some(Relations {
                         blocked_by,
                         blocks: Vec::new(),

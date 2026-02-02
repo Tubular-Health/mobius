@@ -130,12 +130,34 @@ fn update_parent_status_to_review(task_id: &str, backend: &Backend) {
 
     match backend {
         Backend::Linear => {
-            // Linear status update would require async context
-            // For now, log that it would be updated
-            println!(
-                "{}",
-                format!("Note: Update {} to '{}' via Linear API", task_id, review_status).dimmed()
-            );
+            let rt = tokio::runtime::Runtime::new().ok();
+            if let Some(rt) = rt {
+                rt.block_on(async {
+                    if let Ok(client) = crate::linear::LinearClient::new() {
+                        match client
+                            .update_linear_issue_status(task_id, review_status)
+                            .await
+                        {
+                            Ok(()) => println!(
+                                "{}",
+                                format!(
+                                    "✓ Updated {} status to \"{}\"",
+                                    task_id, review_status
+                                )
+                                .green()
+                            ),
+                            Err(_) => eprintln!(
+                                "{}",
+                                format!(
+                                    "⚠ Could not update {} status to \"{}\"",
+                                    task_id, review_status
+                                )
+                                .yellow()
+                            ),
+                        }
+                    }
+                });
+            }
         }
         Backend::Jira => {
             let rt = tokio::runtime::Runtime::new().ok();

@@ -4,6 +4,7 @@ pub mod context;
 pub mod executor;
 pub mod git_lock;
 pub mod jira;
+pub mod linear;
 pub mod local_state;
 pub mod loop_command;
 pub mod mermaid_renderer;
@@ -211,6 +212,10 @@ enum Command {
         /// Skip automatic PR submission after successful completion
         #[arg(long)]
         no_submit: bool,
+
+        /// Disable TUI dashboard (use plain text output)
+        #[arg(long)]
+        no_tui: bool,
     },
 
     /// Create a pull request (auto-detects issue from branch name if not specified)
@@ -391,6 +396,7 @@ fn main() {
                 fresh,
                 debug,
                 no_submit,
+                no_tui,
             } => {
                 if let Err(e) = commands::loop_cmd::run(
                     &task_id,
@@ -402,6 +408,7 @@ fn main() {
                     fresh,
                     debug.as_ref().map(|d| d.as_deref()),
                     no_submit,
+                    no_tui,
                 ) {
                     eprintln!("Loop error: {}", e);
                     std::process::exit(1);
@@ -526,6 +533,7 @@ fn main() {
                         cli.fresh,
                         cli.debug.as_ref().map(|d| d.as_deref()),
                         cli.no_submit,
+                        cli.no_tui,
                     ) {
                         eprintln!("Loop error: {}", e);
                         std::process::exit(1);

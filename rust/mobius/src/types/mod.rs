@@ -19,4 +19,4 @@ pub use enums::{
     Backend, BuildSystem, DebugEventType, DebugVerbosity, Model, PendingUpdateType, Platform,
     ProjectType, SkillOutputStatus, TaskStatus,
 };
-pub use task_graph::{GraphStats, LinearIssue, Relations, SubTask, TaskGraph};
+pub use task_graph::{GraphStats, LinearIssue, ParentIssue, Relation, Relations, SubTask, TaskGraph};

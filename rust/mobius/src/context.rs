@@ -272,9 +272,51 @@ pub fn generate_context(
     // For local or as fallback, read from local state.
     let parent_context = match backend {
         Backend::Local => read_parent_spec(parent_identifier),
-        Backend::Linear | Backend::Jira => {
-            // API fetching would go here; for now fall back to local cache
-            read_parent_spec(parent_identifier)
+        Backend::Linear => {
+            let rt = tokio::runtime::Runtime::new().ok();
+            let fetched = rt.and_then(|rt| {
+                rt.block_on(async {
+                    let client = crate::linear::LinearClient::new().ok()?;
+                    let issue = client
+                        .fetch_linear_issue(parent_identifier)
+                        .await
+                        .ok()?;
+                    Some(crate::types::context::ParentIssueContext {
+                        id: issue.id,
+                        identifier: issue.identifier,
+                        title: issue.title,
+                        status: String::new(),
+                        git_branch_name: issue.git_branch_name,
+                        description: String::new(),
+                        labels: vec![],
+                        url: String::new(),
+                    })
+                })
+            });
+            fetched.or_else(|| read_parent_spec(parent_identifier))
+        }
+        Backend::Jira => {
+            let rt = tokio::runtime::Runtime::new().ok();
+            let fetched = rt.and_then(|rt| {
+                rt.block_on(async {
+                    let client = crate::jira::JiraClient::new().ok()?;
+                    let issue = client
+                        .fetch_jira_issue(parent_identifier)
+                        .await
+                        .ok()?;
+                    Some(crate::types::context::ParentIssueContext {
+                        id: issue.id,
+                        identifier: issue.identifier,
+                        title: issue.title,
+                        status: String::new(),
+                        git_branch_name: issue.git_branch_name,
+                        description: String::new(),
+                        labels: vec![],
+                        url: String::new(),
+                    })
+                })
+            });
+            fetched.or_else(|| read_parent_spec(parent_identifier))
         }
     };
 

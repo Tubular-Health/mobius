@@ -93,10 +93,12 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
                         Err(_) => None,
                     }
                 }),
-                Backend::Linear => {
-                    // Linear status check would go here; fall back to local
-                    None
-                }
+                Backend::Linear => rt.block_on(async {
+                    match crate::linear::LinearClient::new() {
+                        Ok(client) => client.fetch_linear_issue_status(issue_id).await.ok(),
+                        Err(_) => None,
+                    }
+                }),
                 Backend::Local => None,
             };
 

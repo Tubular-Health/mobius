@@ -16,12 +16,36 @@ pub struct ParentIssueContext {
     pub description: String,
     #[serde(default)]
     pub git_branch_name: String,
-    #[serde(alias = "state")]
+    #[serde(alias = "state", deserialize_with = "deserialize_status_field")]
     pub status: String,
     #[serde(default)]
     pub labels: Vec<String>,
     #[serde(default)]
     pub url: String,
+}
+
+/// Deserialize a status field that can be either a plain string or a Linear-style
+/// object with a `name` field (e.g. `{"id": "...", "name": "In Progress"}`).
+fn deserialize_status_field<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct StatusObject {
+        name: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrObject {
+        Str(String),
+        Obj(StatusObject),
+    }
+
+    match StringOrObject::deserialize(deserializer)? {
+        StringOrObject::Str(s) => Ok(s),
+        StringOrObject::Obj(obj) => Ok(obj.name),
+    }
 }
 
 /// Reference to a related issue (blocker or blocked)
@@ -476,6 +500,34 @@ mod tests {
         let parsed: ParentIssueContext = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.identifier, "MOB-100");
         assert_eq!(parsed.git_branch_name, "feature/mob-100");
+    }
+
+    #[test]
+    fn test_parent_issue_context_linear_state_object() {
+        // Linear API returns state as an object with id and name
+        let json = serde_json::json!({
+            "id": "cc04d503-e7f5-48f8-b6fd-9ec198ee6e56",
+            "identifier": "TUB-292",
+            "title": "Remote active sessions not visible on other team devices",
+            "description": "## Summary\nSome description",
+            "state": {
+                "id": "7ca632a3-9c6b-4ccc-968a-d7da504b1ce4",
+                "name": "In Progress"
+            },
+            "team": {
+                "id": "27d43416-a740-49ae-bdd9-e96c36abc610",
+                "key": "TUB",
+                "name": "Tubular"
+            },
+            "priority": 2,
+            "labels": ["Bug"],
+            "url": "https://linear.app/tubular/issue/TUB-292"
+        });
+
+        let parsed: ParentIssueContext = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.identifier, "TUB-292");
+        assert_eq!(parsed.status, "In Progress");
+        assert_eq!(parsed.labels, vec!["Bug"]);
     }
 
     #[test]
