@@ -1,3 +1,4 @@
+pub mod commands;
 pub mod config;
 pub mod context;
 pub mod executor;
@@ -308,18 +309,81 @@ fn main() {
 
     match cli.command {
         Some(command) => match command {
-            Command::Setup { .. } => todo!("setup command"),
-            Command::Shortcuts => todo!("shortcuts command"),
-            Command::Doctor => todo!("doctor command"),
-            Command::Config { .. } => todo!("config command"),
-            Command::List { .. } => todo!("list command"),
-            Command::Clean { .. } => todo!("clean command"),
-            Command::Tree { .. } => todo!("tree command"),
-            Command::Run { .. } => todo!("run command"),
+            Command::Setup {
+                update_skills,
+                update_shortcuts,
+                install,
+            } => {
+                if let Err(e) = commands::setup::run(update_skills, update_shortcuts, install) {
+                    eprintln!("Setup error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::Shortcuts => {
+                if let Err(e) = commands::shortcuts::run() {
+                    eprintln!("Shortcuts error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::Doctor => {
+                if let Err(e) = commands::doctor::run() {
+                    eprintln!("Doctor error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::Config { edit } => {
+                if let Err(e) = commands::config::run(edit) {
+                    eprintln!("Config error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::List { backend } => {
+                if let Err(e) = commands::list::run(backend.as_deref()) {
+                    eprintln!("List error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::Clean { dry_run, backend } => {
+                if let Err(e) = commands::clean::run(dry_run, backend.as_deref()) {
+                    eprintln!("Clean error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::Tree {
+                task_id,
+                backend,
+                mermaid,
+            } => {
+                if let Err(e) = commands::tree::run(&task_id, backend.as_deref(), mermaid) {
+                    eprintln!("Tree error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::Run {
+                task_id,
+                max_iterations,
+                no_sandbox,
+                local: _,
+                backend,
+                model,
+                delay,
+            } => {
+                if let Err(e) = commands::run::run(
+                    &task_id,
+                    max_iterations,
+                    no_sandbox,
+                    backend.as_deref(),
+                    model.as_deref(),
+                    delay,
+                ) {
+                    eprintln!("Run error: {}", e);
+                    std::process::exit(1);
+                }
+            }
             Command::Loop {
                 task_id,
-                no_sandbox,
-                local,
+                no_sandbox: _,
+                local: _,
                 backend,
                 model,
                 parallel,
@@ -328,26 +392,75 @@ fn main() {
                 debug,
                 no_submit,
             } => {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                if let Err(e) = rt.block_on(loop_command::run_loop(loop_command::LoopOptions {
-                    task_id,
-                    no_sandbox: no_sandbox || local,
-                    backend,
-                    model,
+                if let Err(e) = commands::loop_cmd::run(
+                    &task_id,
+                    false,
+                    backend.as_deref(),
+                    model.as_deref(),
                     parallel,
                     max_iterations,
                     fresh,
-                    debug,
+                    debug.as_ref().map(|d| d.as_deref()),
                     no_submit,
-                })) {
-                    eprintln!("Loop failed: {e}");
+                ) {
+                    eprintln!("Loop error: {}", e);
                     std::process::exit(1);
                 }
             }
-            Command::Submit { .. } => todo!("submit command"),
-            Command::Push { .. } => todo!("push command"),
-            Command::Pull { .. } => todo!("pull command"),
-            Command::SetId { .. } => todo!("set-id command"),
+            Command::Submit {
+                task_id,
+                backend,
+                model,
+                draft,
+                skip_status_update,
+            } => {
+                if let Err(e) = commands::submit::run(
+                    task_id.as_deref(),
+                    backend.as_deref(),
+                    model.as_deref(),
+                    draft,
+                    skip_status_update,
+                ) {
+                    eprintln!("Submit error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::Push {
+                parent_id,
+                backend,
+                dry_run,
+                all,
+                summary,
+            } => {
+                if let Err(e) = commands::push::run(
+                    parent_id.as_deref(),
+                    backend.as_deref(),
+                    dry_run,
+                    all,
+                    summary,
+                ) {
+                    eprintln!("Push error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::Pull { task_id, backend } => {
+                if let Err(e) = commands::pull::run(task_id.as_deref(), backend.as_deref()) {
+                    eprintln!("Pull error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Command::SetId {
+                task_id,
+                backend,
+                clear,
+            } => {
+                if let Err(e) =
+                    commands::set_id::run(task_id.as_deref(), backend.as_deref(), clear)
+                {
+                    eprintln!("Set-id error: {}", e);
+                    std::process::exit(1);
+                }
+            }
             Command::Tui {
                 task_id,
                 no_legend: _,
@@ -392,21 +505,34 @@ fn main() {
         },
         None => {
             if let Some(task_id) = cli.task_id {
-                // Auto-route: `mobius <task_id>` behaves like `mobius loop <task_id>`
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                if let Err(e) = rt.block_on(loop_command::run_loop(loop_command::LoopOptions {
-                    task_id,
-                    no_sandbox: cli.no_sandbox || cli.local,
-                    backend: cli.backend,
-                    model: cli.model,
-                    parallel: cli.parallel,
-                    max_iterations: cli.max_iterations,
-                    fresh: cli.fresh,
-                    debug: cli.debug,
-                    no_submit: cli.no_submit,
-                })) {
-                    eprintln!("Loop failed: {e}");
-                    std::process::exit(1);
+                // Default command: auto-route to loop or run based on flags
+                if cli.sequential {
+                    if let Err(e) = commands::run::run(
+                        &task_id,
+                        cli.max_iterations,
+                        cli.no_sandbox || cli.local,
+                        cli.backend.as_deref(),
+                        cli.model.as_deref(),
+                        cli.delay,
+                    ) {
+                        eprintln!("Run error: {}", e);
+                        std::process::exit(1);
+                    }
+                } else {
+                    if let Err(e) = commands::loop_cmd::run(
+                        &task_id,
+                        cli.no_sandbox || cli.local,
+                        cli.backend.as_deref(),
+                        cli.model.as_deref(),
+                        cli.parallel,
+                        cli.max_iterations,
+                        cli.fresh,
+                        cli.debug.as_ref().map(|d| d.as_deref()),
+                        cli.no_submit,
+                    ) {
+                        eprintln!("Loop error: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             } else {
                 // No command and no task ID - show help
