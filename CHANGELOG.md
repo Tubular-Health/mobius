@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.7.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.6.0...mobius-ai-v1.7.0) (2026-02-02)
+
+
+### Features
+
+* **cli:** export MOBIUS_TASK_ID on ml selection ([#53](https://github.com/Tubular-Health/mobius/issues/53)) ([d42bd9f](https://github.com/Tubular-Health/mobius/commit/d42bd9ff6df51ceb14a3d4c814c72d5507f11c1d))
+
+
+### Bug Fixes
+
+* **context:** add local backend logic and workspace context tests ([#55](https://github.com/Tubular-Health/mobius/issues/55)) ([3bc9a0d](https://github.com/Tubular-Health/mobius/commit/3bc9a0d7688e8eca1f696c23a74232bef3fc4554))
+
 ## [1.6.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.5.0...mobius-ai-v1.6.0) (2026-02-02)
 
 
