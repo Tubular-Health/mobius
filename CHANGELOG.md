@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.6.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.5.0...mobius-ai-v1.6.0) (2026-02-02)
+
+
+### Features
+
+* **cli:** add list and clean commands with shell shortcuts ([#52](https://github.com/Tubular-Health/mobius/issues/52)) ([62198e3](https://github.com/Tubular-Health/mobius/commit/62198e3a8e6c62407e28606c19c94b9949cb0e7d))
+* **linear:** add fetchLinearIssueStatus function ([c4920ab](https://github.com/Tubular-Health/mobius/commit/c4920ab4f7916f6411b6a5ba53fd555ebf599149))
+* local-first sub-task reading and --no-sandbox flag ([#44](https://github.com/Tubular-Health/mobius/issues/44)) ([db8c475](https://github.com/Tubular-Health/mobius/commit/db8c47502ce0bf33f1343bd5261506dd0b6ee047))
+* **local-state:** implement local-first state management for define/refine/execute lifecycle ([#42](https://github.com/Tubular-Health/mobius/issues/42)) ([d2fd4e7](https://github.com/Tubular-Health/mobius/commit/d2fd4e700009e5a72504fb97c53ed698a65f2cdd))
+* **loop:** add automatic PR submission after successful completion ([#49](https://github.com/Tubular-Health/mobius/issues/49)) ([77ebd4c](https://github.com/Tubular-Health/mobius/commit/77ebd4cfca0cb631c170aec85360685d72a5c5ec))
+* migrate from linear-cli to linearis ([8e14623](https://github.com/Tubular-Health/mobius/commit/8e1462338d17962c08e718b8ee88107d777b7c54))
+* **setup:** add CLI detection and installer for backend tools ([#45](https://github.com/Tubular-Health/mobius/issues/45)) ([31f0e15](https://github.com/Tubular-Health/mobius/commit/31f0e15e36839255364dddf36e13d6ec7a559fc0))
+* **shortcuts:** add shell shorthand functions for define-refine-execute-submit workflow ([#48](https://github.com/Tubular-Health/mobius/issues/48)) ([63e35cf](https://github.com/Tubular-Health/mobius/commit/63e35cfc8db4ba480c7c3aa613e38919e1f4d388))
+* **skills:** replace MCP tool usage with CLI commands in skills and config ([#47](https://github.com/Tubular-Health/mobius/issues/47)) ([4bfce3b](https://github.com/Tubular-Health/mobius/commit/4bfce3b92cb3f0c5eb2fe6f7156144ca535a6656))
+* **verification:** add project detection and build-aware verify skill ([#51](https://github.com/Tubular-Health/mobius/issues/51)) ([ed68501](https://github.com/Tubular-Health/mobius/commit/ed685010cee9178758cccfd64a74e682a9d35bc5))
+
+
+### Bug Fixes
+
+* harden local state handling and broaden ID patterns ([#46](https://github.com/Tubular-Health/mobius/issues/46)) ([1dddbbd](https://github.com/Tubular-Health/mobius/commit/1dddbbd334bd2687fc53180c9a6be132c5d26b7c))
+
+
+### Miscellaneous Chores
+
+* remove .mobius from tracking ([bb6b99a](https://github.com/Tubular-Health/mobius/commit/bb6b99adf1bdd21afc9edfc351f59d2186a75482))
+* update claue permissions ([64193bb](https://github.com/Tubular-Health/mobius/commit/64193bbb34ffc5472a5a21880828358c5d794514))
+
 ## [1.5.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.4.0...mobius-ai-v1.5.0) (2026-01-30)
 
 
