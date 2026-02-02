@@ -2,7 +2,9 @@ pub mod config;
 pub mod git_lock;
 pub mod jira;
 pub mod local_state;
+pub mod mermaid_renderer;
 pub mod tmux;
+pub mod tree_renderer;
 pub mod types;
 pub mod worktree;
 

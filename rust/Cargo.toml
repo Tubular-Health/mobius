@@ -29,3 +29,4 @@ uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "5"
 libc = "0.2"
 tempfile = "3"
+colored = "2"
