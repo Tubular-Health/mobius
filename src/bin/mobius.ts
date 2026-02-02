@@ -72,8 +72,9 @@ program
 program
   .command('list')
   .description('List all local issues with their status')
-  .action(async () => {
-    await list();
+  .option('-b, --backend <backend>', 'Backend: linear, jira, or local')
+  .action(async (options) => {
+    await list({ backend: options.backend });
   });
 
 program

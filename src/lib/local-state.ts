@@ -262,6 +262,29 @@ export function writeSubTaskSpec(issueId: string, task: SubTaskContext): void {
 }
 
 /**
+ * Update just the status field of a parent issue's parent.json file on disk.
+ *
+ * Reads the existing file, patches the status, and writes it back atomically.
+ * Returns false if the file doesn't exist.
+ */
+export function updateParentStatus(issueId: string, status: string): boolean {
+  const filePath = join(getIssuePath(issueId), 'parent.json');
+  if (!existsSync(filePath)) return false;
+
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    const spec = JSON.parse(content) as ParentIssueContext;
+    spec.status = status;
+    const tmpPath = `${filePath}.tmp`;
+    writeFileSync(tmpPath, JSON.stringify(spec, null, 2), 'utf-8');
+    renameSync(tmpPath, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Update just the status field of a sub-task's JSON file on disk.
  *
  * Reads the existing file, patches the status, and writes it back atomically.
@@ -339,15 +362,15 @@ export function readLocalSubTasksAsLinearIssues(issueId: string): LinearIssue[] 
   const issues = tasks.map((task) => {
     // Refine writes blockedBy/blocks as string arrays like ["task-002"],
     // but SubTaskContext expects Array<{id, identifier}>. Handle both.
-    const rawBlockedBy = (task.blockedBy ?? []) as Array<string | { id: string; identifier: string }>;
+    const rawBlockedBy = (task.blockedBy ?? []) as Array<
+      string | { id: string; identifier: string }
+    >;
     const rawBlocks = (task.blocks ?? []) as Array<string | { id: string; identifier: string }>;
 
     const blockedBy = rawBlockedBy.map((b) =>
       typeof b === 'string' ? { id: b, identifier: b } : b
     );
-    const blocks = rawBlocks.map((b) =>
-      typeof b === 'string' ? { id: b, identifier: b } : b
-    );
+    const blocks = rawBlocks.map((b) => (typeof b === 'string' ? { id: b, identifier: b } : b));
 
     return {
       id: task.id,
@@ -363,7 +386,10 @@ export function readLocalSubTasksAsLinearIssues(issueId: string): LinearIssue[] 
   const byId = new Map<string, LinearIssue>();
   for (const issue of issues) {
     const existing = byId.get(issue.id);
-    if (!existing || (STATUS_PRIORITY[issue.status] ?? 0) > (STATUS_PRIORITY[existing.status] ?? 0)) {
+    if (
+      !existing ||
+      (STATUS_PRIORITY[issue.status] ?? 0) > (STATUS_PRIORITY[existing.status] ?? 0)
+    ) {
       byId.set(issue.id, issue);
     }
   }

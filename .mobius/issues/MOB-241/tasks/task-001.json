@@ -1,9 +1,0 @@
-{
-  "id": "task-001",
-  "identifier": "task-001",
-  "title": "Expand LinearConfig and JiraConfig type interfaces",
-  "description": "Add team, project, and default_labels fields to LinearConfig. Add default_labels to JiraConfig. Add validation for new fields in config.ts.",
-  "status": "done",
-  "blockedBy": [],
-  "blocks": [{"id": "task-002", "identifier": "task-002"}]
-}

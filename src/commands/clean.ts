@@ -16,6 +16,7 @@ import { fetchJiraIssueStatus } from '../lib/jira.js';
 import { fetchLinearIssueStatus } from '../lib/linear.js';
 import { getProjectMobiusPath, readParentSpec } from '../lib/local-state.js';
 import { resolvePaths } from '../lib/paths.js';
+import { syncBackendStatuses } from '../lib/status-sync.js';
 import type { Backend } from '../types.js';
 import { BACKEND_ID_PATTERNS } from '../types.js';
 
@@ -51,10 +52,7 @@ function isCompletedStatus(status: string, backend: Backend): boolean {
  * Fetch the current status of an issue from the backend.
  * Returns null for local issues or on API error.
  */
-async function fetchBackendStatus(
-  issueId: string,
-  backend: Backend
-): Promise<string | null> {
+async function fetchBackendStatus(issueId: string, backend: Backend): Promise<string | null> {
   switch (backend) {
     case 'linear':
       return fetchLinearIssueStatus(issueId);
@@ -140,6 +138,23 @@ export async function clean(options: CleanOptions): Promise<void> {
   const config = readConfig(paths.configPath);
   const backend = options.backend ?? config.backend;
 
+  // Sync statuses from backend before scanning
+  const syncSpinner = ora({
+    text: 'Syncing statuses from backend...',
+    color: 'blue',
+  }).start();
+
+  const syncResult = await syncBackendStatuses(backend);
+
+  if (syncResult.synced > 0 || syncResult.failed > 0) {
+    const parts: string[] = [];
+    if (syncResult.synced > 0) parts.push(`${syncResult.synced} synced`);
+    if (syncResult.failed > 0) parts.push(`${syncResult.failed} unreachable`);
+    syncSpinner.succeed(`Status sync: ${parts.join(', ')}`);
+  } else {
+    syncSpinner.succeed('Status sync complete.');
+  }
+
   const spinner = ora({
     text: 'Scanning for completed issues...',
     color: 'blue',
@@ -152,14 +167,18 @@ export async function clean(options: CleanOptions): Promise<void> {
     return;
   }
 
-  spinner.succeed(`Found ${candidates.length} completed issue${candidates.length === 1 ? '' : 's'}:`);
+  spinner.succeed(
+    `Found ${candidates.length} completed issue${candidates.length === 1 ? '' : 's'}:`
+  );
   console.log('');
 
   for (const candidate of candidates) {
     const statusInfo = candidate.backendStatus
       ? `local: ${candidate.localStatus}, backend: ${candidate.backendStatus}`
       : `local: ${candidate.localStatus}`;
-    console.log(`  ${chalk.cyan(candidate.identifier)}  ${candidate.title}  ${chalk.gray(`(${statusInfo})`)}`);
+    console.log(
+      `  ${chalk.cyan(candidate.identifier)}  ${candidate.title}  ${chalk.gray(`(${statusInfo})`)}`
+    );
   }
   console.log('');
 
