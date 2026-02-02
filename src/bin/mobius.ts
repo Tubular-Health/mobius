@@ -5,8 +5,10 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Option, program } from 'commander';
+import { clean } from '../commands/clean.js';
 import { showConfig } from '../commands/config.js';
 import { doctor } from '../commands/doctor.js';
+import { list } from '../commands/list.js';
 import { loop } from '../commands/loop.js';
 import { pull } from '../commands/pull.js';
 import { push } from '../commands/push.js';
@@ -65,6 +67,22 @@ program
   .option('-e, --edit', 'Open config in editor')
   .action(async (options) => {
     await showConfig(options);
+  });
+
+program
+  .command('list')
+  .description('List all local issues with their status')
+  .action(async () => {
+    await list();
+  });
+
+program
+  .command('clean')
+  .description('Remove completed issues from local .mobius/issues/ directory')
+  .option('--dry-run', 'Preview what would be cleaned without deleting')
+  .option('-b, --backend <backend>', 'Backend: linear, jira, or local')
+  .action(async (options) => {
+    await clean(options);
   });
 
 program
@@ -239,6 +257,8 @@ program
         'shortcuts',
         'doctor',
         'config',
+        'list',
+        'clean',
         'tree',
         'run',
         'loop',
