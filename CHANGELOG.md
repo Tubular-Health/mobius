@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.8.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.7.0...mobius-ai-v1.8.0) (2026-02-02)
+
+
+### Features
+
+* **cli:** sync backend statuses before list and clean commands ([#56](https://github.com/Tubular-Health/mobius/issues/56)) ([c8846b6](https://github.com/Tubular-Health/mobius/commit/c8846b6a810d69f3d380159f3b04a81387d81742))
+* **install:** rewrite install.sh for Rust binary distribution ([#62](https://github.com/Tubular-Health/mobius/issues/62)) ([74be3d7](https://github.com/Tubular-Health/mobius/commit/74be3d7b09358dd0e26df1dd5be0ea71da4ae88c))
+* **rust:** implement CLI command orchestrators for all subcommands ([#60](https://github.com/Tubular-Health/mobius/issues/60)) ([dc50ffd](https://github.com/Tubular-Health/mobius/commit/dc50ffdeecbc60fe8fd1510148347aded757ab8e))
+* **rust:** implement loop command orchestrator with parallel execution ([#59](https://github.com/Tubular-Health/mobius/issues/59)) ([dd1a755](https://github.com/Tubular-Health/mobius/commit/dd1a7554c863d67b8dd99e4a84dfe2642facf021))
+* **rust:** implement Rust CLI engine with parallel execution and TUI dashboard ([#58](https://github.com/Tubular-Health/mobius/issues/58)) ([2ea39ed](https://github.com/Tubular-Health/mobius/commit/2ea39ed4cceea4ce3408c7dbb9eae0f4801c2063))
+
+
+### Bug Fixes
+
+* **rust:** add fallback branch name when Linear doesn't provide one ([#61](https://github.com/Tubular-Health/mobius/issues/61)) ([a7b3ee7](https://github.com/Tubular-Health/mobius/commit/a7b3ee7d24e8286d7db52ef13da0bef0e174c5c6))
+* **rust:** surface actual error when fetch_parent_issue fails ([#63](https://github.com/Tubular-Health/mobius/issues/63)) ([9121d35](https://github.com/Tubular-Health/mobius/commit/9121d35648359f9fab1cfba79354252bf23daf4e))
+
+
+### Code Refactoring
+
+* **rust:** remove redundant BackendStatusBox from TUI dashboard ([#64](https://github.com/Tubular-Health/mobius/issues/64)) ([b729e7e](https://github.com/Tubular-Health/mobius/commit/b729e7eb36e5663e27a8ae775b202d411b512bf9))
+
 ## [1.7.0](https://github.com/Tubular-Health/mobius/compare/mobius-ai-v1.6.0...mobius-ai-v1.7.0) (2026-02-02)
 
 
