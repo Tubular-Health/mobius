@@ -4,7 +4,8 @@ use colored::Colorize;
 
 use crate::config::loader::read_config;
 use crate::config::paths::resolve_paths;
-use crate::jira::{JiraClient, ParentIssue};
+use crate::jira::JiraClient;
+use crate::types::task_graph::ParentIssue;
 use crate::local_state::{read_local_subtasks_as_linear_issues, read_parent_spec};
 use crate::mermaid_renderer::render_mermaid_with_title;
 use crate::tree_renderer::render_full_tree_output;
@@ -38,7 +39,7 @@ pub fn run(task_id: &str, backend_override: Option<&str>, mermaid: bool) -> anyh
     }
 
     // Fetch parent issue
-    let parent_issue: Option<ParentIssue> = match backend {
+    let parent_issue: Result<ParentIssue, String> = match backend {
         Backend::Local => {
             let spec = read_parent_spec(task_id);
             spec.map(|s| ParentIssue {
@@ -47,30 +48,54 @@ pub fn run(task_id: &str, backend_override: Option<&str>, mermaid: bool) -> anyh
                 title: s.title,
                 git_branch_name: s.git_branch_name,
             })
+            .ok_or_else(|| format!("No local state found for {}", task_id))
         }
         Backend::Jira => {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
-                match JiraClient::new() {
-                    Ok(client) => client.fetch_jira_issue(task_id).await.ok(),
-                    Err(_) => None,
+                let api_err = match JiraClient::new() {
+                    Ok(client) => match client.fetch_jira_issue(task_id).await {
+                        Ok(issue) => return Ok(issue),
+                        Err(e) => e.to_string(),
+                    },
+                    Err(e) => e.to_string(),
+                };
+                match read_parent_spec(task_id) {
+                    Some(s) => Ok(ParentIssue {
+                        id: s.id,
+                        identifier: s.identifier,
+                        title: s.title,
+                        git_branch_name: s.git_branch_name,
+                    }),
+                    None => Err(api_err),
                 }
             })
         }
         Backend::Linear => {
-            // Linear client not implemented in Rust yet - fall back to local state
-            let spec = read_parent_spec(task_id);
-            spec.map(|s| ParentIssue {
-                id: s.id,
-                identifier: s.identifier,
-                title: s.title,
-                git_branch_name: s.git_branch_name,
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(async {
+                let api_err = match crate::linear::LinearClient::new() {
+                    Ok(client) => match client.fetch_linear_issue(task_id).await {
+                        Ok(issue) => return Ok(issue),
+                        Err(e) => e.to_string(),
+                    },
+                    Err(e) => e.to_string(),
+                };
+                match read_parent_spec(task_id) {
+                    Some(s) => Ok(ParentIssue {
+                        id: s.id,
+                        identifier: s.identifier,
+                        title: s.title,
+                        git_branch_name: s.git_branch_name,
+                    }),
+                    None => Err(api_err),
+                }
             })
         }
     };
 
-    match parent_issue {
-        Some(ref issue) => {
+    let parent_issue = match parent_issue {
+        Ok(issue) => {
             println!(
                 "{} {}: {}",
                 "✓".green(),
@@ -78,14 +103,14 @@ pub fn run(task_id: &str, backend_override: Option<&str>, mermaid: bool) -> anyh
                 issue.title
             );
             println!("  {}", format!("Branch: {}", issue.git_branch_name).dimmed());
+            issue
         }
-        None => {
-            eprintln!("{}", format!("Could not fetch issue {}", task_id).red());
+        Err(cause) => {
+            eprintln!("{}", format!("Error: Could not fetch issue {}", task_id).red());
+            eprintln!("{}", format!("  Cause: {}", cause).red());
             std::process::exit(1);
         }
-    }
-
-    let parent_issue = parent_issue.unwrap();
+    };
 
     // Read sub-tasks from local state
     let sub_tasks = read_local_subtasks_as_linear_issues(task_id);
