@@ -17,6 +17,10 @@ dev:
 typecheck:
     npm run typecheck
 
+# Run Biome linter
+lint:
+    npm run lint
+
 # Run all unit tests
 test *args:
     bun test {{args}}
