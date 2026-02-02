@@ -121,6 +121,32 @@ export async function fetchLinearSubTasks(parentId: string): Promise<LinearIssue
 }
 
 /**
+ * Fetch the current workflow state name for a Linear issue.
+ *
+ * @param identifier - The Linear issue identifier (e.g., "MOB-123")
+ * @returns The status name string (e.g., "Done", "Canceled", "In Progress"), or null if unavailable
+ */
+export async function fetchLinearIssueStatus(identifier: string): Promise<string | null> {
+  const client = getLinearClient();
+  if (!client) {
+    return null;
+  }
+
+  try {
+    const issue = await client.issue(identifier);
+    const state = await issue.state;
+    return state?.name || null;
+  } catch (error) {
+    console.error(
+      chalk.gray(
+        `Failed to fetch issue status: ${error instanceof Error ? error.message : String(error)}`
+      )
+    );
+    return null;
+  }
+}
+
+/**
  * Result type for SDK operations
  */
 export interface LinearOperationResult {
