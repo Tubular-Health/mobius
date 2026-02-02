@@ -1,3 +1,4 @@
+pub mod config;
 pub mod git_lock;
 pub mod jira;
 pub mod local_state;
