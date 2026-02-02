@@ -645,16 +645,7 @@ fn run_with_tui(
     fresh: bool,
     no_submit: bool,
 ) -> anyhow::Result<()> {
-    // 1. Resolve backend (same logic as run())
-    let paths = resolve_paths();
-    let config = read_config(&paths.config_path).unwrap_or_default();
-    let backend: Backend = if let Some(b) = backend_override {
-        b.parse().unwrap_or(config.backend)
-    } else {
-        config.backend
-    };
-
-    // 2. Read local state for TUI display data (cheap, no network/worktree)
+    // 1. Read local state for TUI display data (cheap, no network/worktree)
     let issues = read_local_subtasks_as_linear_issues(task_id);
     if issues.is_empty() {
         anyhow::bail!("No sub-tasks found for {}. Run refine first.", task_id);
@@ -713,9 +704,7 @@ fn run_with_tui(
     crate::tui::dashboard::run_dashboard(
         parent_id,
         parent_title,
-        graph.clone(),
         graph,
-        backend,
         runtime_state_path,
     )?;
 

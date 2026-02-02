@@ -4,6 +4,7 @@ pub mod context;
 pub mod executor;
 pub mod git_lock;
 pub mod jira;
+pub mod linear;
 pub mod local_state;
 pub mod loop_command;
 pub mod mermaid_renderer;
@@ -211,6 +212,10 @@ enum Command {
         /// Skip automatic PR submission after successful completion
         #[arg(long)]
         no_submit: bool,
+
+        /// Disable TUI dashboard (use plain text output)
+        #[arg(long)]
+        no_tui: bool,
     },
 
     /// Create a pull request (auto-detects issue from branch name if not specified)
@@ -391,6 +396,7 @@ fn main() {
                 fresh,
                 debug,
                 no_submit,
+                no_tui,
             } => {
                 if let Err(e) = commands::loop_cmd::run(
                     &task_id,
@@ -402,6 +408,7 @@ fn main() {
                     fresh,
                     debug.as_ref().map(|d| d.as_deref()),
                     no_submit,
+                    no_tui,
                 ) {
                     eprintln!("Loop error: {}", e);
                     std::process::exit(1);
@@ -483,7 +490,6 @@ fn main() {
                 // Read sub-tasks from local state and build graph
                 let issues = local_state::read_local_subtasks_as_linear_issues(&task_id);
                 let graph = types::task_graph::build_task_graph(&task_id, &task_id, &issues);
-                let api_graph = graph.clone();
 
                 // Read parent title
                 let parent_title = local_state::read_parent_spec(&task_id)
@@ -494,8 +500,6 @@ fn main() {
                     task_id,
                     parent_title,
                     graph,
-                    api_graph,
-                    types::enums::Backend::Local,
                     state_path,
                 ) {
                     eprintln!("TUI error: {}", e);
@@ -529,6 +533,7 @@ fn main() {
                         cli.fresh,
                         cli.debug.as_ref().map(|d| d.as_deref()),
                         cli.no_submit,
+                        cli.no_tui,
                     ) {
                         eprintln!("Loop error: {}", e);
                         std::process::exit(1);

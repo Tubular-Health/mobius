@@ -37,6 +37,16 @@ pub struct GraphStats {
     pub in_progress: usize,
 }
 
+/// A parent issue fetched from the backend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParentIssue {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub git_branch_name: String,
+}
+
 /// Linear/Jira issue data structure (subset of what the backend returns)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

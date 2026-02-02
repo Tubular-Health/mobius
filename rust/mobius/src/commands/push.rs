@@ -394,8 +394,11 @@ async fn push_update(update: &serde_json::Value, backend: &Backend) -> anyhow::R
                         .map_err(|e| anyhow::anyhow!("Failed to update Jira status: {}", e))?;
                 }
                 Backend::Linear => {
-                    // Linear API calls would go here
-                    // For now, succeed silently for local IDs
+                    let client = crate::linear::LinearClient::new()?;
+                    client
+                        .update_linear_issue_status(issue_id, new_status)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Failed to update Linear status: {}", e))?;
                 }
                 Backend::Local => {}
             }
@@ -416,7 +419,11 @@ async fn push_update(update: &serde_json::Value, backend: &Backend) -> anyhow::R
                     client.add_jira_comment(issue_id, body).await?;
                 }
                 Backend::Linear => {
-                    // Linear API calls would go here
+                    let client = crate::linear::LinearClient::new()?;
+                    client
+                        .add_linear_comment(issue_id, body)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("Failed to add Linear comment: {}", e))?;
                 }
                 Backend::Local => {}
             }

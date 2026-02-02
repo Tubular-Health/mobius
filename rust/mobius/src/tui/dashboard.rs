@@ -14,12 +14,10 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::Terminal;
 
-use crate::types::enums::Backend;
 use crate::types::task_graph::TaskGraph;
 
 use super::agent_slots::{AgentSlots, AGENT_SLOTS_HEIGHT};
 use super::app::App;
-use super::backend_status::BackendStatusBox;
 use super::debug_panel::{DebugPanel, DEBUG_PANEL_HEIGHT};
 use super::events::{EventHandler, TuiEvent};
 use super::exit_modal::ExitModal;
@@ -33,8 +31,6 @@ pub fn run_dashboard(
     parent_id: String,
     parent_title: String,
     graph: TaskGraph,
-    api_graph: TaskGraph,
-    backend: Backend,
     runtime_state_path: PathBuf,
 ) -> anyhow::Result<()> {
     // Setup terminal
@@ -50,8 +46,6 @@ pub fn run_dashboard(
         parent_id,
         parent_title,
         graph,
-        api_graph,
-        backend,
         runtime_state_path.clone(),
     );
 
@@ -177,11 +171,6 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
     let main_area = chunks[chunk_idx];
     chunk_idx += 1;
 
-    let main_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-        .split(main_area);
-
     // Build status overrides and timing maps
     let status_overrides = app.status_overrides();
     let mut active_elapsed: HashMap<String, u64> = HashMap::new();
@@ -222,13 +211,7 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
         active_elapsed: &active_elapsed,
         completed_info: &completed_info,
     };
-    frame.render_widget(task_tree, main_chunks[0]);
-
-    let backend_status = BackendStatusBox {
-        graph: &app.api_graph,
-        backend: app.backend,
-    };
-    frame.render_widget(backend_status, main_chunks[1]);
+    frame.render_widget(task_tree, main_area);
 
     // Render agent slots
     let agent_area = chunks[chunk_idx];
