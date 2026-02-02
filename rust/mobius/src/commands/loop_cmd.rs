@@ -11,10 +11,11 @@ use crate::context::{
     add_runtime_active_task, clear_all_runtime_active_tasks, complete_runtime_task,
     create_session as create_mobius_session, delete_runtime_state, end_session, fail_runtime_task,
     generate_context, initialize_runtime_state, remove_runtime_active_task,
-    update_runtime_task_pane, write_full_context_file,
+    update_runtime_task_pane, write_full_context_file, write_runtime_state,
 };
 use crate::executor::{calculate_parallelism, execute_parallel};
-use crate::jira::{JiraClient, ParentIssue};
+use crate::jira::JiraClient;
+use crate::types::task_graph::ParentIssue;
 use crate::local_state::{
     read_local_subtasks_as_linear_issues, read_parent_spec, read_subtasks, update_subtask_status,
     write_iteration_log, IterationLogEntry, IterationStatus,
@@ -46,7 +47,20 @@ pub fn run(
     fresh: bool,
     _debug: Option<Option<&str>>,
     no_submit: bool,
+    no_tui: bool,
 ) -> anyhow::Result<()> {
+    if !no_tui {
+        return run_with_tui(
+            task_id,
+            backend_override,
+            model_override,
+            parallel_override,
+            max_iterations_override,
+            fresh,
+            no_submit,
+        );
+    }
+
     let paths = resolve_paths();
     let config = read_config(&paths.config_path).unwrap_or_default();
     let backend: Backend = if let Some(b) = backend_override {
@@ -125,15 +139,20 @@ pub fn run(
     // Fetch parent issue
     let rt = tokio::runtime::Runtime::new()?;
 
-    let parent_issue = rt.block_on(fetch_parent_issue(task_id, &backend));
-    if parent_issue.is_none() {
-        eprintln!(
-            "{}",
-            format!("Error: Could not fetch issue {}", task_id).red()
-        );
-        std::process::exit(1);
-    }
-    let parent_issue = parent_issue.unwrap();
+    let parent_issue = match rt.block_on(fetch_parent_issue(task_id, &backend)) {
+        Ok(issue) => issue,
+        Err(cause) => {
+            eprintln!(
+                "{}",
+                format!("Error: Could not fetch issue {}", task_id).red()
+            );
+            eprintln!(
+                "{}",
+                format!("  Cause: {}", cause).red()
+            );
+            std::process::exit(1);
+        }
+    };
 
     // Derive branch name with fallback when Linear/backend doesn't provide one
     let branch_name = if parent_issue.git_branch_name.is_empty() {
@@ -244,11 +263,11 @@ pub fn run(
     // Create session in context system
     let _ = create_mobius_session(task_id, backend, None);
 
-    // Initialize runtime state
+    // Initialize runtime state (include own PID so TUI can SIGTERM this process)
     let mut runtime_state = initialize_runtime_state(
         task_id,
         &parent_issue.title,
-        None,
+        Some(std::process::id()),
         Some(graph.tasks.len() as u32),
     )?;
 
@@ -258,6 +277,7 @@ pub fn run(
             runtime_state = complete_runtime_task(&runtime_state, &task.identifier);
         }
     }
+    write_runtime_state(&runtime_state)?;
 
     // Main execution loop
     while iteration < max_iterations {
@@ -359,6 +379,7 @@ pub fn run(
                 },
             );
         }
+        write_runtime_state(&runtime_state)?;
 
         // Update status pane
         let loop_status = LoopStatus {
@@ -478,6 +499,7 @@ pub fn run(
                 );
             }
         }
+        write_runtime_state(&runtime_state)?;
 
         // Add retry tasks
         for task in need_retry {
@@ -614,7 +636,93 @@ pub fn run(
     Ok(())
 }
 
-async fn fetch_parent_issue(task_id: &str, backend: &Backend) -> Option<ParentIssue> {
+fn run_with_tui(
+    task_id: &str,
+    backend_override: Option<&str>,
+    model_override: Option<&str>,
+    parallel_override: Option<u32>,
+    max_iterations_override: Option<u32>,
+    fresh: bool,
+    no_submit: bool,
+) -> anyhow::Result<()> {
+    // 1. Resolve backend (same logic as run())
+    let paths = resolve_paths();
+    let config = read_config(&paths.config_path).unwrap_or_default();
+    let backend: Backend = if let Some(b) = backend_override {
+        b.parse().unwrap_or(config.backend)
+    } else {
+        config.backend
+    };
+
+    // 2. Read local state for TUI display data (cheap, no network/worktree)
+    let issues = read_local_subtasks_as_linear_issues(task_id);
+    if issues.is_empty() {
+        anyhow::bail!("No sub-tasks found for {}. Run refine first.", task_id);
+    }
+    let parent_spec = read_parent_spec(task_id);
+    let parent_title = parent_spec
+        .as_ref()
+        .map(|p| p.title.clone())
+        .unwrap_or_else(|| task_id.to_string());
+    let parent_id = parent_spec
+        .as_ref()
+        .map(|p| p.identifier.clone())
+        .unwrap_or_else(|| task_id.to_string());
+    let graph = build_task_graph(task_id, &parent_id, &issues);
+    let runtime_state_path = crate::context::get_runtime_path(task_id);
+
+    // 3. Build subprocess args (pass through all overrides, always add --no-tui)
+    let mut args = vec![
+        "loop".to_string(),
+        task_id.to_string(),
+        "--no-tui".to_string(),
+    ];
+    if let Some(b) = backend_override {
+        args.extend(["--backend".into(), b.to_string()]);
+    }
+    if let Some(m) = model_override {
+        args.extend(["--model".into(), m.to_string()]);
+    }
+    if let Some(p) = parallel_override {
+        args.extend(["--parallel".into(), p.to_string()]);
+    }
+    if let Some(n) = max_iterations_override {
+        args.extend(["--max-iterations".into(), n.to_string()]);
+    }
+    if fresh {
+        args.push("--fresh".into());
+    }
+    if no_submit {
+        args.push("--no-submit".into());
+    }
+
+    // 4. Spawn subprocess with stderr redirected to a log file for diagnostics
+    let log_dir = runtime_state_path.parent().unwrap_or(std::path::Path::new("."));
+    std::fs::create_dir_all(log_dir)?;
+    let log_path = log_dir.join("loop-subprocess.log");
+    let log_file = std::fs::File::create(&log_path)?;
+
+    let _child = std::process::Command::new(std::env::current_exe()?)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::from(log_file))
+        .spawn()?;
+
+    // 5. Run TUI dashboard (blocks until user exits or execution completes)
+    crate::tui::dashboard::run_dashboard(
+        parent_id,
+        parent_title,
+        graph.clone(),
+        graph,
+        backend,
+        runtime_state_path,
+    )?;
+
+    Ok(())
+}
+
+async fn fetch_parent_issue(task_id: &str, backend: &Backend) -> Result<ParentIssue, String> {
     match backend {
         Backend::Local => {
             let spec = read_parent_spec(task_id);
@@ -624,20 +732,47 @@ async fn fetch_parent_issue(task_id: &str, backend: &Backend) -> Option<ParentIs
                 title: s.title,
                 git_branch_name: s.git_branch_name,
             })
+            .ok_or_else(|| format!("No local state found for {}", task_id))
         }
-        Backend::Jira => match JiraClient::new() {
-            Ok(client) => client.fetch_jira_issue(task_id).await.ok(),
-            Err(_) => None,
-        },
+        Backend::Jira => {
+            let api_err = match JiraClient::new() {
+                Ok(client) => match client.fetch_jira_issue(task_id).await {
+                    Ok(issue) => return Ok(issue),
+                    Err(e) => e.to_string(),
+                },
+                Err(e) => e.to_string(),
+            };
+            // API failed, try local state fallback
+            tracing::warn!("Jira API fetch failed, falling back to local state: {}", api_err);
+            match read_parent_spec(task_id) {
+                Some(s) => Ok(ParentIssue {
+                    id: s.id,
+                    identifier: s.identifier,
+                    title: s.title,
+                    git_branch_name: s.git_branch_name,
+                }),
+                None => Err(api_err),
+            }
+        }
         Backend::Linear => {
-            // Fall back to local state for now (Linear client not yet in Rust)
-            let spec = read_parent_spec(task_id);
-            spec.map(|s| ParentIssue {
-                id: s.id,
-                identifier: s.identifier,
-                title: s.title,
-                git_branch_name: s.git_branch_name,
-            })
+            let api_err = match crate::linear::LinearClient::new() {
+                Ok(client) => match client.fetch_linear_issue(task_id).await {
+                    Ok(issue) => return Ok(issue),
+                    Err(e) => e.to_string(),
+                },
+                Err(e) => e.to_string(),
+            };
+            // API failed, try local state fallback
+            tracing::warn!("Linear API fetch failed, falling back to local state: {}", api_err);
+            match read_parent_spec(task_id) {
+                Some(s) => Ok(ParentIssue {
+                    id: s.id,
+                    identifier: s.identifier,
+                    title: s.title,
+                    git_branch_name: s.git_branch_name,
+                }),
+                None => Err(api_err),
+            }
         }
     }
 }
