@@ -254,7 +254,7 @@ pub fn update_task_status(graph: &TaskGraph, task_id: &str, new_status: TaskStat
     new_tasks.insert(
         task_id.to_string(),
         SubTask {
-            status: new_status.clone(),
+            status: new_status,
             ..task.clone()
         },
     );

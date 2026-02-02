@@ -43,10 +43,6 @@ pub struct SubTaskContext {
     pub blocked_by: Vec<IssueRef>,
     #[serde(default, deserialize_with = "deserialize_issue_refs")]
     pub blocks: Vec<IssueRef>,
-    #[serde(default)]
-    pub labels: Vec<String>,
-    #[serde(default)]
-    pub parent_id: Option<String>,
 }
 
 /// Deserialize blockedBy/blocks fields that can be either string arrays or IssueRef arrays.
