@@ -227,6 +227,325 @@ execution:
     });
   });
 
+  describe('linear workspace context parsing', () => {
+    it('parses linear team, project, and default_labels from config', () => {
+      const configPath = join(tempDir, 'config.yaml');
+      writeFileSync(
+        configPath,
+        `backend: linear
+linear:
+  team: Engineering
+  project: My Project
+  default_labels: [Bug, Feature, Improvement]
+execution:
+  delay_seconds: 3
+  max_iterations: 50
+  model: opus
+  sandbox: true
+  container_name: mobius-sandbox
+`
+      );
+
+      const config = readConfig(configPath);
+
+      expect(config.linear?.team).toBe('Engineering');
+      expect(config.linear?.project).toBe('My Project');
+      expect(config.linear?.default_labels).toEqual(['Bug', 'Feature', 'Improvement']);
+    });
+
+    it('returns undefined linear section when not specified', () => {
+      const configPath = join(tempDir, 'config.yaml');
+      writeFileSync(
+        configPath,
+        `backend: linear
+execution:
+  delay_seconds: 3
+  max_iterations: 50
+  model: opus
+  sandbox: true
+  container_name: mobius-sandbox
+`
+      );
+
+      const config = readConfig(configPath);
+
+      expect(config.linear).toBeUndefined();
+    });
+
+    it('parses partial linear config (team only)', () => {
+      const configPath = join(tempDir, 'config.yaml');
+      writeFileSync(
+        configPath,
+        `backend: linear
+linear:
+  team: Platform
+execution:
+  delay_seconds: 3
+  max_iterations: 50
+  model: opus
+  sandbox: true
+  container_name: mobius-sandbox
+`
+      );
+
+      const config = readConfig(configPath);
+
+      expect(config.linear?.team).toBe('Platform');
+      expect(config.linear?.project).toBeUndefined();
+      expect(config.linear?.default_labels).toBeUndefined();
+    });
+  });
+
+  describe('jira workspace context parsing', () => {
+    it('parses jira config with default_labels from config', () => {
+      const configPath = join(tempDir, 'config.yaml');
+      writeFileSync(
+        configPath,
+        `backend: jira
+jira:
+  base_url: https://mycompany.atlassian.net
+  project_key: PROJ
+  auth_method: api_token
+  default_labels: [bug, story, task]
+execution:
+  delay_seconds: 3
+  max_iterations: 50
+  model: opus
+  sandbox: true
+  container_name: mobius-sandbox
+`
+      );
+
+      const config = readConfig(configPath);
+
+      expect(config.jira?.base_url).toBe('https://mycompany.atlassian.net');
+      expect(config.jira?.project_key).toBe('PROJ');
+      expect(config.jira?.auth_method).toBe('api_token');
+      expect(config.jira?.default_labels).toEqual(['bug', 'story', 'task']);
+    });
+
+    it('returns undefined jira section when not specified', () => {
+      const configPath = join(tempDir, 'config.yaml');
+      writeFileSync(
+        configPath,
+        `backend: linear
+execution:
+  delay_seconds: 3
+  max_iterations: 50
+  model: opus
+  sandbox: true
+  container_name: mobius-sandbox
+`
+      );
+
+      const config = readConfig(configPath);
+
+      expect(config.jira).toBeUndefined();
+    });
+  });
+
+  describe('linear workspace context validation', () => {
+    it('validates config with valid linear workspace context', () => {
+      const config: LoopConfig = {
+        backend: 'linear',
+        linear: {
+          team: 'Engineering',
+          project: 'My Project',
+          default_labels: ['Bug', 'Feature'],
+        },
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('rejects non-string linear.team', () => {
+      const config: LoopConfig = {
+        backend: 'linear',
+        linear: {
+          team: 123 as unknown as string,
+        },
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('linear.team must be a string');
+    });
+
+    it('rejects non-string linear.project', () => {
+      const config: LoopConfig = {
+        backend: 'linear',
+        linear: {
+          project: false as unknown as string,
+        },
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('linear.project must be a string');
+    });
+
+    it('rejects non-array linear.default_labels', () => {
+      const config: LoopConfig = {
+        backend: 'linear',
+        linear: {
+          default_labels: 'Bug' as unknown as string[],
+        },
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('linear.default_labels must be an array of strings');
+    });
+
+    it('rejects linear.default_labels with non-string elements', () => {
+      const config: LoopConfig = {
+        backend: 'linear',
+        linear: {
+          default_labels: ['Bug', 42 as unknown as string],
+        },
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('linear.default_labels must be an array of strings');
+    });
+
+    it('skips linear validation when backend is not linear', () => {
+      const config: LoopConfig = {
+        backend: 'local',
+        linear: {
+          team: 123 as unknown as string, // Invalid but should not matter
+        },
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+  });
+
+  describe('jira workspace context validation', () => {
+    it('validates config with valid jira workspace context including default_labels', () => {
+      const config: LoopConfig = {
+        backend: 'jira',
+        jira: {
+          base_url: 'https://mycompany.atlassian.net',
+          project_key: 'PROJ',
+          auth_method: 'api_token',
+          default_labels: ['bug', 'story', 'task'],
+        },
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('rejects non-array jira.default_labels', () => {
+      const config: LoopConfig = {
+        backend: 'jira',
+        jira: {
+          base_url: 'https://mycompany.atlassian.net',
+          project_key: 'PROJ',
+          default_labels: 'bug' as unknown as string[],
+        },
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('jira.default_labels must be an array of strings');
+    });
+
+    it('rejects jira.default_labels with non-string elements', () => {
+      const config: LoopConfig = {
+        backend: 'jira',
+        jira: {
+          base_url: 'https://mycompany.atlassian.net',
+          project_key: 'PROJ',
+          default_labels: ['bug', 99 as unknown as string],
+        },
+        execution: {
+          delay_seconds: 3,
+          max_iterations: 50,
+          model: 'opus',
+          sandbox: true,
+          container_name: 'mobius-sandbox',
+        },
+      };
+
+      const result = validateConfig(config);
+
+      expect(result.valid).toBe(false);
+      expect(result.errors).toContain('jira.default_labels must be an array of strings');
+    });
+  });
+
   describe('verification config validation', () => {
     it('validates config with valid verification values', () => {
       const config: LoopConfig = {
