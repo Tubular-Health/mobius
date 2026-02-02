@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use crate::types::context::{RuntimeActiveTask, RuntimeCompletedTask, RuntimeState};
 use crate::types::debug::DebugEvent;
-use crate::types::enums::{Backend, TaskStatus};
+use crate::types::enums::TaskStatus;
 use crate::types::task_graph::{TaskGraph, SubTask};
 
 /// Application state for the TUI dashboard.
@@ -12,8 +12,6 @@ pub struct App {
     pub parent_id: String,
     pub parent_title: String,
     pub graph: TaskGraph,
-    pub api_graph: TaskGraph,
-    pub backend: Backend,
     pub runtime_state: Option<RuntimeState>,
     pub start_time: Instant,
     pub show_legend: bool,
@@ -32,16 +30,12 @@ impl App {
         parent_id: String,
         parent_title: String,
         graph: TaskGraph,
-        api_graph: TaskGraph,
-        backend: Backend,
         runtime_state_path: PathBuf,
     ) -> Self {
         Self {
             parent_id,
             parent_title,
             graph,
-            api_graph,
-            backend,
             runtime_state: None,
             start_time: Instant::now(),
             show_legend: true,

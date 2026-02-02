@@ -1,6 +1,5 @@
 pub mod app;
 pub mod agent_slots;
-pub mod backend_status;
 pub mod dashboard;
 pub mod debug_panel;
 pub mod events;

@@ -483,7 +483,6 @@ fn main() {
                 // Read sub-tasks from local state and build graph
                 let issues = local_state::read_local_subtasks_as_linear_issues(&task_id);
                 let graph = types::task_graph::build_task_graph(&task_id, &task_id, &issues);
-                let api_graph = graph.clone();
 
                 // Read parent title
                 let parent_title = local_state::read_parent_spec(&task_id)
@@ -494,8 +493,6 @@ fn main() {
                     task_id,
                     parent_title,
                     graph,
-                    api_graph,
-                    types::enums::Backend::Local,
                     state_path,
                 ) {
                     eprintln!("TUI error: {}", e);
