@@ -1,10 +1,13 @@
 pub mod config;
+pub mod executor;
 pub mod git_lock;
 pub mod jira;
 pub mod local_state;
 pub mod mermaid_renderer;
 pub mod tmux;
+pub mod tracker;
 pub mod tree_renderer;
+pub mod tui;
 pub mod types;
 pub mod worktree;
 
@@ -316,7 +319,47 @@ fn main() {
             Command::Push { .. } => todo!("push command"),
             Command::Pull { .. } => todo!("pull command"),
             Command::SetId { .. } => todo!("set-id command"),
-            Command::Tui { .. } => todo!("tui command"),
+            Command::Tui {
+                task_id,
+                no_legend: _,
+                state_dir,
+                refresh: _,
+                lines: _,
+            } => {
+                // Resolve runtime state path
+                let mobius_path = local_state::get_project_mobius_path();
+                let state_path = if let Some(dir) = state_dir {
+                    std::path::PathBuf::from(dir).join("runtime.json")
+                } else {
+                    mobius_path
+                        .join("issues")
+                        .join(&task_id)
+                        .join("execution")
+                        .join("runtime.json")
+                };
+
+                // Read sub-tasks from local state and build graph
+                let issues = local_state::read_local_subtasks_as_linear_issues(&task_id);
+                let graph = types::task_graph::build_task_graph(&task_id, &task_id, &issues);
+                let api_graph = graph.clone();
+
+                // Read parent title
+                let parent_title = local_state::read_parent_spec(&task_id)
+                    .map(|p| p.title)
+                    .unwrap_or_else(|| task_id.clone());
+
+                if let Err(e) = tui::dashboard::run_dashboard(
+                    task_id,
+                    parent_title,
+                    graph,
+                    api_graph,
+                    types::enums::Backend::Local,
+                    state_path,
+                ) {
+                    eprintln!("TUI error: {}", e);
+                    std::process::exit(1);
+                }
+            }
         },
         None => {
             if let Some(_task_id) = cli.task_id {
