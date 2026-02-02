@@ -5,6 +5,7 @@ pub mod executor;
 pub mod git_lock;
 pub mod jira;
 pub mod local_state;
+pub mod loop_command;
 pub mod mermaid_renderer;
 pub mod tmux;
 pub mod tracker;
