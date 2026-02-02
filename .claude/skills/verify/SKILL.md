@@ -145,6 +145,26 @@ status: PASS  # Required: one of the valid status values
 timestamp: "2026-01-28T12:00:00Z"  # Required: ISO-8601 timestamp
 parentId: "MOB-161"  # Required: parent issue identifier
 verificationTaskId: "MOB-186"  # Required: verification sub-task identifier
+durationSeconds: 45  # Required: total VG execution time in seconds
+
+# Project detection info (from context file):
+projectInfo:
+  projectType: "node"
+  buildSystem: "just"
+  platformTargets: []
+
+# Sub-task verify command results:
+subtaskVerifyResults:
+  - subtaskId: "MOB-177"
+    title: "Define types"
+    command: "bun run typecheck"
+    exitCode: 0
+    passed: true
+  - subtaskId: "MOB-178"
+    title: "Create service"
+    command: "bun test service.test.ts"
+    exitCode: 0
+    passed: true
 
 # For PASS or PASS_WITH_NOTES:
 criteriaResults:
@@ -158,9 +178,15 @@ criteriaResults:
       status: PASS
       evidence: "src/feature.test.ts"
 verificationChecks:
-  tests: PASS
-  typecheck: PASS
-  lint: PASS
+  tests:
+    status: PASS
+    command: "just test"  # Dynamic command used
+  typecheck:
+    status: PASS
+    command: "just typecheck"
+  lint:
+    status: PASS
+    command: "just lint"
   cicd: PASS
 reviewComment: |
   ## Verification Review
@@ -228,6 +254,22 @@ status: PASS
 timestamp: "2026-01-28T16:45:00Z"
 parentId: "MOB-161"
 verificationTaskId: "MOB-186"
+durationSeconds: 120
+projectInfo:
+  projectType: "node"
+  buildSystem: "just"
+  platformTargets: []
+subtaskVerifyResults:
+  - subtaskId: "MOB-177"
+    title: "Define types"
+    command: "bun run typecheck"
+    exitCode: 0
+    passed: true
+  - subtaskId: "MOB-178"
+    title: "Create service"
+    command: "bun test service.test.ts"
+    exitCode: 0
+    passed: true
 criteriaResults:
   met: 5
   total: 5
@@ -239,9 +281,15 @@ criteriaResults:
       status: PASS
       evidence: ".mobius/issues/ directory created"
 verificationChecks:
-  tests: PASS
-  typecheck: PASS
-  lint: PASS
+  tests:
+    status: PASS
+    command: "just test"
+  typecheck:
+    status: PASS
+    command: "just typecheck"
+  lint:
+    status: PASS
+    command: "just lint"
   cicd: PASS
 reviewComment: |
   ## Verification Review
@@ -253,9 +301,9 @@ reviewComment: |
   All 5 criteria met.
 
   ### Checks
-  - Tests: PASS
-  - Typecheck: PASS
-  - Lint: PASS
+  - Tests: PASS (just test)
+  - Typecheck: PASS (just typecheck)
+  - Lint: PASS (just lint)
   - CI/CD: PASS
 
   All criteria met. Ready to close.
@@ -270,6 +318,17 @@ status: NEEDS_WORK
 timestamp: "2026-01-28T16:45:00Z"
 parentId: "MOB-161"
 verificationTaskId: "MOB-186"
+durationSeconds: 85
+projectInfo:
+  projectType: "node"
+  buildSystem: "just"
+  platformTargets: []
+subtaskVerifyResults:
+  - subtaskId: "MOB-177"
+    title: "Create context generator"
+    command: "bun run typecheck"
+    exitCode: 1
+    passed: false
 criteriaResults:
   met: 3
   total: 5
@@ -281,9 +340,15 @@ criteriaResults:
       status: FAIL
       evidence: "2 tests failing"
 verificationChecks:
-  tests: FAIL
-  typecheck: PASS
-  lint: PASS
+  tests:
+    status: FAIL
+    command: "just test"
+  typecheck:
+    status: PASS
+    command: "just typecheck"
+  lint:
+    status: PASS
+    command: "just lint"
   cicd: FAIL
 failingSubtasks:
   - id: "uuid-here"
@@ -471,6 +536,57 @@ Verify:
 - Each sub-task has description with acceptance criteria
 </load_subtasks>
 
+<subtask_verify_commands>
+**Execute sub-task verify commands from the context file.**
+
+After loading sub-tasks, read and execute the `subTaskVerifyCommands` array from the context file. These are per-sub-task verification commands extracted during refinement.
+
+**Reading verify commands**:
+```bash
+cat "$MOBIUS_CONTEXT_FILE" | jq '.subTaskVerifyCommands // []'
+```
+
+Each entry has the structure: `{ subtaskId: string, title: string, command: string }`
+
+**Execution flow**:
+
+1. Read `subTaskVerifyCommands` array from context file
+2. If array is empty or missing, skip this phase (it's optional)
+3. For EACH entry in the array:
+   a. Log: `Sub-task {subtaskId}: {title} — executing verify command`
+   b. Execute the `command` via Bash tool with 60-second timeout
+   c. Capture exit code and output
+   d. Record result: `{ subtaskId, title, command, exitCode, passed: exitCode === 0 }`
+4. Continue executing ALL commands even if some fail (gather all results)
+5. After all commands complete, log summary:
+   ```
+   Sub-task verify results:
+   - {subtaskId}: {title} — {command} — PASS/FAIL
+   - {subtaskId}: {title} — {command} — PASS/FAIL
+   ```
+6. If ANY command fails, include in the overall failure assessment during criteria comparison
+
+**Safety**: Apply the same safety checks as the execute skill's verify command execution — block dangerous patterns (`rm -rf`, `sudo`, `curl | bash`, etc.) before running.
+
+**Result tracking**: Store all results in a `subtaskVerifyResults` array for inclusion in the structured output:
+
+```yaml
+subtaskVerifyResults:
+  - subtaskId: "MOB-177"
+    title: "Define types"
+    command: "bun run typecheck"
+    exitCode: 0
+    passed: true
+  - subtaskId: "MOB-178"
+    title: "Create service"
+    command: "bun test service.test.ts"
+    exitCode: 1
+    passed: false
+```
+
+**If no `subTaskVerifyCommands` in context**: This is normal for older issues. Skip silently and proceed to standard verification checks.
+</subtask_verify_commands>
+
 <context_summary>
 Build verification context from local files:
 
@@ -549,44 +665,79 @@ Review corresponding test files:
 </implementation_analysis_phase>
 
 <verification_checks_phase>
-<run_tests>
-Execute the test suite:
+<run_dynamic_checks>
+**Use dynamic commands from `projectInfo.availableCommands` in the context file.**
 
+Read project detection results:
 ```bash
-# Run all tests
-just test
-
-# Or run tests for specific files
-just test-file {pattern}
+cat "$MOBIUS_CONTEXT_FILE" | jq '.projectInfo'
 ```
 
-Capture:
-- Pass/fail count
-- Any failures with error messages
-- Coverage information if available
-</run_tests>
+The `projectInfo` object contains:
+- `availableCommands`: `{ test?, typecheck?, lint?, build?, platformBuild? }`
+- `platformTargets`: `string[]` (e.g., `["android", "ios"]`)
+- `projectType`: Project type string
+- `buildSystem`: Build system string
 
-<run_typecheck>
-Verify type safety:
+**Command resolution order** (for each check):
 
+1. Use `projectInfo.availableCommands.{check}` if present in context
+2. Fall back to `just {check}` if `projectInfo.hasJustfile` is true
+3. Fall back to hardcoded default with a warning: `⚠ projectInfo not available, using hardcoded fallback`
+
+**Run typecheck**:
 ```bash
-just typecheck
+# Dynamic: use availableCommands.typecheck from context
+# Example: "just typecheck" or "bun run typecheck" or "cargo check"
+# Fallback: just typecheck
 ```
 
+If `projectInfo.availableCommands.typecheck` exists, run it; otherwise try `just typecheck`.
 Capture any type errors or warnings.
-</run_typecheck>
 
-<run_lint>
-Check code quality:
-
+**Run lint**:
 ```bash
-just lint
-# or
-bun run lint
+# Dynamic: use availableCommands.lint from context
+# Example: "just lint" or "bun run lint" or "cargo clippy"
+# Fallback: just lint
 ```
 
+If `projectInfo.availableCommands.lint` exists, run it; otherwise try `just lint`.
 Note any linting issues.
-</run_lint>
+
+**Run tests**:
+```bash
+# Dynamic: use availableCommands.test from context
+# Example: "just test" or "bun test" or "cargo test"
+# Fallback: just test
+```
+
+If `projectInfo.availableCommands.test` exists, run it; otherwise try `just test`.
+Capture pass/fail count, any failures with error messages, and coverage information if available.
+
+**Run platform-specific builds** (if applicable):
+
+If `projectInfo.platformTargets` includes `'android'`:
+```bash
+# Run: projectInfo.availableCommands.platformBuild.android
+```
+
+If `projectInfo.platformTargets` includes `'ios'`:
+```bash
+# Run: projectInfo.availableCommands.platformBuild.ios
+```
+
+Platform builds are optional — only run when platform targets are detected.
+
+**Fallback warning**: If `projectInfo` is missing from the context file entirely, log:
+```
+⚠ projectInfo not found in context file. Using hardcoded fallback commands:
+  typecheck: just typecheck
+  lint: just lint
+  test: just test
+```
+And proceed with hardcoded commands.
+</run_dynamic_checks>
 
 <check_cicd_status>
 Verify CI/CD pipeline status before approving:
@@ -676,7 +827,37 @@ Build a criteria evaluation matrix:
 </criteria_matrix>
 </criteria_comparison_phase>
 
+<duration_sanity_check>
+**Check for suspiciously fast verification completion.**
+
+Record the start time at the beginning of skill execution (before any context loading). After all verification commands complete (tests, typecheck, lint, platform builds, sub-task verify commands), calculate elapsed time.
+
+**Duration check logic**:
+
+1. Record `startTime` at skill initialization (use `Date.now()` or equivalent)
+2. After all verification checks complete, calculate `elapsedSeconds = (Date.now() - startTime) / 1000`
+3. If `elapsedSeconds < 5`:
+   - Log warning: `⚠ VG completed in {elapsedSeconds}s — suspiciously fast. Re-running all checks with verbose output.`
+   - Re-execute ALL verification commands (typecheck, lint, tests, platform builds)
+   - Use verbose flags where available (e.g., `--verbose`, `-v`)
+   - If re-run also completes in <5 seconds, accept the results but note the fast duration
+4. Include `durationSeconds` in the structured output regardless of whether re-run was triggered
+
+**Why this matters**: A verification gate completing in under 5 seconds likely means commands were skipped, failed silently, or the project has no meaningful checks configured. The re-run with verbose output helps catch these cases.
+
+**Duration in structured output**:
+```yaml
+durationSeconds: 45  # Total VG execution time in seconds
+```
+</duration_sanity_check>
+
 <multi_agent_review>
+**ALWAYS spawn all 4 review agents — do NOT skip any agent regardless of issue size or perceived simplicity.**
+
+If the Task tool is unavailable (e.g., in piped mode with `claude -p`), perform the 4 reviews INLINE sequentially using the same prompts below. Each review must still be performed — the only difference is sequential execution instead of parallel.
+
+Wait for ALL agent results before continuing to aggregation. Do not proceed with partial results.
+
 Spawn four specialized review agents IN PARALLEL using Task tool:
 
 ### Agent 1: Bug & Logic Detection

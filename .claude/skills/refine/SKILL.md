@@ -181,7 +181,7 @@ Write tool:
 {
   "id": "task-VG",
   "title": "[{parent-id}] Verification Gate",
-  "description": "Runs verify to validate implementation meets acceptance criteria.\n\n**Blocked by**: ALL implementation sub-tasks\n**Action**: Run `/verify {parent-id}` after all implementation tasks complete",
+  "description": "Runs verify to validate implementation meets acceptance criteria.\n\n**Blocked by**: ALL implementation sub-tasks\n**Action**: Run `/verify {parent-id}` after all implementation tasks complete\n\n### Aggregated Verify Commands\n1. task-001: Define types\n   ```bash\n   cd /path && bun run typecheck\n   ```\n2. task-002: Implement service\n   ```bash\n   cd /path && bun test service.test.ts\n   ```\n3. task-003: Add hook\n   ```bash\n   cd /path && bun run typecheck\n   ```",
   "status": "pending",
   "blockedBy": ["task-001", "task-002", "task-003"],
   "blocks": [],
@@ -566,14 +566,19 @@ Determine blocking order based on functional requirements:
 2. **Assign ordering numbers** — Use dependency hints from subagent outputs combined with ordering principles to assign sequential order numbers
 3. **Establish blockedBy relationships** — Convert dependency hints into formal `blockedBy` references using assigned order numbers
 4. **Verify no circular dependencies** — Walk the dependency graph to confirm it is a DAG (directed acyclic graph)
-5. **Identify parallel groups** — Group tasks that share no mutual dependencies for concurrent execution
-6. **Add verification gate** — Append the verification gate sub-task blocked by ALL implementation tasks
-7. **Quality checks**:
+5. **Aggregate verify commands** — For each sub-task write-up from Phase 3 subagents, extract the `### Verify Command` bash code block and collect into a numbered list for the Verification Gate description:
+   - Format each entry as: `{N}. {task-id}: {title}\n   ```bash\n   {verify command}\n   ```\n`
+   - If a sub-task has no verify command, note: `{N}. {task-id}: {title}\n   (no verify command specified)`
+   - Insert the collected list into the VG description's `### Aggregated Verify Commands` section
+6. **Identify parallel groups** — Group tasks that share no mutual dependencies for concurrent execution
+7. **Add verification gate** — Append the verification gate sub-task blocked by ALL implementation tasks, with the aggregated verify commands from step 5 included in its description
+8. **Quality checks**:
    - Each sub-task targets a single file (or tightly-coupled pair)
    - No duplicate target files across sub-tasks
    - All template sections are complete (Summary, Context, Target Files, Action, Avoid, Acceptance Criteria, Verify Command)
    - Verify commands are executable (not pseudocode)
    - Acceptance criteria are measurable
+   - Verification Gate description includes aggregated verify commands from all sub-tasks
 </aggregation_phase>
 
 <verification_gate>
@@ -595,7 +600,11 @@ The verification gate:
 ### Action
 This task triggers the verify skill to validate all implementation sub-tasks meet the parent issue's acceptance criteria.
 
+### Aggregated Verify Commands
+{List of each implementation sub-task's verify command, numbered by sub-task}
+
 ### Done
+- [ ] All sub-task verify commands pass
 - [ ] All tests pass
 - [ ] All acceptance criteria verified
 - [ ] No critical issues found by code review agents

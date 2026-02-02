@@ -247,6 +247,10 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
   // Track tasks pending retry
   let retryQueue: SubTask[] = [];
 
+  // Track VG fast-completion retries to prevent infinite loops
+  let vgFastRetryCount = 0;
+  const MAX_VG_FAST_RETRIES = 3;
+
   // Create session in context system
   createMobiusSession(taskId, backend, worktreeInfo.path);
 
@@ -383,11 +387,11 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
             );
           }
 
-          // Handle NEEDS_WORK status: reset target task(s) and queue for re-execution
-          if (skillResult.status === 'NEEDS_WORK') {
+          // Handle NEEDS_WORK and FAIL statuses: reset target task(s) and queue for re-execution
+          if (skillResult.status === 'NEEDS_WORK' || skillResult.status === 'FAIL') {
             // Parse target subtask(s) from raw output
             const parsed = parseSkillOutput(result.rawOutput);
-            if (parsed.output.status === 'NEEDS_WORK') {
+            if (parsed.output.status === 'NEEDS_WORK' || parsed.output.status === 'FAIL') {
               // Collect all target task identifiers from either format
               const targetIds: string[] = [];
 
@@ -396,7 +400,7 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
                 targetIds.push(parsed.output.subtaskId);
               }
 
-              // Verify-issue format: failingSubtasks array
+              // Verify/FAIL format: failingSubtasks array
               if (
                 'failingSubtasks' in parsed.output &&
                 Array.isArray(parsed.output.failingSubtasks)
@@ -411,6 +415,8 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
                 targetIds.push(result.identifier);
               }
 
+              const statusLabel = parsed.output.status;
+
               // Find and queue each target task for retry
               for (const targetId of targetIds) {
                 const targetTask = getTaskByIdentifier(graph, targetId);
@@ -418,7 +424,7 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
                   graph = updateTaskStatus(graph, targetTask.id, 'ready');
                   retryQueue.push(targetTask);
                   console.log(
-                    chalk.yellow(`  ↻ ${targetId}: NEEDS_WORK detected, queuing for rework`)
+                    chalk.yellow(`  ↻ ${targetId}: ${statusLabel} detected, queuing for rework`)
                   );
                 }
               }
@@ -460,6 +466,32 @@ export async function loop(taskId: string, options: LoopOptions): Promise<void> 
       // Update graph and runtime state for verified results
       for (const result of verifiedResults) {
         if (result.success && result.linearVerified) {
+          // VG duration sanity check: if a VG task completes suspiciously fast (<5s),
+          // queue for retry instead of marking as done (up to MAX_VG_FAST_RETRIES times)
+          const isVgTask =
+            result.identifier.toLowerCase().includes('vg') ||
+            (getTaskByIdentifier(graph, result.identifier)
+              ?.title.toLowerCase()
+              .includes('verification gate') ??
+              false);
+
+          if (isVgTask && result.duration < 5000 && vgFastRetryCount < MAX_VG_FAST_RETRIES) {
+            vgFastRetryCount++;
+            console.log(
+              chalk.yellow(
+                `  ⚠ VG task ${result.identifier} completed in ${result.duration}ms (< 5s). ` +
+                  `Queuing for retry (${vgFastRetryCount}/${MAX_VG_FAST_RETRIES}).`
+              )
+            );
+            graph = updateTaskStatus(graph, result.taskId, 'ready');
+            const task = tasksToExecute.find((t) => t.identifier === result.identifier);
+            if (task && !retryQueue.some((t) => t.identifier === result.identifier)) {
+              retryQueue.push(task);
+            }
+            runtimeState = removeRuntimeActiveTask(runtimeState, result.identifier);
+            continue;
+          }
+
           graph = updateTaskStatus(graph, result.taskId, 'done');
           runtimeState = completeRuntimeTask(runtimeState, result.identifier);
           // Persist status to local task file so syncGraphFromLocal() sees it
@@ -895,7 +927,59 @@ function queueLinearUpdates(
       break;
     }
 
-    // Other statuses (ALL_COMPLETE, ALL_BLOCKED, NO_SUBTASKS, PASS, FAIL)
+    case 'PASS': {
+      // VG passed — mark verification task as done
+      queuePendingUpdate(parentId, {
+        type: 'status_change',
+        issueId: taskIdentifier,
+        identifier: taskIdentifier,
+        oldStatus: 'In Progress',
+        newStatus: 'Done',
+      });
+      console.log(chalk.gray(`  Queued: ${taskIdentifier} status -> Done (VG passed)`));
+
+      // Post review comment to parent if available
+      if ('reviewComment' in output && typeof output.reviewComment === 'string') {
+        queuePendingUpdate(parentId, {
+          type: 'add_comment',
+          issueId: parentId,
+          identifier: parentId,
+          body: output.reviewComment,
+        });
+        console.log(chalk.gray(`  Queued: ${parentId} review comment`));
+      }
+      break;
+    }
+
+    case 'FAIL': {
+      // VG failed — reopen failing sub-tasks
+      if ('failingSubtasks' in output && Array.isArray(output.failingSubtasks)) {
+        for (const task of output.failingSubtasks) {
+          queuePendingUpdate(parentId, {
+            type: 'status_change',
+            issueId: task.id,
+            identifier: task.identifier,
+            oldStatus: 'Done',
+            newStatus: 'Todo',
+          });
+          console.log(chalk.gray(`  Queued: ${task.identifier} status -> Todo (VG failed)`));
+        }
+      }
+
+      // Post failure comment to parent
+      if ('reviewComment' in output && typeof output.reviewComment === 'string') {
+        queuePendingUpdate(parentId, {
+          type: 'add_comment',
+          issueId: parentId,
+          identifier: parentId,
+          body: output.reviewComment,
+        });
+        console.log(chalk.gray(`  Queued: ${parentId} failure comment`));
+      }
+      break;
+    }
+
+    // Other statuses (ALL_COMPLETE, ALL_BLOCKED, NO_SUBTASKS)
     // don't require updates at the subtask level
     default:
       break;

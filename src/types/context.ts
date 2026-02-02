@@ -7,6 +7,7 @@
  */
 
 import type { TaskStatus } from '../lib/task-graph.js';
+import type { ProjectDetectionResult, SubTaskVerifyCommand } from '../types.js';
 
 /**
  * Parent issue details stored in local context
@@ -166,6 +167,10 @@ export interface IssueContext {
   parent: ParentIssueContext;
   subTasks: SubTaskContext[];
   metadata: ContextMetadata;
+  /** Project detection results for platform-aware verification */
+  projectInfo?: ProjectDetectionResult;
+  /** Aggregated verify commands from sub-task descriptions */
+  subTaskVerifyCommands?: SubTaskVerifyCommand[];
 }
 
 /**

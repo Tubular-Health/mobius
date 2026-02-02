@@ -125,6 +125,56 @@ export interface CliDetectionResult {
 
 export type Platform = 'darwin' | 'linux' | 'win32';
 
+/** Project type detected from filesystem markers */
+export type ProjectType =
+  | 'node'
+  | 'android'
+  | 'ios'
+  | 'rust'
+  | 'python'
+  | 'multi-platform'
+  | 'unknown';
+
+/** Build system detected from project configuration files */
+export type BuildSystem =
+  | 'npm'
+  | 'yarn'
+  | 'pnpm'
+  | 'gradle'
+  | 'xcodebuild'
+  | 'cargo'
+  | 'pip'
+  | 'poetry'
+  | 'just'
+  | 'make'
+  | 'unknown';
+
+/** Commands available for project verification steps */
+export interface VerificationCommands {
+  test?: string;
+  typecheck?: string;
+  lint?: string;
+  build?: string;
+  platformBuild?: Record<string, string>;
+}
+
+/** Result of detecting project type, build system, and available commands */
+export interface ProjectDetectionResult {
+  projectType: ProjectType;
+  buildSystem: BuildSystem;
+  platformTargets: string[];
+  availableCommands: VerificationCommands;
+  hasJustfile: boolean;
+  detectedConfigFiles: string[];
+}
+
+/** Verify command extracted from a sub-task description */
+export interface SubTaskVerifyCommand {
+  subtaskId: string;
+  title: string;
+  command: string;
+}
+
 export interface InstallMethod {
   platform: Platform;
   method: string;

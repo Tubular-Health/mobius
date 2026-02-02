@@ -32,12 +32,13 @@ import type {
   SessionInfo,
   SubTaskContext,
 } from '../types/context.js';
-import type { Backend } from '../types.js';
+import type { Backend, SubTaskVerifyCommand } from '../types.js';
 import { readConfig } from './config.js';
 import { debugLog } from './debug-logger.js';
 import { fetchJiraIssue } from './jira.js';
 import { fetchLinearIssue } from './linear.js';
 import { ensureProjectMobiusDir, getProjectMobiusPath, readSubTasks } from './local-state.js';
+import { detectProjectInfo } from './project-detector.js';
 import { mapLinearStatus } from './task-graph.js';
 
 /**
@@ -260,6 +261,31 @@ async function fetchJiraParentContext(
 }
 
 /**
+ * Extract verify commands from sub-task descriptions.
+ *
+ * Scans each sub-task's description for a `### Verify Command` section
+ * containing a bash code block and returns the extracted commands.
+ */
+function extractVerifyCommands(subTasks: SubTaskContext[]): SubTaskVerifyCommand[] {
+  const commands: SubTaskVerifyCommand[] = [];
+  const pattern = /###\s+Verify\s+Command\s*\n\s*```bash\s*\n([\s\S]*?)\n\s*```/i;
+
+  for (const task of subTasks) {
+    if (!task.description) continue;
+    const match = task.description.match(pattern);
+    if (match?.[1]) {
+      commands.push({
+        subtaskId: task.identifier ?? task.id,
+        title: task.title,
+        command: match[1].trim(),
+      });
+    }
+  }
+
+  return commands;
+}
+
+/**
  * Generate local context files for an issue
  *
  * Fetches issue data from the configured backend (Linear or Jira) via SDK
@@ -301,6 +327,10 @@ export async function generateContext(
     return null;
   }
 
+  // Detect project info and extract verify commands from sub-task descriptions
+  const projectInfo = detectProjectInfo(options?.projectPath ?? process.cwd());
+  const subTaskVerifyCommands = extractVerifyCommands(subTaskContexts);
+
   // Ensure directories exist
   ensureContextDirectories(parentIdentifier);
 
@@ -316,6 +346,8 @@ export async function generateContext(
     parent: parentContext,
     subTasks: subTaskContexts,
     metadata,
+    projectInfo,
+    ...(subTaskVerifyCommands.length > 0 && { subTaskVerifyCommands }),
   };
 
   // Write parent.json
