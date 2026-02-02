@@ -1,3 +1,6 @@
+pub mod jira;
+pub mod tmux;
+
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
