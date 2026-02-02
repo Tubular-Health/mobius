@@ -51,3 +51,12 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  build-rust-binaries:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    uses: ./.github/workflows/build-rust.yml
+    with:
+      tag_name: ${{ needs.release-please.outputs.tag_name }}
+    permissions:
+      contents: write
