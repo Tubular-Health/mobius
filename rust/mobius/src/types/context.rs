@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::config::{ProjectDetectionResult, SubTaskVerifyCommand};
 use super::enums::{
-    Backend, PendingUpdateType, SessionStatus, SkillOutputStatus, TaskStatus, VerificationResult,
+    Backend, PendingUpdateType, SessionStatus, TaskStatus, VerificationResult,
 };
 
 /// Parent issue details stored in local context
