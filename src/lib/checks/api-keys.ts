@@ -8,6 +8,13 @@ export async function checkApiKeys(backend: Backend): Promise<CheckResult> {
     return checkLinearApiKey();
   } else if (backend === 'jira') {
     return checkJiraCredentials();
+  } else if (backend === 'local') {
+    return {
+      name: 'API Keys',
+      status: 'skip',
+      message: 'Local backend — no API keys required',
+      required: false,
+    };
   }
 
   return {

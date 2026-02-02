@@ -37,7 +37,12 @@ import { readConfig } from './config.js';
 import { debugLog } from './debug-logger.js';
 import { fetchJiraIssue } from './jira.js';
 import { fetchLinearIssue } from './linear.js';
-import { ensureProjectMobiusDir, getProjectMobiusPath, readSubTasks } from './local-state.js';
+import {
+  ensureProjectMobiusDir,
+  getProjectMobiusPath,
+  readParentSpec,
+  readSubTasks,
+} from './local-state.js';
 import { detectProjectInfo } from './project-detector.js';
 import { mapLinearStatus } from './task-graph.js';
 
@@ -318,12 +323,29 @@ export async function generateContext(
     parentContext = await fetchLinearParentContext(parentIdentifier);
   } else if (backend === 'jira') {
     parentContext = await fetchJiraParentContext(parentIdentifier);
+  } else if (backend === 'local') {
+    parentContext = readParentSpec(parentIdentifier);
   }
 
   // Always read sub-tasks from local state
   subTaskContexts = readSubTasks(parentIdentifier);
 
+  // Fallback to local parent.json when API fetch fails for linear/jira backends
+  if (!parentContext && backend !== 'local') {
+    parentContext = readParentSpec(parentIdentifier);
+    if (parentContext) {
+      debugLog('task_state_change', 'context-generator', parentIdentifier, {
+        event: 'using_cached_parent_spec',
+        backend,
+      });
+    }
+  }
+
   if (!parentContext) {
+    debugLog('task_state_change', 'context-generator', parentIdentifier, {
+      event: 'parent_context_not_found',
+      backend,
+    });
     return null;
   }
 
