@@ -16,6 +16,7 @@ use ratatui::Terminal;
 
 use crate::types::task_graph::TaskGraph;
 
+use super::agent_progress::{AgentProgress, calculate_height};
 use super::agent_slots::{AgentSlots, AGENT_SLOTS_HEIGHT};
 use super::app::App;
 use super::debug_panel::{DebugPanel, DEBUG_PANEL_HEIGHT};
@@ -32,6 +33,7 @@ pub fn run_dashboard(
     parent_title: String,
     graph: TaskGraph,
     runtime_state_path: PathBuf,
+    max_parallel_agents: usize,
 ) -> anyhow::Result<()> {
     // Setup terminal
     enable_raw_mode()?;
@@ -47,14 +49,15 @@ pub fn run_dashboard(
         parent_title,
         graph,
         runtime_state_path.clone(),
-        3, // default max_parallel_agents, will be configurable via task-008
+        max_parallel_agents,
     );
 
     // Load initial runtime state if file exists
     app.reload_runtime_state();
 
-    // Create event handler
-    let events = EventHandler::new(Some(runtime_state_path), None);
+    // Create event handler with todos directory watcher
+    let todos_dir = app.todos_dir();
+    let events = EventHandler::new(Some(runtime_state_path), Some(todos_dir));
 
     // Main event loop
     loop {
@@ -72,7 +75,7 @@ pub fn run_dashboard(
                     app.reload_runtime_state();
                 }
                 TuiEvent::TodosChanged => {
-                    // Will be handled in task-008 with app.reload_todos()
+                    app.reload_todos();
                 }
                 TuiEvent::Tick => {
                     app.on_tick();
@@ -135,11 +138,16 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
     frame.render_widget(bg_block, size);
 
     // Calculate layout constraints
+    let has_agent_progress = !app.agent_todos.is_empty();
     let mut constraints = vec![
         Constraint::Length(HEADER_HEIGHT),     // Header
         Constraint::Min(5),                    // Main content (task tree + backend status)
         Constraint::Length(AGENT_SLOTS_HEIGHT), // Agent slots
     ];
+
+    if has_agent_progress {
+        constraints.push(Constraint::Length(calculate_height(app.agent_todos.len())));
+    }
 
     if app.show_legend {
         constraints.push(Constraint::Length(LEGEND_HEIGHT));
@@ -229,9 +237,20 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
 
     let agent_slots = AgentSlots {
         active_tasks: &active_ids,
-        max_slots: 4,
+        max_slots: app.max_parallel_agents,
     };
     frame.render_widget(agent_slots, agent_area);
+
+    // Render agent progress (if any todos exist)
+    if has_agent_progress {
+        let progress_area = chunks[chunk_idx];
+        chunk_idx += 1;
+
+        let agent_progress = AgentProgress {
+            todos: &app.agent_todos,
+        };
+        frame.render_widget(agent_progress, progress_area);
+    }
 
     // Render legend (if shown)
     if app.show_legend {

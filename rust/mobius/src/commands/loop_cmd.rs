@@ -700,12 +700,22 @@ fn run_with_tui(
         .stderr(std::process::Stdio::from(log_file))
         .spawn()?;
 
-    // 5. Run TUI dashboard (blocks until user exits or execution completes)
+    // 5. Load config to get max_parallel_agents
+    let paths = resolve_paths();
+    let config = read_config(&paths.config_path).unwrap_or_default();
+    let max_parallel_agents = if let Some(p) = parallel_override {
+        p as usize
+    } else {
+        config.execution.max_parallel_agents.unwrap_or(3) as usize
+    };
+
+    // 6. Run TUI dashboard (blocks until user exits or execution completes)
     crate::tui::dashboard::run_dashboard(
         parent_id,
         parent_title,
         graph,
         runtime_state_path,
+        max_parallel_agents,
     )?;
 
     Ok(())

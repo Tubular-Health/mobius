@@ -500,11 +500,17 @@ fn main() {
                     .map(|p| p.title)
                     .unwrap_or_else(|| task_id.clone());
 
+                // Load config to get max_parallel_agents
+                let paths = config::resolve_paths();
+                let loop_config = config::read_config(&paths.config_path).unwrap_or_default();
+                let max_parallel_agents = loop_config.execution.max_parallel_agents.unwrap_or(3) as usize;
+
                 if let Err(e) = tui::dashboard::run_dashboard(
                     task_id,
                     parent_title,
                     graph,
                     state_path,
+                    max_parallel_agents,
                 ) {
                     eprintln!("TUI error: {}", e);
                     std::process::exit(1);
