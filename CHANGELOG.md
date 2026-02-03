@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/Tubular-Health/mobius/compare/v1.9.0...v1.10.0) (2026-02-03)
+
+
+### Features
+
+* **release:** bundle skills and shortcuts in release tarballs ([#72](https://github.com/Tubular-Health/mobius/issues/72)) ([b0f7393](https://github.com/Tubular-Health/mobius/commit/b0f739306ef63c6d34a2a36b24e28f008efa0150))
+
+
+### Bug Fixes
+
+* **rust:** resolve clippy warnings ([#70](https://github.com/Tubular-Health/mobius/issues/70)) ([07cc55e](https://github.com/Tubular-Health/mobius/commit/07cc55e490dd61b890288083857f14c96c723e1f))
+
 ## [1.9.0](https://github.com/Tubular-Health/mobius/compare/v1.8.0...v1.9.0) (2026-02-03)
 
 
