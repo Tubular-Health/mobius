@@ -1072,23 +1072,55 @@ pub struct ProgressSummary {
     pub completed: usize,
     pub active: usize,
     pub failed: usize,
+    pub is_complete: bool,
+}
+
+/// Execution summary for modal/exit display.
+#[derive(Debug, Clone)]
+pub struct ExecutionSummary {
+    pub completed: usize,
+    pub failed: usize,
+    pub active: usize,
+    pub total: u32,
+    pub is_complete: bool,
+    pub elapsed_ms: u64,
 }
 
 /// Get a progress summary from runtime state.
 pub fn get_progress_summary(state: Option<&RuntimeState>) -> ProgressSummary {
     match state {
-        Some(s) => ProgressSummary {
-            total: s.total_tasks.unwrap_or(0),
-            completed: s.completed_tasks.len(),
-            active: s.active_tasks.len(),
-            failed: s.failed_tasks.len(),
-        },
+        Some(s) => {
+            let completed = s.completed_tasks.len();
+            let active = s.active_tasks.len();
+            let failed = s.failed_tasks.len();
+            ProgressSummary {
+                total: s.total_tasks.unwrap_or(0),
+                completed,
+                active,
+                failed,
+                is_complete: active == 0 && (completed > 0 || failed > 0),
+            }
+        }
         None => ProgressSummary {
             total: 0,
             completed: 0,
             active: 0,
             failed: 0,
+            is_complete: false,
         },
+    }
+}
+
+/// Get an execution summary suitable for modal/exit display.
+pub fn get_modal_summary(state: Option<&RuntimeState>, elapsed_ms: u64) -> ExecutionSummary {
+    let progress = get_progress_summary(state);
+    ExecutionSummary {
+        completed: progress.completed,
+        failed: progress.failed,
+        active: progress.active,
+        total: progress.total,
+        is_complete: progress.is_complete,
+        elapsed_ms,
     }
 }
 
@@ -2004,6 +2036,7 @@ echo "test"
     fn test_progress_summary() {
         let summary = get_progress_summary(None);
         assert_eq!(summary.total, 0);
+        assert!(!summary.is_complete);
 
         let state = RuntimeState {
             parent_id: "p".to_string(),
@@ -2029,6 +2062,7 @@ echo "test"
         assert_eq!(summary.active, 1);
         assert_eq!(summary.completed, 2);
         assert_eq!(summary.failed, 1);
+        assert!(!summary.is_complete); // active > 0, so not complete
     }
 
     // -- Session management tests --
