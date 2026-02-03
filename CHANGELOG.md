@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.9.0](https://github.com/Tubular-Health/mobius/compare/v1.8.0...v1.9.0) (2026-02-03)
+
+
+### Features
+
+* **tui:** add agent progress tracking with todo capture hooks ([#69](https://github.com/Tubular-Health/mobius/issues/69)) ([ffb0418](https://github.com/Tubular-Health/mobius/commit/ffb04189d43504834ef028f885869ebdf8e8e171))
+
+
+### Bug Fixes
+
+* **rust:** remove unused git2 and graphql_client dependencies that require OpenSSL ([#67](https://github.com/Tubular-Health/mobius/issues/67)) ([fd626b7](https://github.com/Tubular-Health/mobius/commit/fd626b72977479585cc202354d20d3787ebe3c63))
+
 ## [1.8.0](https://github.com/Tubular-Health/mobius/compare/v1.7.0...v1.8.0) (2026-02-03)
 
 
