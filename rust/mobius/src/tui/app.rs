@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::types::context::{RuntimeActiveTask, RuntimeCompletedTask, RuntimeState};
+use crate::types::context::{AgentTodoFile, RuntimeActiveTask, RuntimeCompletedTask, RuntimeState};
 use crate::types::debug::DebugEvent;
 use crate::types::enums::TaskStatus;
 use crate::types::task_graph::{TaskGraph, SubTask};
@@ -23,6 +23,8 @@ pub struct App {
     pub runtime_state_path: PathBuf,
     pub should_quit: bool,
     pub auto_exit_tick: Option<u8>,
+    pub agent_todos: HashMap<String, AgentTodoFile>,
+    pub max_parallel_agents: usize,
 }
 
 impl App {
@@ -31,6 +33,7 @@ impl App {
         parent_title: String,
         graph: TaskGraph,
         runtime_state_path: PathBuf,
+        max_parallel_agents: usize,
     ) -> Self {
         Self {
             parent_id,
@@ -47,6 +50,8 @@ impl App {
             runtime_state_path,
             should_quit: false,
             auto_exit_tick: None,
+            agent_todos: HashMap::new(),
+            max_parallel_agents,
         }
     }
 
@@ -56,6 +61,35 @@ impl App {
             if let Ok(state) = serde_json::from_str::<RuntimeState>(&content) {
                 self.runtime_state = Some(state);
                 self.check_completion();
+            }
+        }
+    }
+
+    /// Get the path to the todos directory (sibling to runtime.json).
+    pub fn todos_dir(&self) -> PathBuf {
+        self.runtime_state_path
+            .parent()
+            .unwrap()
+            .join("todos")
+    }
+
+    /// Reload agent todo files from the todos directory.
+    pub fn reload_todos(&mut self) {
+        self.agent_todos.clear();
+        let todos_dir = self.todos_dir();
+        let entries = match std::fs::read_dir(&todos_dir) {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("json") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if let Ok(todo_file) = serde_json::from_str::<AgentTodoFile>(&content) {
+                        self.agent_todos
+                            .insert(todo_file.subtask_id.clone(), todo_file);
+                    }
+                }
             }
         }
     }

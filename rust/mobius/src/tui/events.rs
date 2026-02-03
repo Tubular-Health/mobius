@@ -11,6 +11,8 @@ pub enum TuiEvent {
     Key(KeyEvent),
     /// The runtime state file changed on disk
     StateFileChanged,
+    /// A todo file was created or modified in the todos directory
+    TodosChanged,
     /// 1-second tick for elapsed time updates
     Tick,
 }
@@ -21,11 +23,13 @@ pub struct EventHandler {
     _keyboard_handle: std::thread::JoinHandle<()>,
     _tick_handle: std::thread::JoinHandle<()>,
     _watcher: Option<notify::RecommendedWatcher>,
+    _todos_watcher: Option<notify::RecommendedWatcher>,
 }
 
 impl EventHandler {
-    /// Create a new event handler that watches the given runtime state file path.
-    pub fn new(runtime_state_path: Option<PathBuf>) -> Self {
+    /// Create a new event handler that watches the given runtime state file path
+    /// and optionally a todos directory for agent progress updates.
+    pub fn new(runtime_state_path: Option<PathBuf>, todos_dir: Option<PathBuf>) -> Self {
         let (tx, rx) = mpsc::channel();
 
         // Keyboard event thread
@@ -75,11 +79,31 @@ impl EventHandler {
             Some(watcher)
         });
 
+        // File watcher for todos directory
+        let todos_watcher = todos_dir.and_then(|dir| {
+            use notify::{Watcher, RecursiveMode, Config};
+            let tx_todos = tx.clone();
+            let mut watcher = notify::RecommendedWatcher::new(
+                move |res: Result<notify::Event, notify::Error>| {
+                    if let Ok(event) = res {
+                        if event.kind.is_modify() || event.kind.is_create() {
+                            let _ = tx_todos.send(TuiEvent::TodosChanged);
+                        }
+                    }
+                },
+                Config::default(),
+            ).ok()?;
+
+            let _ = watcher.watch(&dir, RecursiveMode::NonRecursive);
+            Some(watcher)
+        });
+
         Self {
             rx,
             _keyboard_handle: keyboard_handle,
             _tick_handle: tick_handle,
             _watcher: watcher,
+            _todos_watcher: todos_watcher,
         }
     }
 

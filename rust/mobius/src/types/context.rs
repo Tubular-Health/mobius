@@ -173,6 +173,24 @@ pub struct RuntimeCompletedTask {
     pub duration: u64,
 }
 
+/// A single todo task from a Claude Code agent
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTodoTask {
+    pub subject: String,
+    pub status: String,
+    pub description: Option<String>,
+}
+
+/// A todo file written by a Claude Code agent's PostToolUse hook
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTodoFile {
+    pub subtask_id: String,
+    pub updated_at: String,
+    pub tasks: Vec<AgentTodoTask>,
+}
+
 /// Backend status entry for tracking synced status
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

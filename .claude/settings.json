@@ -10,5 +10,18 @@
       "Write(.mobius/**)",
       "Edit(.mobius/**)"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "TodoWrite|TaskCreate|TaskUpdate",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/capture-agent-todos.sh"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -15,7 +15,7 @@ impl Default for AgentSlots<'_> {
     fn default() -> Self {
         Self {
             active_tasks: &[],
-            max_slots: 4,
+            max_slots: 3,
         }
     }
 }
