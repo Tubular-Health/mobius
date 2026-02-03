@@ -644,4 +644,464 @@ mod tests {
         assert_eq!(ready.len(), 1);
         assert_eq!(ready[0].status, TaskStatus::InProgress);
     }
+
+    // ── Diamond Dependency Tests ──────────────────────────────────────
+
+    /// Helper: creates a diamond dependency graph A→B, A→C, B→D, C→D
+    fn make_diamond_issues() -> Vec<LinearIssue> {
+        vec![
+            LinearIssue {
+                id: "a".to_string(),
+                identifier: "MOB-200".to_string(),
+                title: "Task A (root)".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![],
+                    blocks: vec![
+                        Relation { id: "b".to_string(), identifier: "MOB-201".to_string() },
+                        Relation { id: "c".to_string(), identifier: "MOB-202".to_string() },
+                    ],
+                }),
+            },
+            LinearIssue {
+                id: "b".to_string(),
+                identifier: "MOB-201".to_string(),
+                title: "Task B (left)".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-200".to_string() }],
+                    blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-203".to_string() }],
+                }),
+            },
+            LinearIssue {
+                id: "c".to_string(),
+                identifier: "MOB-202".to_string(),
+                title: "Task C (right)".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-200".to_string() }],
+                    blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-203".to_string() }],
+                }),
+            },
+            LinearIssue {
+                id: "d".to_string(),
+                identifier: "MOB-203".to_string(),
+                title: "Task D (sink)".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![
+                        Relation { id: "b".to_string(), identifier: "MOB-201".to_string() },
+                        Relation { id: "c".to_string(), identifier: "MOB-202".to_string() },
+                    ],
+                    blocks: vec![],
+                }),
+            },
+        ]
+    }
+
+    #[test]
+    fn test_diamond_dependency_all_blocked() {
+        let graph = build_task_graph("p1", "MOB-100", &make_diamond_issues());
+        assert_eq!(graph.tasks.get("a").unwrap().status, TaskStatus::Ready);
+        assert_eq!(graph.tasks.get("b").unwrap().status, TaskStatus::Blocked);
+        assert_eq!(graph.tasks.get("c").unwrap().status, TaskStatus::Blocked);
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Blocked);
+    }
+
+    #[test]
+    fn test_diamond_dependency_partial_unblock() {
+        let graph = build_task_graph("p1", "MOB-100", &make_diamond_issues());
+        // Mark A done → B and C become Ready, but D still blocked (needs both B and C)
+        let graph = update_task_status(&graph, "a", TaskStatus::Done);
+        assert_eq!(graph.tasks.get("b").unwrap().status, TaskStatus::Ready);
+        assert_eq!(graph.tasks.get("c").unwrap().status, TaskStatus::Ready);
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Blocked);
+    }
+
+    #[test]
+    fn test_diamond_dependency_full_cascade() {
+        let graph = build_task_graph("p1", "MOB-100", &make_diamond_issues());
+        let graph = update_task_status(&graph, "a", TaskStatus::Done);
+        let graph = update_task_status(&graph, "b", TaskStatus::Done);
+        // D still blocked because C is not done
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Blocked);
+        let graph = update_task_status(&graph, "c", TaskStatus::Done);
+        // Now D should be ready
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Ready);
+    }
+
+    #[test]
+    fn test_diamond_with_multiple_downstream() {
+        // A blocks B, C, D directly (fan-out)
+        let issues = vec![
+            LinearIssue {
+                id: "a".to_string(),
+                identifier: "MOB-300".to_string(),
+                title: "Root".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![],
+                    blocks: vec![
+                        Relation { id: "b".to_string(), identifier: "MOB-301".to_string() },
+                        Relation { id: "c".to_string(), identifier: "MOB-302".to_string() },
+                        Relation { id: "d".to_string(), identifier: "MOB-303".to_string() },
+                    ],
+                }),
+            },
+            LinearIssue {
+                id: "b".to_string(),
+                identifier: "MOB-301".to_string(),
+                title: "B".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-300".to_string() }],
+                    blocks: vec![],
+                }),
+            },
+            LinearIssue {
+                id: "c".to_string(),
+                identifier: "MOB-302".to_string(),
+                title: "C".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-300".to_string() }],
+                    blocks: vec![],
+                }),
+            },
+            LinearIssue {
+                id: "d".to_string(),
+                identifier: "MOB-303".to_string(),
+                title: "D".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-300".to_string() }],
+                    blocks: vec![],
+                }),
+            },
+        ];
+        let graph = build_task_graph("p1", "MOB-100", &issues);
+        assert_eq!(graph.tasks.get("b").unwrap().status, TaskStatus::Blocked);
+        assert_eq!(graph.tasks.get("c").unwrap().status, TaskStatus::Blocked);
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Blocked);
+
+        let graph = update_task_status(&graph, "a", TaskStatus::Done);
+        assert_eq!(graph.tasks.get("b").unwrap().status, TaskStatus::Ready);
+        assert_eq!(graph.tasks.get("c").unwrap().status, TaskStatus::Ready);
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Ready);
+    }
+
+    // ── Empty/Single-Task Graph Tests ─────────────────────────────────
+
+    #[test]
+    fn test_build_graph_empty_issues() {
+        let graph = build_task_graph("p1", "MOB-100", &[]);
+        assert_eq!(graph.tasks.len(), 0);
+        let stats = get_graph_stats(&graph);
+        assert_eq!(stats.total, 0);
+        assert_eq!(stats.done, 0);
+        assert_eq!(stats.ready, 0);
+        assert_eq!(stats.blocked, 0);
+        assert_eq!(stats.in_progress, 0);
+        assert!(get_ready_tasks(&graph).is_empty());
+        assert!(get_blocked_tasks(&graph).is_empty());
+        assert!(get_completed_tasks(&graph).is_empty());
+    }
+
+    #[test]
+    fn test_build_graph_single_task_no_relations() {
+        let issues = vec![LinearIssue {
+            id: "solo".to_string(),
+            identifier: "MOB-400".to_string(),
+            title: "Solo task".to_string(),
+            status: "Backlog".to_string(),
+            git_branch_name: String::new(),
+            relations: None,
+        }];
+        let graph = build_task_graph("p1", "MOB-100", &issues);
+        assert_eq!(graph.tasks.len(), 1);
+        // No blockers → should be Ready
+        assert_eq!(graph.tasks.get("solo").unwrap().status, TaskStatus::Ready);
+    }
+
+    #[test]
+    fn test_build_graph_single_task_external_blocker() {
+        let issues = vec![LinearIssue {
+            id: "solo".to_string(),
+            identifier: "MOB-401".to_string(),
+            title: "Blocked by external".to_string(),
+            status: "Backlog".to_string(),
+            git_branch_name: String::new(),
+            relations: Some(Relations {
+                blocked_by: vec![Relation {
+                    id: "ext-1".to_string(),
+                    identifier: "EXT-1".to_string(),
+                }],
+                blocks: vec![],
+            }),
+        }];
+        let graph = build_task_graph("p1", "MOB-100", &issues);
+        // External blocker not in graph → assumed done → task is Ready
+        assert_eq!(graph.tasks.get("solo").unwrap().status, TaskStatus::Ready);
+    }
+
+    // ── Multi-Level Cascade Tests ─────────────────────────────────────
+
+    #[test]
+    fn test_cascade_three_level_chain() {
+        // A → B → C → D (four-level chain)
+        let issues = vec![
+            LinearIssue {
+                id: "a".to_string(),
+                identifier: "MOB-500".to_string(),
+                title: "Level 0".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![],
+                    blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-501".to_string() }],
+                }),
+            },
+            LinearIssue {
+                id: "b".to_string(),
+                identifier: "MOB-501".to_string(),
+                title: "Level 1".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-500".to_string() }],
+                    blocks: vec![Relation { id: "c".to_string(), identifier: "MOB-502".to_string() }],
+                }),
+            },
+            LinearIssue {
+                id: "c".to_string(),
+                identifier: "MOB-502".to_string(),
+                title: "Level 2".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "b".to_string(), identifier: "MOB-501".to_string() }],
+                    blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-503".to_string() }],
+                }),
+            },
+            LinearIssue {
+                id: "d".to_string(),
+                identifier: "MOB-503".to_string(),
+                title: "Level 3".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "c".to_string(), identifier: "MOB-502".to_string() }],
+                    blocks: vec![],
+                }),
+            },
+        ];
+        let graph = build_task_graph("p1", "MOB-100", &issues);
+
+        // Initially: A ready, B/C/D blocked
+        assert_eq!(graph.tasks.get("a").unwrap().status, TaskStatus::Ready);
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Blocked);
+
+        let graph = update_task_status(&graph, "a", TaskStatus::Done);
+        assert_eq!(graph.tasks.get("b").unwrap().status, TaskStatus::Ready);
+        assert_eq!(graph.tasks.get("c").unwrap().status, TaskStatus::Blocked);
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Blocked);
+
+        let graph = update_task_status(&graph, "b", TaskStatus::Done);
+        assert_eq!(graph.tasks.get("c").unwrap().status, TaskStatus::Ready);
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Blocked);
+
+        let graph = update_task_status(&graph, "c", TaskStatus::Done);
+        assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Ready);
+    }
+
+    #[test]
+    fn test_cascade_does_not_affect_unrelated() {
+        // Two independent chains: A→B and X→Y
+        let issues = vec![
+            LinearIssue {
+                id: "a".to_string(),
+                identifier: "MOB-600".to_string(),
+                title: "Chain1-A".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![],
+                    blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-601".to_string() }],
+                }),
+            },
+            LinearIssue {
+                id: "b".to_string(),
+                identifier: "MOB-601".to_string(),
+                title: "Chain1-B".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-600".to_string() }],
+                    blocks: vec![],
+                }),
+            },
+            LinearIssue {
+                id: "x".to_string(),
+                identifier: "MOB-602".to_string(),
+                title: "Chain2-X".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![],
+                    blocks: vec![Relation { id: "y".to_string(), identifier: "MOB-603".to_string() }],
+                }),
+            },
+            LinearIssue {
+                id: "y".to_string(),
+                identifier: "MOB-603".to_string(),
+                title: "Chain2-Y".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "x".to_string(), identifier: "MOB-602".to_string() }],
+                    blocks: vec![],
+                }),
+            },
+        ];
+        let graph = build_task_graph("p1", "MOB-100", &issues);
+
+        // Mark A done - should only affect B, not Y
+        let graph = update_task_status(&graph, "a", TaskStatus::Done);
+        assert_eq!(graph.tasks.get("b").unwrap().status, TaskStatus::Ready);
+        assert_eq!(graph.tasks.get("y").unwrap().status, TaskStatus::Blocked);
+
+        // Mark X done - should only affect Y
+        let graph = update_task_status(&graph, "x", TaskStatus::Done);
+        assert_eq!(graph.tasks.get("y").unwrap().status, TaskStatus::Ready);
+    }
+
+    #[test]
+    fn test_cascade_with_in_progress_blocker() {
+        // A (InProgress) → B: B should remain blocked because InProgress != Done
+        let issues = vec![
+            LinearIssue {
+                id: "a".to_string(),
+                identifier: "MOB-700".to_string(),
+                title: "In progress blocker".to_string(),
+                status: "In Progress".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![],
+                    blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-701".to_string() }],
+                }),
+            },
+            LinearIssue {
+                id: "b".to_string(),
+                identifier: "MOB-701".to_string(),
+                title: "Waiting on A".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-700".to_string() }],
+                    blocks: vec![],
+                }),
+            },
+        ];
+        let graph = build_task_graph("p1", "MOB-100", &issues);
+        assert_eq!(graph.tasks.get("a").unwrap().status, TaskStatus::InProgress);
+        assert_eq!(graph.tasks.get("b").unwrap().status, TaskStatus::Blocked);
+
+        // Setting A to InProgress again shouldn't unblock B
+        let graph = update_task_status(&graph, "a", TaskStatus::InProgress);
+        assert_eq!(graph.tasks.get("b").unwrap().status, TaskStatus::Blocked);
+    }
+
+    // ── Graph Stats After Mutations Tests ─────────────────────────────
+
+    #[test]
+    fn test_graph_stats_after_status_updates() {
+        let issues = make_chain_issues(); // A→B→C
+        let graph = build_task_graph("p1", "MOB-100", &issues);
+
+        let stats = get_graph_stats(&graph);
+        assert_eq!(stats, GraphStats { total: 3, done: 0, ready: 1, blocked: 2, in_progress: 0 });
+
+        let graph = update_task_status(&graph, "a", TaskStatus::Done);
+        let stats = get_graph_stats(&graph);
+        assert_eq!(stats, GraphStats { total: 3, done: 1, ready: 1, blocked: 1, in_progress: 0 });
+
+        let graph = update_task_status(&graph, "b", TaskStatus::Done);
+        let stats = get_graph_stats(&graph);
+        assert_eq!(stats, GraphStats { total: 3, done: 2, ready: 1, blocked: 0, in_progress: 0 });
+
+        let graph = update_task_status(&graph, "c", TaskStatus::Done);
+        let stats = get_graph_stats(&graph);
+        assert_eq!(stats, GraphStats { total: 3, done: 3, ready: 0, blocked: 0, in_progress: 0 });
+    }
+
+    #[test]
+    fn test_graph_stats_with_all_statuses() {
+        // Create tasks with different statuses
+        let issues = vec![
+            LinearIssue {
+                id: "done1".to_string(),
+                identifier: "MOB-800".to_string(),
+                title: "Done task".to_string(),
+                status: "Done".to_string(),
+                git_branch_name: String::new(),
+                relations: None,
+            },
+            LinearIssue {
+                id: "ip1".to_string(),
+                identifier: "MOB-801".to_string(),
+                title: "In progress task".to_string(),
+                status: "In Progress".to_string(),
+                git_branch_name: String::new(),
+                relations: None,
+            },
+            LinearIssue {
+                id: "ready1".to_string(),
+                identifier: "MOB-802".to_string(),
+                title: "Ready task".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: None,
+            },
+            LinearIssue {
+                id: "blocked1".to_string(),
+                identifier: "MOB-803".to_string(),
+                title: "Blocked task".to_string(),
+                status: "Backlog".to_string(),
+                git_branch_name: String::new(),
+                relations: Some(Relations {
+                    blocked_by: vec![Relation { id: "ip1".to_string(), identifier: "MOB-801".to_string() }],
+                    blocks: vec![],
+                }),
+            },
+        ];
+        let graph = build_task_graph("p1", "MOB-100", &issues);
+        let stats = get_graph_stats(&graph);
+        assert_eq!(stats, GraphStats { total: 4, done: 1, ready: 1, blocked: 1, in_progress: 1 });
+    }
+
+    #[test]
+    fn test_graph_stats_after_cascade() {
+        let graph = build_task_graph("p1", "MOB-100", &make_diamond_issues());
+        let stats = get_graph_stats(&graph);
+        assert_eq!(stats, GraphStats { total: 4, done: 0, ready: 1, blocked: 3, in_progress: 0 });
+
+        // A done → B and C become ready, D still blocked
+        let graph = update_task_status(&graph, "a", TaskStatus::Done);
+        let stats = get_graph_stats(&graph);
+        assert_eq!(stats, GraphStats { total: 4, done: 1, ready: 2, blocked: 1, in_progress: 0 });
+
+        // B and C done → D becomes ready
+        let graph = update_task_status(&graph, "b", TaskStatus::Done);
+        let graph = update_task_status(&graph, "c", TaskStatus::Done);
+        let stats = get_graph_stats(&graph);
+        assert_eq!(stats, GraphStats { total: 4, done: 3, ready: 1, blocked: 0, in_progress: 0 });
+    }
 }

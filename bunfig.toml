@@ -1,6 +1,0 @@
-# Bun configuration
-# https://bun.sh/docs/runtime/bunfig
-
-[test]
-# Only run tests from src/, not from dist/
-root = "./src"

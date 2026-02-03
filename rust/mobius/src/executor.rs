@@ -785,4 +785,326 @@ mod tests {
         assert_eq!(agg.succeeded, 0);
         assert_eq!(agg.failed, 0);
     }
+
+    // --- build_claude_command Edge Cases ---
+
+    #[test]
+    fn test_build_claude_command_path_with_spaces() {
+        let config = ExecutionConfig::default();
+        let cmd = build_claude_command(
+            "MOB-101",
+            "/execute",
+            "/path/to/my worktree/project",
+            &config,
+            None,
+        );
+        // Path with spaces should be properly quoted in the cd command
+        assert!(cmd.contains("cd \"/path/to/my worktree/project\""));
+        assert!(cmd.contains("claude -p"));
+    }
+
+    #[test]
+    fn test_build_claude_command_path_with_special_chars() {
+        let config = ExecutionConfig::default();
+        let cmd = build_claude_command(
+            "MOB-101",
+            "/execute",
+            "/path/to/project-v2.0_(beta)",
+            &config,
+            None,
+        );
+        assert!(cmd.contains("cd \"/path/to/project-v2.0_(beta)\""));
+        assert!(cmd.contains("echo '/execute MOB-101'"));
+    }
+
+    #[test]
+    fn test_build_claude_command_empty_disallowed_tools() {
+        let mut config = ExecutionConfig::default();
+        config.disallowed_tools = Some(vec![]);
+
+        let cmd = build_claude_command("MOB-101", "/execute", "/path", &config, None);
+        // Empty vec should be filtered out, no --disallowedTools flag
+        assert!(!cmd.contains("--disallowedTools"));
+    }
+
+    #[test]
+    fn test_build_claude_command_context_file_with_quotes() {
+        let config = ExecutionConfig::default();
+        let cmd = build_claude_command(
+            "MOB-101",
+            "/execute",
+            "/path",
+            &config,
+            Some("/tmp/my context/file.json"),
+        );
+        // Context file path should be in quotes
+        assert!(cmd.contains("MOBIUS_CONTEXT_FILE=\"/tmp/my context/file.json\""));
+        assert!(cmd.contains("MOBIUS_TASK_ID=\"MOB-101\""));
+    }
+
+    // --- Status Pattern Matching in Noisy Output ---
+
+    #[test]
+    fn test_status_patterns_match_in_noisy_output() {
+        let patterns = StatusPatterns::new();
+
+        // Generate 50 lines of noise before and after the status line
+        let mut lines = Vec::new();
+        for i in 0..50 {
+            lines.push(format!("Line {} of agent output: processing files, running tests, checking types...", i));
+        }
+        lines.push("STATUS: SUBTASK_COMPLETE".to_string());
+        for i in 50..100 {
+            lines.push(format!("Line {} more output after completion marker with various data", i));
+        }
+        let content = lines.join("\n");
+
+        assert!(patterns.subtask_complete.is_match(&content));
+        // Other patterns should NOT match
+        assert!(!patterns.verification_failed.is_match(&content));
+        assert!(!patterns.all_blocked.is_match(&content));
+    }
+
+    #[test]
+    fn test_status_patterns_multiple_statuses_first_wins() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        // Content has SUBTASK_COMPLETE before VERIFICATION_FAILED
+        let content = "output\nSTATUS: SUBTASK_COMPLETE\nlater\nSTATUS: VERIFICATION_FAILED\n";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re);
+
+        assert!(result.is_some());
+        let result = result.unwrap();
+        // SUBTASK_COMPLETE is checked first in parse_agent_output, so it wins
+        assert!(result.success);
+        assert_eq!(result.status, ExecutionStatus::SubtaskComplete);
+    }
+
+    #[test]
+    fn test_status_patterns_execution_complete_various_ids() {
+        let patterns = StatusPatterns::new();
+
+        // Standard format
+        assert!(patterns.execution_complete.is_match("EXECUTION_COMPLETE: MOB-124"));
+        // Hyphenated task IDs
+        assert!(patterns.execution_complete.is_match("EXECUTION_COMPLETE: task-001"));
+        // No space after colon
+        assert!(patterns.execution_complete.is_match("EXECUTION_COMPLETE:task-VG"));
+        // Alphanumeric IDs
+        assert!(patterns.execution_complete.is_match("EXECUTION_COMPLETE: PROJ-999"));
+        // Embedded in larger output
+        assert!(patterns.execution_complete.is_match(
+            "lots of text\nEXECUTION_COMPLETE: MOB-255\nmore text"
+        ));
+    }
+
+    #[test]
+    fn test_status_patterns_case_sensitivity() {
+        let patterns = StatusPatterns::new();
+
+        // Lowercase should NOT match
+        assert!(!patterns.subtask_complete.is_match("status: subtask_complete"));
+        assert!(!patterns.subtask_complete.is_match("Status: Subtask_Complete"));
+
+        // Missing STATUS: prefix should NOT match
+        assert!(!patterns.subtask_complete.is_match("SUBTASK_COMPLETE"));
+        assert!(!patterns.verification_failed.is_match("VERIFICATION_FAILED"));
+        assert!(!patterns.all_complete.is_match("ALL_COMPLETE"));
+    }
+
+    // --- parse_agent_output Edge Cases ---
+
+    #[test]
+    fn test_parse_agent_output_empty_content() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        let result = parse_agent_output("", &task, start, "%0", &patterns, &error_re);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_agent_output_only_error_no_status() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        // Has error summary but no STATUS: pattern - should return None (still running)
+        let content = "Agent output\n### Error Summary\nSomething went wrong\nBut no status pattern";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_agent_output_truncated_pattern() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        // Truncated status keywords should NOT match
+        let content = "STATUS: SUBTASK_COMPLE";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re);
+        assert!(result.is_none());
+
+        let content2 = "STATUS: VERIFICATION_FAIL";
+        let result2 = parse_agent_output(content2, &task, start, "%0", &patterns, &error_re);
+        assert!(result2.is_none());
+    }
+
+    #[test]
+    fn test_parse_agent_output_multiline_error() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        // Error summary captures only the first line after the header
+        let content = "output\n### Error Summary\nFirst error line\nSecond error line\nThird error line\nSTATUS: VERIFICATION_FAILED\n";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re);
+
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert_eq!(result.error.as_deref(), Some("First error line"));
+    }
+
+    #[test]
+    fn test_parse_agent_output_multiple_error_summaries() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        // Multiple error summaries - regex captures first occurrence
+        let content = "### Error Summary\nFirst error\n\n### Error Summary\nSecond error\nSTATUS: VERIFICATION_FAILED\n";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re);
+
+        assert!(result.is_some());
+        let result = result.unwrap();
+        // First capture wins
+        assert_eq!(result.error.as_deref(), Some("First error"));
+    }
+
+    // --- aggregate_results Additional Tests ---
+
+    #[test]
+    fn test_aggregate_results_all_success() {
+        let results: Vec<ExecutionResult> = (0..5)
+            .map(|i| ExecutionResult {
+                task_id: format!("{}", i),
+                identifier: format!("MOB-{}", 100 + i),
+                success: true,
+                status: ExecutionStatus::SubtaskComplete,
+                duration_ms: 5000 + i * 1000,
+                error: None,
+                pane_id: Some(format!("%{}", i)),
+                raw_output: None,
+            })
+            .collect();
+
+        let agg = aggregate_results(&results);
+        assert_eq!(agg.total, 5);
+        assert_eq!(agg.succeeded, 5);
+        assert_eq!(agg.failed, 0);
+        assert_eq!(agg.completed.len(), 5);
+        assert!(agg.failed_tasks.is_empty());
+    }
+
+    #[test]
+    fn test_aggregate_results_all_failure() {
+        let errors = vec![
+            "Type mismatch in foo.rs",
+            "Test assertion failed",
+            "Lint error: unused variable",
+        ];
+        let results: Vec<ExecutionResult> = errors
+            .iter()
+            .enumerate()
+            .map(|(i, err)| ExecutionResult {
+                task_id: format!("{}", i),
+                identifier: format!("MOB-{}", 200 + i),
+                success: false,
+                status: ExecutionStatus::VerificationFailed,
+                duration_ms: 3000,
+                error: Some(err.to_string()),
+                pane_id: Some(format!("%{}", i)),
+                raw_output: None,
+            })
+            .collect();
+
+        let agg = aggregate_results(&results);
+        assert_eq!(agg.total, 3);
+        assert_eq!(agg.succeeded, 0);
+        assert_eq!(agg.failed, 3);
+        assert!(agg.completed.is_empty());
+        assert_eq!(agg.failed_tasks.len(), 3);
+        // Each failure message should contain the identifier and error
+        assert!(agg.failed_tasks[0].contains("MOB-200"));
+        assert!(agg.failed_tasks[0].contains("Type mismatch"));
+        assert!(agg.failed_tasks[1].contains("MOB-201"));
+        assert!(agg.failed_tasks[2].contains("MOB-202"));
+    }
+
+    #[test]
+    fn test_aggregate_results_mixed() {
+        let results = vec![
+            ExecutionResult {
+                task_id: "1".to_string(),
+                identifier: "MOB-301".to_string(),
+                success: true,
+                status: ExecutionStatus::SubtaskComplete,
+                duration_ms: 5000,
+                error: None,
+                pane_id: Some("%0".to_string()),
+                raw_output: None,
+            },
+            ExecutionResult {
+                task_id: "2".to_string(),
+                identifier: "MOB-302".to_string(),
+                success: false,
+                status: ExecutionStatus::VerificationFailed,
+                duration_ms: 8000,
+                error: Some("Tests failed".to_string()),
+                pane_id: Some("%1".to_string()),
+                raw_output: None,
+            },
+            ExecutionResult {
+                task_id: "3".to_string(),
+                identifier: "MOB-303".to_string(),
+                success: false,
+                status: ExecutionStatus::Error,
+                duration_ms: 1000,
+                error: Some("Agent timed out".to_string()),
+                pane_id: Some("%2".to_string()),
+                raw_output: None,
+            },
+            ExecutionResult {
+                task_id: "4".to_string(),
+                identifier: "MOB-304".to_string(),
+                success: true,
+                status: ExecutionStatus::SubtaskComplete,
+                duration_ms: 6000,
+                error: None,
+                pane_id: Some("%3".to_string()),
+                raw_output: None,
+            },
+        ];
+
+        let agg = aggregate_results(&results);
+        assert_eq!(agg.total, 4);
+        assert_eq!(agg.succeeded, 2);
+        assert_eq!(agg.failed, 2);
+        assert_eq!(agg.completed, vec!["MOB-301", "MOB-304"]);
+        assert_eq!(agg.failed_tasks.len(), 2);
+        assert!(agg.failed_tasks[0].contains("MOB-302"));
+        assert!(agg.failed_tasks[0].contains("Tests failed"));
+        assert!(agg.failed_tasks[1].contains("MOB-303"));
+        assert!(agg.failed_tasks[1].contains("Agent timed out"));
+    }
 }
