@@ -161,7 +161,7 @@ impl DebugLogger {
 
     fn get_recent_events(&self, count: usize) -> Vec<DebugEvent> {
         let len = self.ring_buffer.len();
-        let start = if len > count { len - count } else { 0 };
+        let start = len.saturating_sub(count);
         self.ring_buffer.iter().skip(start).cloned().collect()
     }
 

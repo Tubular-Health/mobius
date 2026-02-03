@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod config;
 pub mod context;
+pub mod debug_logger;
 pub mod executor;
 pub mod git_lock;
 pub mod jira;
@@ -10,6 +11,7 @@ pub mod loop_command;
 pub mod mermaid_renderer;
 pub mod output_parser;
 pub mod project_detector;
+pub mod status_sync;
 pub mod tmux;
 pub mod tracker;
 pub mod tree_renderer;
