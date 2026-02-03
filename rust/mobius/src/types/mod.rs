@@ -10,9 +10,9 @@ pub use config::{
     VerificationCommands, VerificationConfig,
 };
 pub use context::{
-    ContextMetadata, IssueContext, ParentIssueContext, PendingUpdate, PendingUpdateData,
-    PendingUpdatesQueue, RuntimeState, SessionInfo, SkillOutputData, SubTaskContext, SyncLog,
-    SyncLogEntry,
+    AgentTodoFile, AgentTodoTask, ContextMetadata, IssueContext, ParentIssueContext, PendingUpdate,
+    PendingUpdateData, PendingUpdatesQueue, RuntimeState, SessionInfo, SkillOutputData,
+    SubTaskContext, SyncLog, SyncLogEntry,
 };
 pub use debug::{DebugConfig, DebugEvent};
 pub use enums::{
