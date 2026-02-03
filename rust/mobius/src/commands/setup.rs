@@ -105,9 +105,7 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
     let install_type_idx = dialoguer::Select::new()
         .with_prompt("Installation type")
         .items(&[
-            format!(
-                "Local (this project) - Config at ./mobius.config.yaml, skills at ./.claude/skills/"
-            ),
+            "Local (this project) - Config at ./mobius.config.yaml, skills at ./.claude/skills/".to_string(),
             format!(
                 "Global (user-wide) - Config at {}/config.yaml, skills at ~/.claude/skills/",
                 get_global_config_dir().display()
@@ -122,7 +120,7 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
         PathConfigType::Global
     };
 
-    let paths = get_paths_for_type(install_type.clone(), None);
+    let paths = get_paths_for_type(install_type, None);
 
     // Check for existing config
     if config_exists(&paths.config_path) {

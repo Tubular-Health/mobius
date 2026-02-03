@@ -37,19 +37,25 @@ use crate::worktree::{create_worktree, remove_worktree, WorktreeConfig};
 use super::push::push_pending_updates_for_task;
 use super::submit;
 
-pub fn run(
-    task_id: &str,
-    _no_sandbox: bool,
-    backend_override: Option<&str>,
-    model_override: Option<&str>,
-    parallel_override: Option<u32>,
-    max_iterations_override: Option<u32>,
-    fresh: bool,
-    _debug: Option<Option<&str>>,
-    no_submit: bool,
-    no_tui: bool,
-) -> anyhow::Result<()> {
-    if !no_tui {
+pub struct LoopOptions<'a> {
+    pub backend_override: Option<&'a str>,
+    pub model_override: Option<&'a str>,
+    pub parallel_override: Option<u32>,
+    pub max_iterations_override: Option<u32>,
+    pub fresh: bool,
+    pub no_submit: bool,
+    pub no_tui: bool,
+}
+
+pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
+    let backend_override = opts.backend_override;
+    let model_override = opts.model_override;
+    let parallel_override = opts.parallel_override;
+    let max_iterations_override = opts.max_iterations_override;
+    let fresh = opts.fresh;
+    let no_submit = opts.no_submit;
+
+    if !opts.no_tui {
         return run_with_tui(
             task_id,
             backend_override,

@@ -398,21 +398,21 @@ fn main() {
                 parallel,
                 max_iterations,
                 fresh,
-                debug,
+                debug: _,
                 no_submit,
                 no_tui,
             } => {
                 if let Err(e) = commands::loop_cmd::run(
                     &task_id,
-                    false,
-                    backend.as_deref(),
-                    model.as_deref(),
-                    parallel,
-                    max_iterations,
-                    fresh,
-                    debug.as_ref().map(|d| d.as_deref()),
-                    no_submit,
-                    no_tui,
+                    &commands::loop_cmd::LoopOptions {
+                        backend_override: backend.as_deref(),
+                        model_override: model.as_deref(),
+                        parallel_override: parallel,
+                        max_iterations_override: max_iterations,
+                        fresh,
+                        no_submit,
+                        no_tui,
+                    },
                 ) {
                     eprintln!("Loop error: {}", e);
                     std::process::exit(1);
@@ -532,22 +532,20 @@ fn main() {
                         eprintln!("Run error: {}", e);
                         std::process::exit(1);
                     }
-                } else {
-                    if let Err(e) = commands::loop_cmd::run(
-                        &task_id,
-                        cli.no_sandbox || cli.local,
-                        cli.backend.as_deref(),
-                        cli.model.as_deref(),
-                        cli.parallel,
-                        cli.max_iterations,
-                        cli.fresh,
-                        cli.debug.as_ref().map(|d| d.as_deref()),
-                        cli.no_submit,
-                        cli.no_tui,
-                    ) {
-                        eprintln!("Loop error: {}", e);
-                        std::process::exit(1);
-                    }
+                } else if let Err(e) = commands::loop_cmd::run(
+                    &task_id,
+                    &commands::loop_cmd::LoopOptions {
+                        backend_override: cli.backend.as_deref(),
+                        model_override: cli.model.as_deref(),
+                        parallel_override: cli.parallel,
+                        max_iterations_override: cli.max_iterations,
+                        fresh: cli.fresh,
+                        no_submit: cli.no_submit,
+                        no_tui: cli.no_tui,
+                    },
+                ) {
+                    eprintln!("Loop error: {}", e);
+                    std::process::exit(1);
                 }
             } else {
                 // No command and no task ID - show help
