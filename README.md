@@ -13,17 +13,16 @@
 
 **Define issues in Linear or Jira. Let Claude implement them. Review and ship.**
 
-[![npm version](https://img.shields.io/npm/v/mobius-ai?style=for-the-badge&logo=npm&logoColor=white&color=CB3837)](https://www.npmjs.com/package/mobius-ai)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
-[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Rust](https://img.shields.io/badge/rust-stable-orange?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 
 <br>
 
 ```bash
-npm install -g mobius-ai && mobius setup
+curl -fsSL https://raw.githubusercontent.com/Tubular-Health/mobius/main/install.sh | bash
 ```
 
-**Works on Mac, Windows, and Linux.**
+**Works on Mac and Linux (x86_64 and aarch64).**
 
 </div>
 
@@ -65,9 +64,9 @@ Instead of feeding entire codebases into a single context window, Mobius breaks 
 ## Quick Start
 
 ```bash
-npm install -g mobius-ai
-mobius setup
-mobius ABC-123
+./install.sh        # Download pre-compiled binary
+mobius setup         # Interactive setup wizard
+mobius ABC-123       # Start working on an issue
 ```
 
 <p align="center">
@@ -263,7 +262,6 @@ mobius doctor
 
 | Requirement | Notes |
 |-------------|-------|
-| **Node.js 18+** | For npm installation |
 | **Claude Code CLI** | Install from [claude.ai/code](https://claude.ai/code) |
 | **Git** | Required for worktree operations |
 | **Linear or Jira account** | Both backends fully supported |
@@ -355,5 +353,5 @@ mobius ABC-123 --local   # Bypass sandbox
 </p>
 
 <p align="center">
-  <code>npm install -g mobius-ai && mobius setup</code>
+  <code>./install.sh && mobius setup</code>
 </p>

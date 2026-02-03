@@ -5,37 +5,37 @@
 default:
     @just --list
 
-# TypeScript build (compile to dist/)
+# Build Rust binary (release mode)
 build:
-    npm run build
+    cargo build -p mobius --release
 
-# Watch mode for development
+# Build Rust binary (debug mode)
 dev:
-    npm run dev
+    cargo build -p mobius
 
-# TypeScript type check
+# Type check (cargo check)
 typecheck:
-    npm run typecheck
+    cargo check -p mobius
 
-# Run Biome linter
+# Run clippy linter
 lint:
-    npm run lint
+    cargo clippy -p mobius -- -D warnings
 
 # Run all unit tests
 test *args:
-    bun test {{args}}
+    cargo test -p mobius {{args}}
 
 # Run tests matching a pattern
 test-file pattern:
-    bun test "{{pattern}}"
+    cargo test -p mobius --lib "{{pattern}}"
 
-# Run tests in watch mode
+# Run tests in watch mode (requires cargo-watch)
 test-watch:
-    bun test --watch
+    cargo watch -x 'test -p mobius'
 
 # Run mobius locally (development mode)
 run *args:
-    bun src/bin/mobius.ts {{args}}
+    cargo run -p mobius -- {{args}}
 
 # Run mobius loop on a Linear issue
 loop task-id *args:
@@ -51,19 +51,11 @@ config:
 
 # Full validation (typecheck + test + build)
 validate:
-    npm run typecheck && bun test && npm run build
+    cargo check -p mobius && cargo test -p mobius && cargo build -p mobius --release
 
 # Clean build artifacts
 clean:
-    npm run clean
-
-# Install dependencies
-deps:
-    bun install
-
-# Lint commit messages (useful for debugging commitlint issues)
-lint-commit msg:
-    echo "{{msg}}" | bunx commitlint
+    cargo clean
 
 # Generate workflow demo recording from VHS tape file
 tape:
