@@ -18,7 +18,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="${MOBIUS_INSTALL_DIR:-$HOME/.local/bin}"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/mobius"
-SKILLS_DIR="$HOME/.claude/skills"
 GITHUB_REPO="Tubular-Health/mobius"
 
 RED='\033[0;31m'
@@ -225,9 +224,26 @@ install_command() {
     # Create install directory if it doesn't exist
     mkdir -p "$INSTALL_DIR"
 
-    # Extract binary
-    tar -xzf "$tmpdir/$tarball_name" -C "$INSTALL_DIR"
+    # Extract tarball to temp directory first, then move contents into place
+    mkdir -p "$tmpdir/extract"
+    tar -xzf "$tmpdir/$tarball_name" -C "$tmpdir/extract"
+
+    # Install binary
+    cp "$tmpdir/extract/mobius" "$INSTALL_DIR/mobius"
     chmod +x "$INSTALL_DIR/mobius"
+
+    # Install bundled skills alongside the binary (used by mobius setup)
+    if [ -d "$tmpdir/extract/skills" ]; then
+        rm -rf "$INSTALL_DIR/skills"
+        cp -r "$tmpdir/extract/skills" "$INSTALL_DIR/skills"
+        success "Bundled skills installed to: $INSTALL_DIR/skills/"
+    fi
+
+    # Install shortcuts script alongside the binary (used by mobius setup)
+    if [ -f "$tmpdir/extract/shortcuts.sh" ]; then
+        cp "$tmpdir/extract/shortcuts.sh" "$INSTALL_DIR/shortcuts.sh"
+        success "Shortcuts installed to: $INSTALL_DIR/shortcuts.sh"
+    fi
 
     success "Installed: $INSTALL_DIR/mobius ($tag)"
 }
@@ -252,34 +268,7 @@ install_config() {
 }
 
 install_skills() {
-    # Only install skills when running from a cloned repo that has them
-    if [ ! -d "$SCRIPT_DIR/.claude/skills" ]; then
-        info "Skills not found in local directory. Skipping skill installation."
-        info "Run 'mobius setup' to install skills after binary is installed."
-        return
-    fi
-
-    info "Installing Claude skills..."
-
-    # Create skills directory
-    mkdir -p "$SKILLS_DIR"
-
-    # Copy skills
-    local skills=("define" "execute" "pr" "refine" "verify")
-
-    for skill in "${skills[@]}"; do
-        local src="$SCRIPT_DIR/.claude/skills/$skill"
-        local dest="$SKILLS_DIR/$skill"
-
-        if [ -d "$src" ]; then
-            if [ -d "$dest" ]; then
-                info "Skill already exists: $skill (not overwritten)"
-            else
-                cp -r "$src" "$dest"
-                success "Installed skill: $skill"
-            fi
-        fi
-    done
+    info "Run 'mobius setup' to install skills and shell shortcuts."
 }
 
 copy_agents_template() {
@@ -314,14 +303,17 @@ uninstall() {
         info "Command not found: $INSTALL_DIR/mobius"
     fi
 
-    # Remove skills
-    local skills=("define" "execute" "pr" "refine" "verify")
-    for skill in "${skills[@]}"; do
-        if [ -d "$SKILLS_DIR/$skill" ]; then
-            rm -rf "$SKILLS_DIR/$skill"
-            success "Removed skill: $skill"
-        fi
-    done
+    # Remove bundled skills
+    if [ -d "$INSTALL_DIR/skills" ]; then
+        rm -rf "$INSTALL_DIR/skills"
+        success "Removed: $INSTALL_DIR/skills/"
+    fi
+
+    # Remove bundled shortcuts
+    if [ -f "$INSTALL_DIR/shortcuts.sh" ]; then
+        rm "$INSTALL_DIR/shortcuts.sh"
+        success "Removed: $INSTALL_DIR/shortcuts.sh"
+    fi
 
     # Remove config
     if [ -d "$CONFIG_DIR" ]; then
@@ -350,7 +342,8 @@ Installation:
     3. Verifies SHA256 checksum
     4. Places binary at ~/.local/bin/mobius
     5. Creates config at ~/.config/mobius/config.yaml (if not exists)
-    6. Installs Claude skills to ~/.claude/skills/ (if running from repo)
+    6. Bundles skills and shortcuts alongside the binary
+    7. Run 'mobius setup' to complete skill and shortcut installation
 
 Environment Variables:
     MOBIUS_VERSION        Install a specific version (e.g., MOBIUS_VERSION=v1.7.0 ./install.sh)
