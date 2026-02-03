@@ -53,7 +53,7 @@ pub fn run_dashboard(
     app.reload_runtime_state();
 
     // Create event handler
-    let events = EventHandler::new(Some(runtime_state_path));
+    let events = EventHandler::new(Some(runtime_state_path), None);
 
     // Main event loop
     loop {
@@ -69,6 +69,9 @@ pub fn run_dashboard(
                 TuiEvent::Key(key) => handle_key_event(&mut app, key),
                 TuiEvent::StateFileChanged => {
                     app.reload_runtime_state();
+                }
+                TuiEvent::TodosChanged => {
+                    // Will be handled in task-008 with app.reload_todos()
                 }
                 TuiEvent::Tick => {
                     app.on_tick();
