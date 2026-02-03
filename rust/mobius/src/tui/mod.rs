@@ -1,3 +1,4 @@
+pub mod agent_progress;
 pub mod app;
 pub mod agent_slots;
 pub mod dashboard;
