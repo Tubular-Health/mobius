@@ -47,6 +47,7 @@ pub fn run_dashboard(
         parent_title,
         graph,
         runtime_state_path.clone(),
+        3, // default max_parallel_agents, will be configurable via task-008
     );
 
     // Load initial runtime state if file exists
