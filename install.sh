@@ -127,7 +127,7 @@ resolve_version() {
         return
     fi
 
-    info "Fetching latest release version..."
+    info "Fetching latest release version..." >&2
     local api_url="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
     local response
     response="$(download_stdout "$api_url" 2>/dev/null)" || {

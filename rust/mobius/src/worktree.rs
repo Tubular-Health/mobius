@@ -433,6 +433,8 @@ pub async fn list_worktrees() -> Result<Vec<WorktreeEntry>> {
             current_head = Some(head.to_string());
         } else if let Some(branch) = line.strip_prefix("branch ") {
             current_branch = Some(branch.replace("refs/heads/", ""));
+        } else if line == "detached" {
+            current_branch = Some("(detached)".to_string());
         } else if line.is_empty() {
             if let (Some(path), Some(branch), Some(head)) =
                 (current_path.take(), current_branch.take(), current_head.take())
@@ -445,6 +447,13 @@ pub async fn list_worktrees() -> Result<Vec<WorktreeEntry>> {
                 current_branch = None;
             }
         }
+    }
+
+    // Flush the last entry if the output didn't end with a blank line
+    if let (Some(path), Some(branch), Some(head)) =
+        (current_path.take(), current_branch.take(), current_head.take())
+    {
+        worktrees.push(WorktreeEntry { path, branch, head });
     }
 
     Ok(worktrees)

@@ -1,7 +1,38 @@
+# Rust build artifacts
 target/
-*.log
+**/*.rs.bk
+
+# Environment files
 .env
 .env.*
 !.env.example
 
-.mobius
+# Logs
+*.log
+
+# Mobius runtime state
+.mobius/
+
+# Build output
+dist/
+
+# Node.js (husky/tooling)
+node_modules/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Coverage and profiling
+*.profraw
+*.profdata
+lcov.info
+tarpaulin-report.html
+coverage/
