@@ -2123,4 +2123,544 @@ echo "test"
         let state = remove_runtime_active_task(&state, "nonexistent");
         assert_eq!(state.active_tasks.len(), 1);
     }
+
+    // -- Session lifecycle tests --
+
+    /// Helper to clean up test context directories
+    fn cleanup_test_parent(parent_id: &str) {
+        let ctx = get_context_path(parent_id);
+        let _ = fs::remove_dir_all(&ctx);
+    }
+
+    #[test]
+    fn test_session_lifecycle_create_update_end_delete() {
+        let parent_id = "TEST-CTX-SL-001";
+        cleanup_test_parent(parent_id);
+
+        // Create session
+        let session = create_session(parent_id, Backend::Linear, Some("/tmp/wt"))
+            .expect("create_session should succeed");
+        assert_eq!(session.parent_id, parent_id);
+        assert_eq!(session.status, SessionStatus::Active);
+        assert_eq!(session.worktree_path, Some("/tmp/wt".to_string()));
+
+        // Verify session.json exists on disk
+        let session_path = get_session_path(parent_id);
+        assert!(session_path.exists(), "session.json should exist after create");
+
+        // Update session status
+        let updated = update_session(parent_id, Some(SessionStatus::Paused), None);
+        assert!(updated.is_some());
+        assert_eq!(updated.unwrap().status, SessionStatus::Paused);
+
+        // Read back from disk
+        let read_back = read_session(parent_id);
+        assert!(read_back.is_some());
+        assert_eq!(read_back.unwrap().status, SessionStatus::Paused);
+
+        // End session
+        end_session(parent_id, SessionStatus::Completed);
+        let after_end = read_session(parent_id);
+        assert!(after_end.is_some());
+        assert_eq!(after_end.unwrap().status, SessionStatus::Completed);
+
+        // Delete session
+        delete_session(parent_id);
+        let after_delete = read_session(parent_id);
+        assert!(after_delete.is_none(), "session should be gone after delete");
+        assert!(!session_path.exists(), "session.json should not exist after delete");
+
+        cleanup_test_parent(parent_id);
+    }
+
+    #[test]
+    fn test_session_pointer_survives_read() {
+        let parent_id = "TEST-CTX-SP-001";
+        cleanup_test_parent(parent_id);
+
+        // Create session sets the pointer
+        let _session = create_session(parent_id, Backend::Local, None)
+            .expect("create_session should succeed");
+
+        // Read pointer back
+        let raw = get_current_session_parent_id_raw();
+        assert_eq!(raw.as_deref(), Some(parent_id));
+
+        // Full validation (checks session file exists)
+        let validated = get_current_session_parent_id();
+        assert_eq!(validated.as_deref(), Some(parent_id));
+
+        // Cleanup
+        delete_session(parent_id);
+        cleanup_test_parent(parent_id);
+    }
+
+    #[test]
+    fn test_session_pointer_cleared_on_delete() {
+        let parent_id_a = "TEST-CTX-SPC-A";
+        let parent_id_b = "TEST-CTX-SPC-B";
+        cleanup_test_parent(parent_id_a);
+        cleanup_test_parent(parent_id_b);
+
+        // Create session A, then session B (B becomes current)
+        let _sa = create_session(parent_id_a, Backend::Local, None).unwrap();
+        let _sb = create_session(parent_id_b, Backend::Local, None).unwrap();
+
+        // Pointer should be B
+        assert_eq!(get_current_session_parent_id_raw().as_deref(), Some(parent_id_b));
+
+        // Clearing pointer for A should NOT clear it (it doesn't match)
+        clear_current_session_pointer(parent_id_a);
+        assert_eq!(
+            get_current_session_parent_id_raw().as_deref(),
+            Some(parent_id_b),
+            "pointer should still be B after clearing A"
+        );
+
+        // Clearing pointer for B should clear it
+        clear_current_session_pointer(parent_id_b);
+        assert!(
+            get_current_session_parent_id_raw().is_none(),
+            "pointer should be cleared after clearing B"
+        );
+
+        // Cleanup
+        delete_session(parent_id_a);
+        delete_session(parent_id_b);
+        cleanup_test_parent(parent_id_a);
+        cleanup_test_parent(parent_id_b);
+    }
+
+    #[test]
+    fn test_update_session_partial_fields() {
+        let parent_id = "TEST-CTX-USP-001";
+        cleanup_test_parent(parent_id);
+
+        let _session = create_session(parent_id, Backend::Linear, Some("/original"))
+            .expect("create_session should succeed");
+
+        // Update only worktree_path, leave status unchanged
+        let updated = update_session(parent_id, None, Some("/new-path".to_string()));
+        assert!(updated.is_some());
+        let s = updated.unwrap();
+        assert_eq!(s.status, SessionStatus::Active, "status should remain Active");
+        assert_eq!(s.worktree_path.as_deref(), Some("/new-path"));
+
+        // Update only status, worktree should remain
+        let updated2 = update_session(parent_id, Some(SessionStatus::Failed), None);
+        assert!(updated2.is_some());
+        let s2 = updated2.unwrap();
+        assert_eq!(s2.status, SessionStatus::Failed);
+        assert_eq!(s2.worktree_path.as_deref(), Some("/new-path"), "worktree should persist");
+
+        delete_session(parent_id);
+        cleanup_test_parent(parent_id);
+    }
+
+    // -- Concurrent lock tests --
+
+    #[test]
+    fn test_concurrent_lock_contention_retry() {
+        let tmp = setup_test_dir();
+        let lock_path = tmp.path().join("contention.lock");
+
+        // Acquire the lock (simulating another process holding it)
+        assert!(try_acquire_lock(&lock_path));
+
+        // Try to acquire again - should fail (lock is held and not stale)
+        assert!(!try_acquire_lock(&lock_path), "second acquire should fail");
+
+        // Release the lock
+        release_lock(&lock_path);
+
+        // Now acquisition should succeed
+        assert!(try_acquire_lock(&lock_path), "should succeed after release");
+        release_lock(&lock_path);
+    }
+
+    #[test]
+    fn test_stale_lock_cleanup_on_acquire() {
+        let tmp = setup_test_dir();
+        let lock_path = tmp.path().join("stale-cleanup.lock");
+
+        // Write a stale lock with timestamp 0
+        fs::write(&lock_path, "0").unwrap();
+        assert!(lock_path.exists());
+
+        // Acquiring should succeed by cleaning up the stale lock
+        assert!(try_acquire_lock(&lock_path), "should acquire over stale lock");
+
+        // The lock file should now contain a recent timestamp
+        let content = fs::read_to_string(&lock_path).unwrap();
+        let ts: u128 = content.trim().parse().unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        assert!(now - ts < 5000, "lock timestamp should be recent");
+
+        release_lock(&lock_path);
+    }
+
+    #[test]
+    fn test_lock_release_idempotent() {
+        let tmp = setup_test_dir();
+        let lock_path = tmp.path().join("idempotent.lock");
+
+        // Acquire lock
+        assert!(try_acquire_lock(&lock_path));
+
+        // Release once
+        release_lock(&lock_path);
+        assert!(!lock_path.exists());
+
+        // Release again - should not panic or error
+        release_lock(&lock_path);
+        assert!(!lock_path.exists(), "double release should be safe");
+    }
+
+    // -- Runtime state edge cases --
+
+    #[test]
+    fn test_runtime_state_read_missing_file() {
+        // Non-existent parent should return None
+        let result = read_runtime_state("NONEXISTENT-RUNTIME-999");
+        assert!(result.is_none(), "missing runtime file should return None");
+    }
+
+    #[test]
+    fn test_runtime_state_read_empty_json() {
+        let parent_id = "TEST-CTX-RSE-001";
+        cleanup_test_parent(parent_id);
+        ensure_context_directories(parent_id).unwrap();
+
+        // Write empty content to runtime.json
+        let runtime_path = get_runtime_path(parent_id);
+        fs::write(&runtime_path, "").unwrap();
+
+        let result = read_runtime_state(parent_id);
+        assert!(result.is_none(), "empty file should return None");
+
+        cleanup_test_parent(parent_id);
+    }
+
+    #[test]
+    fn test_runtime_state_read_malformed_json() {
+        let parent_id = "TEST-CTX-RSM-001";
+        cleanup_test_parent(parent_id);
+        ensure_context_directories(parent_id).unwrap();
+
+        // Write invalid JSON to runtime.json
+        let runtime_path = get_runtime_path(parent_id);
+        fs::write(&runtime_path, "{invalid json!!!").unwrap();
+
+        let result = read_runtime_state(parent_id);
+        assert!(result.is_none(), "malformed JSON should return None");
+
+        cleanup_test_parent(parent_id);
+    }
+
+    #[test]
+    fn test_initialize_runtime_state_overwrites_existing() {
+        let parent_id = "TEST-CTX-IRO-001";
+        cleanup_test_parent(parent_id);
+
+        // Initialize with first values
+        let state1 = initialize_runtime_state(parent_id, "First Title", Some(100), Some(5))
+            .expect("first init should succeed");
+        assert_eq!(state1.parent_title, "First Title");
+        assert_eq!(state1.loop_pid, Some(100));
+
+        // Re-initialize with different values - should overwrite
+        let state2 = initialize_runtime_state(parent_id, "Second Title", Some(200), Some(10))
+            .expect("second init should succeed");
+        assert_eq!(state2.parent_title, "Second Title");
+        assert_eq!(state2.loop_pid, Some(200));
+        assert_eq!(state2.total_tasks, Some(10));
+
+        // Active tasks from first init should be gone
+        assert!(state2.active_tasks.is_empty());
+        assert!(state2.completed_tasks.is_empty());
+
+        // Clean up
+        delete_runtime_state(parent_id);
+        cleanup_test_parent(parent_id);
+    }
+
+    #[test]
+    fn test_with_runtime_state_sync_creates_parent_dir() {
+        let parent_id = "TEST-CTX-WRSS-001";
+        cleanup_test_parent(parent_id);
+
+        // The execution dir should not exist yet
+        let exec_path = get_execution_path(parent_id);
+        assert!(!exec_path.exists(), "execution dir should not exist before test");
+
+        // with_runtime_state_sync should create the necessary directories
+        let result = with_runtime_state_sync(parent_id, |_current| RuntimeState {
+            parent_id: parent_id.to_string(),
+            parent_title: "Test".to_string(),
+            active_tasks: vec![],
+            completed_tasks: vec![],
+            failed_tasks: vec![],
+            started_at: "t".to_string(),
+            updated_at: "t".to_string(),
+            loop_pid: None,
+            total_tasks: None,
+            backend_statuses: None,
+        });
+
+        assert!(result.is_ok(), "with_runtime_state_sync should succeed");
+        assert!(exec_path.exists(), "execution directory should be auto-created");
+
+        // Runtime file should exist
+        let runtime_path = get_runtime_path(parent_id);
+        assert!(runtime_path.exists(), "runtime.json should exist");
+
+        delete_runtime_state(parent_id);
+        cleanup_test_parent(parent_id);
+    }
+
+    // -- ProgressSummary is_complete tests --
+
+    #[test]
+    fn test_progress_summary_is_complete_true() {
+        // active=0, completed>0 → is_complete=true
+        let state = RuntimeState {
+            parent_id: "p".to_string(),
+            parent_title: "t".to_string(),
+            active_tasks: vec![],
+            completed_tasks: vec![serde_json::json!("t1"), serde_json::json!("t2")],
+            failed_tasks: vec![],
+            started_at: "t".to_string(),
+            updated_at: "t".to_string(),
+            loop_pid: None,
+            total_tasks: Some(2),
+            backend_statuses: None,
+        };
+
+        let summary = get_progress_summary(Some(&state));
+        assert!(summary.is_complete, "should be complete with no active tasks and some completed");
+        assert_eq!(summary.completed, 2);
+        assert_eq!(summary.active, 0);
+
+        // Also true when only failed tasks exist (active=0, failed>0)
+        let state_failed = RuntimeState {
+            active_tasks: vec![],
+            completed_tasks: vec![],
+            failed_tasks: vec![serde_json::json!("t1")],
+            ..state
+        };
+        let summary_failed = get_progress_summary(Some(&state_failed));
+        assert!(summary_failed.is_complete, "should be complete with only failed tasks");
+    }
+
+    #[test]
+    fn test_progress_summary_is_complete_false() {
+        // active>0 → is_complete=false even if completed > 0
+        let state = RuntimeState {
+            parent_id: "p".to_string(),
+            parent_title: "t".to_string(),
+            active_tasks: vec![RuntimeActiveTask {
+                id: "running".to_string(),
+                pid: 1,
+                pane: "%1".to_string(),
+                started_at: "t".to_string(),
+                worktree: None,
+            }],
+            completed_tasks: vec![serde_json::json!("t1")],
+            failed_tasks: vec![],
+            started_at: "t".to_string(),
+            updated_at: "t".to_string(),
+            loop_pid: None,
+            total_tasks: Some(3),
+            backend_statuses: None,
+        };
+
+        let summary = get_progress_summary(Some(&state));
+        assert!(!summary.is_complete, "should NOT be complete while tasks are active");
+        assert_eq!(summary.active, 1);
+
+        // Also false when all empty (no work done at all)
+        let state_empty = RuntimeState {
+            active_tasks: vec![],
+            completed_tasks: vec![],
+            failed_tasks: vec![],
+            ..state
+        };
+        let summary_empty = get_progress_summary(Some(&state_empty));
+        assert!(!summary_empty.is_complete, "should NOT be complete when nothing has run");
+    }
+
+    // -- File watcher helper tests --
+
+    #[test]
+    fn test_has_new_active_tasks_detection() {
+        // None old → non-empty new → new tasks detected
+        let new = Some(RuntimeState {
+            parent_id: "p".to_string(),
+            parent_title: "t".to_string(),
+            active_tasks: vec![RuntimeActiveTask {
+                id: "task-001".to_string(),
+                pid: 1,
+                pane: "%1".to_string(),
+                started_at: "t".to_string(),
+                worktree: None,
+            }],
+            completed_tasks: vec![],
+            failed_tasks: vec![],
+            started_at: "t".to_string(),
+            updated_at: "t".to_string(),
+            loop_pid: None,
+            total_tasks: None,
+            backend_statuses: None,
+        });
+        assert!(
+            has_new_active_tasks(&None, &new),
+            "None→Some with active tasks should detect new tasks"
+        );
+
+        // None old → empty new → no new tasks
+        let new_empty = Some(RuntimeState {
+            active_tasks: vec![],
+            ..new.as_ref().unwrap().clone()
+        });
+        assert!(
+            !has_new_active_tasks(&None, &new_empty),
+            "None→Some with empty active should NOT detect new tasks"
+        );
+
+        // Both None → no new tasks
+        assert!(!has_new_active_tasks(&None, &None), "None→None should not detect new tasks");
+
+        // Old has tasks, new is None → no new tasks
+        assert!(!has_new_active_tasks(&new, &None), "Some→None should not detect new tasks");
+
+        // Old has task-001, new has task-001 + task-002 → new tasks
+        let new_with_extra = Some(RuntimeState {
+            active_tasks: vec![
+                RuntimeActiveTask {
+                    id: "task-001".to_string(),
+                    pid: 1,
+                    pane: "%1".to_string(),
+                    started_at: "t".to_string(),
+                    worktree: None,
+                },
+                RuntimeActiveTask {
+                    id: "task-002".to_string(),
+                    pid: 2,
+                    pane: "%2".to_string(),
+                    started_at: "t".to_string(),
+                    worktree: None,
+                },
+            ],
+            ..new.as_ref().unwrap().clone()
+        });
+        assert!(
+            has_new_active_tasks(&new, &new_with_extra),
+            "added task-002 should be detected as new"
+        );
+
+        // Same tasks in both → no new tasks
+        assert!(
+            !has_new_active_tasks(&new, &new),
+            "identical active tasks should not detect new"
+        );
+    }
+
+    #[test]
+    fn test_has_content_changed_ignores_updated_at() {
+        let base = RuntimeState {
+            parent_id: "p".to_string(),
+            parent_title: "t".to_string(),
+            active_tasks: vec![RuntimeActiveTask {
+                id: "task-001".to_string(),
+                pid: 1,
+                pane: "%1".to_string(),
+                started_at: "t".to_string(),
+                worktree: None,
+            }],
+            completed_tasks: vec![serde_json::json!("done-1")],
+            failed_tasks: vec![serde_json::json!("fail-1")],
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            loop_pid: Some(42),
+            total_tasks: Some(5),
+            backend_statuses: None,
+        };
+
+        // Only updated_at changed → no content change
+        let with_different_updated_at = RuntimeState {
+            updated_at: "2026-01-01T12:00:00Z".to_string(),
+            ..base.clone()
+        };
+        assert!(
+            !has_content_changed(&Some(base.clone()), &Some(with_different_updated_at)),
+            "only updated_at change should NOT count as content change"
+        );
+
+        // started_at changed → still no content change (not compared)
+        let with_different_started_at = RuntimeState {
+            started_at: "2026-06-01T00:00:00Z".to_string(),
+            ..base.clone()
+        };
+        assert!(
+            !has_content_changed(&Some(base.clone()), &Some(with_different_started_at)),
+            "started_at change alone should NOT count as content change"
+        );
+
+        // active_tasks changed → content change
+        let with_extra_task = RuntimeState {
+            active_tasks: vec![
+                RuntimeActiveTask {
+                    id: "task-001".to_string(),
+                    pid: 1,
+                    pane: "%1".to_string(),
+                    started_at: "t".to_string(),
+                    worktree: None,
+                },
+                RuntimeActiveTask {
+                    id: "task-002".to_string(),
+                    pid: 2,
+                    pane: "%2".to_string(),
+                    started_at: "t".to_string(),
+                    worktree: None,
+                },
+            ],
+            ..base.clone()
+        };
+        assert!(
+            has_content_changed(&Some(base.clone()), &Some(with_extra_task)),
+            "different active_tasks should count as content change"
+        );
+
+        // completed_tasks changed → content change
+        let with_extra_completed = RuntimeState {
+            completed_tasks: vec![serde_json::json!("done-1"), serde_json::json!("done-2")],
+            ..base.clone()
+        };
+        assert!(
+            has_content_changed(&Some(base.clone()), &Some(with_extra_completed)),
+            "different completed_tasks should count as content change"
+        );
+
+        // backend_statuses changed → content change
+        let mut statuses = HashMap::new();
+        statuses.insert(
+            "MOB-101".to_string(),
+            BackendStatusEntry {
+                identifier: "MOB-101".to_string(),
+                status: "Done".to_string(),
+                synced_at: "t".to_string(),
+            },
+        );
+        let with_statuses = RuntimeState {
+            backend_statuses: Some(statuses),
+            ..base.clone()
+        };
+        assert!(
+            has_content_changed(&Some(base.clone()), &Some(with_statuses)),
+            "added backend_statuses should count as content change"
+        );
+    }
 }
