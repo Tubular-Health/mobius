@@ -416,7 +416,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         pane: String::new(),
                         started_at: now.clone(),
                         worktree: Some(worktree_path.clone()),
-                        model: None,
+                        model: Some(exec_config.model.to_string()),
                         input_tokens: None,
                         output_tokens: None,
                     },

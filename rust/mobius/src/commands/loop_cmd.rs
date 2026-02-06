@@ -382,7 +382,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     pane: String::new(),
                     started_at: chrono::Utc::now().to_rfc3339(),
                     worktree: Some(worktree_info.path.display().to_string()),
-                    model: None,
+                    model: Some(execution_config.model.to_string()),
                     input_tokens: None,
                     output_tokens: None,
                 },
