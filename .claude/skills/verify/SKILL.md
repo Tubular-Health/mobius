@@ -5,168 +5,82 @@ invocation: /verify
 ---
 
 <objective>
-Perform a thorough verification of a completed issue implementation. This skill compares what was actually built against the intended goal and acceptance criteria, identifies gaps, runs validation checks, and documents the review on the ticket.
+Perform thorough verification of a completed issue implementation. Compare what was built against acceptance criteria, identify gaps, run validation checks, and document the review on the ticket.
 
-This is the fourth and final step in the issue workflow:
-1. **define** - Creates well-defined issues with acceptance criteria
-2. **refine** - Breaks issues into single-file-focused sub-tasks with dependencies
-3. **execute** - Implements sub-tasks one at a time
-4. **verify** (this skill) - Validates implementation against acceptance criteria
+Workflow: define → refine → execute → **verify** (this skill)
 </objective>
 
 <backend_detection>
-**FIRST**: Detect the backend from context file metadata.
-
-Read the `metadata.backend` field from the context file:
-
-```bash
-cat "$MOBIUS_CONTEXT_FILE" | jq '.metadata.backend'
-```
-
-**Values**: `linear` or `jira`
-
-**Default**: If no backend is specified in metadata, default to `linear`.
-
-The backend information is used for understanding status naming conventions but does not change the workflow - all context is read from local files and outputs are structured data.
+Read `metadata.backend` from context file (`cat "$MOBIUS_CONTEXT_FILE" | jq '.metadata.backend'`). Values: `linear` or `jira` (default: `linear`). Backend affects status naming conventions but not workflow.
 </backend_detection>
 
 <verification_config>
-Read verification configuration from `mobius.config.yaml`:
+Read from `mobius.config.yaml` (defaults in parentheses):
 
 ```yaml
 execution:
   verification:
-    coverage_threshold: 80        # Default: 80%
-    require_all_tests_pass: true  # Default: true
-    performance_check: true       # Default: true
-    security_check: true          # Default: true
-    max_rework_iterations: 3      # Default: 3
+    coverage_threshold: 80
+    require_all_tests_pass: true
+    performance_check: true
+    security_check: true
+    max_rework_iterations: 3
 ```
-
-If not specified, use defaults. These settings control the multi-agent verification behavior.
 </verification_config>
 
 <autonomous_actions>
-**CRITICAL**: The following actions MUST be performed AUTONOMOUSLY without asking the user:
+**CRITICAL**: These actions MUST be performed AUTONOMOUSLY without asking the user:
 
-1. **Reopen failing sub-tasks** - When verification finds issues (FAIL or NEEDS_WORK), IMMEDIATELY:
-   - Add feedback comments to failing sub-tasks with specific file:line references
-   - Transition failing sub-tasks back to "To Do" status
-   - Do not ask "Should I reopen these sub-tasks?" - just do it
+1. **Reopen failing sub-tasks** - On FAIL/NEEDS_WORK: add feedback comments with file:line references, transition back to "To Do" immediately
+2. **Post verification report** - Always post review comment to ticket
+3. **Mark verification sub-task Done** - On PASS/PASS_WITH_NOTES, automatically mark Done
 
-2. **Post verification report** - Always post the review comment to the ticket without asking.
+User interaction only for: escalation after max_rework_iterations, ambiguous requirements (DISCUSS status).
 
-3. **Mark verification sub-task Done** - On PASS or PASS_WITH_NOTES, automatically mark the current verification sub-task as Done.
-
-The verify skill is designed to run end-to-end autonomously. User interaction is only needed for:
-- Escalation after max_rework_iterations exceeded
-- Ambiguous requirements that need clarification (DISCUSS status)
-
-**Note**: The verification sub-task is created by refine during issue breakdown. When mobius executes a "Verification Gate" sub-task, it routes to this skill instead of execute.
+**Note**: The verification sub-task is created by refine. When mobius executes a "Verification Gate" sub-task, it routes to this skill.
 </autonomous_actions>
 
 <context_input>
-**The mobius loop provides verification context via environment variable and local files.**
-
-The skill receives context through:
-1. `MOBIUS_CONTEXT_FILE` environment variable - path to the context JSON file
-2. Local files at `.mobius/issues/{parentId}/`
-
-**Context file structure** (at `MOBIUS_CONTEXT_FILE` path):
+Context provided via `MOBIUS_CONTEXT_FILE` env var and `.mobius/issues/{parentId}/` local files.
 
 ```json
 {
-  "parent": {
-    "id": "uuid",
-    "identifier": "MOB-161",
-    "title": "Parent issue title",
-    "description": "Full description with acceptance criteria",
-    "gitBranchName": "branch-name",
-    "status": "In Progress",
-    "labels": ["Feature"],
-    "url": "https://linear.app/..."
-  },
-  "subTasks": [
-    {
-      "id": "uuid",
-      "identifier": "MOB-177",
-      "title": "Sub-task title",
-      "description": "Full description with acceptance criteria",
-      "status": "done",
-      "gitBranchName": "branch-name",
-      "blockedBy": [],
-      "blocks": []
-    }
-  ],
-  "verificationTask": {
-    "id": "uuid",
-    "identifier": "MOB-186",
-    "title": "[MOB-161] Verification Gate",
-    "status": "in_progress"
-  },
-  "metadata": {
-    "fetchedAt": "2026-01-28T12:00:00Z",
-    "updatedAt": "2026-01-28T12:00:00Z",
-    "backend": "linear"
-  }
+  "parent": { "id": "uuid", "identifier": "MOB-161", "title": "...", "description": "...", "gitBranchName": "...", "status": "In Progress", "labels": [], "url": "..." },
+  "subTasks": [{ "id": "uuid", "identifier": "MOB-177", "title": "...", "description": "...", "status": "done", "blockedBy": [], "blocks": [] }],
+  "verificationTask": { "id": "uuid", "identifier": "MOB-186", "title": "[MOB-161] Verification Gate", "status": "in_progress" },
+  "metadata": { "fetchedAt": "...", "updatedAt": "...", "backend": "linear" }
 }
 ```
 
-**Reading context**:
-```bash
-# Context file path from environment
-CONTEXT_FILE="$MOBIUS_CONTEXT_FILE"
+Read with: `cat "$MOBIUS_CONTEXT_FILE"` or `cat .mobius/issues/{parentId}/parent.json`
 
-# Or read directly from local storage
-cat .mobius/issues/MOB-161/parent.json
-cat .mobius/issues/MOB-161/tasks/MOB-177.json
-```
-
-**Sub-task status values**: `pending`, `in_progress`, `done`
-
-**Implementation sub-tasks vs Verification sub-task**:
-- Implementation sub-tasks have titles like `[MOB-161] Create feature X`
-- Verification sub-task has title containing `Verification Gate`
-- The context file separates these: `subTasks` (implementation) and `verificationTask`
-
-**Backend detection**: The `metadata.backend` field indicates whether the issue is from Linear or Jira. This affects status transition names in the structured output but the skill should treat the context data uniformly.
+Sub-task status values: `pending`, `in_progress`, `done`. Implementation sub-tasks are in `subTasks`; verification sub-task in `verificationTask`.
 </context_input>
 
 <structured_output>
-**This skill MUST output structured data for the mobius loop to parse.**
-
-At the END of your response, output a YAML or JSON block with the verification result. The mobius loop parses this to execute status updates, add comments, and determine next actions.
-
-**Output format** (YAML preferred for readability):
+**This skill MUST output structured YAML at the END of your response.**
 
 ```yaml
 ---
-status: PASS  # Required: one of the valid status values
-timestamp: "2026-01-28T12:00:00Z"  # Required: ISO-8601 timestamp
-parentId: "MOB-161"  # Required: parent issue identifier
-verificationTaskId: "MOB-186"  # Required: verification sub-task identifier
-durationSeconds: 45  # Required: total VG execution time in seconds
+status: PASS  # Required: PASS | PASS_WITH_NOTES | NEEDS_WORK | FAIL | ALL_BLOCKED
+timestamp: "2026-01-28T12:00:00Z"  # Required
+parentId: "MOB-161"  # Required
+verificationTaskId: "MOB-186"  # Required
+durationSeconds: 45  # Required
 
-# Project detection info (from context file):
 projectInfo:
   projectType: "node"
   buildSystem: "just"
   platformTargets: []
 
-# Sub-task verify command results:
 subtaskVerifyResults:
   - subtaskId: "MOB-177"
     title: "Define types"
     command: "bun run typecheck"
     exitCode: 0
     passed: true
-  - subtaskId: "MOB-178"
-    title: "Create service"
-    command: "bun test service.test.ts"
-    exitCode: 0
-    passed: true
 
-# For PASS or PASS_WITH_NOTES:
+# PASS / PASS_WITH_NOTES:
 criteriaResults:
   met: 5
   total: 5
@@ -174,935 +88,229 @@ criteriaResults:
     - criterion: "Feature X implemented"
       status: PASS
       evidence: "src/feature.ts:42"
-    - criterion: "Tests added"
-      status: PASS
-      evidence: "src/feature.test.ts"
 verificationChecks:
-  tests:
-    status: PASS
-    command: "just test"  # Dynamic command used
-  typecheck:
-    status: PASS
-    command: "just typecheck"
-  lint:
-    status: PASS
-    command: "just lint"
+  tests: { status: PASS, command: "just test" }
+  typecheck: { status: PASS, command: "just typecheck" }
+  lint: { status: PASS, command: "just lint" }
   cicd: PASS
 reviewComment: |
   ## Verification Review
-
   **Status**: PASS
   ...full review content...
-
-# For PASS_WITH_NOTES additionally:
-notes:
+notes:  # PASS_WITH_NOTES only
   - "Consider refactoring X for clarity"
-  - "Documentation could be improved"
 
-# For NEEDS_WORK or FAIL:
+# NEEDS_WORK / FAIL:
 failingSubtasks:
-  - id: "MOB-177"
+  - id: "uuid"
     identifier: "MOB-177"
     issues:
       - type: "critical"
         description: "Missing error handling"
         file: "src/feature.ts"
         line: 42
-      - type: "important"
-        description: "Test coverage below threshold"
-reworkIteration: 1  # Current iteration count
+reworkIteration: 1
 feedbackComments:
   - subtaskId: "MOB-177"
     comment: |
       ## Verification Feedback: NEEDS_REWORK
       ...feedback content...
 
-# For escalation (max iterations reached):
+# Escalation (max iterations reached):
 escalation:
   reason: "Max rework iterations (3) exceeded"
   history:
     - iteration: 1
       issues: ["Missing tests"]
-    - iteration: 2
-      issues: ["Tests still incomplete"]
-    - iteration: 3
-      issues: ["Coverage threshold not met"]
 ---
 ```
 
-**Valid status values**:
-| Status | When to use |
-|--------|-------------|
-| `PASS` | All criteria met, all checks pass, no issues |
-| `PASS_WITH_NOTES` | All criteria met with minor suggestions |
-| `NEEDS_WORK` | Some criteria not met or important issues found |
-| `FAIL` | Critical issues or many criteria not met |
-| `ALL_BLOCKED` | Implementation sub-tasks not all complete |
-
-**Critical requirements**:
-1. Output MUST be valid YAML or JSON
-2. Output MUST appear at the END of your response
-3. Output MUST include `status`, `timestamp`, `parentId`, and `verificationTaskId` fields
-4. Include all required fields for the specific status type
-5. The `reviewComment` field should contain the full verification review to be posted to the parent issue
-
-**Example complete output for PASS**:
-
-```yaml
----
-status: PASS
-timestamp: "2026-01-28T16:45:00Z"
-parentId: "MOB-161"
-verificationTaskId: "MOB-186"
-durationSeconds: 120
-projectInfo:
-  projectType: "node"
-  buildSystem: "just"
-  platformTargets: []
-subtaskVerifyResults:
-  - subtaskId: "MOB-177"
-    title: "Define types"
-    command: "bun run typecheck"
-    exitCode: 0
-    passed: true
-  - subtaskId: "MOB-178"
-    title: "Create service"
-    command: "bun test service.test.ts"
-    exitCode: 0
-    passed: true
-criteriaResults:
-  met: 5
-  total: 5
-  details:
-    - criterion: "SDK infrastructure replaces all MCP tool operations"
-      status: PASS
-      evidence: "No MCP tool references in skills"
-    - criterion: "Local file system stores issue context"
-      status: PASS
-      evidence: ".mobius/issues/ directory created"
-verificationChecks:
-  tests:
-    status: PASS
-    command: "just test"
-  typecheck:
-    status: PASS
-    command: "just typecheck"
-  lint:
-    status: PASS
-    command: "just lint"
-  cicd: PASS
-reviewComment: |
-  ## Verification Review
-
-  **Status**: PASS
-  **Recommendation**: APPROVE
-
-  ### Acceptance Criteria
-  All 5 criteria met.
-
-  ### Checks
-  - Tests: PASS (just test)
-  - Typecheck: PASS (just typecheck)
-  - Lint: PASS (just lint)
-  - CI/CD: PASS
-
-  All criteria met. Ready to close.
----
-```
-
-**Example complete output for NEEDS_WORK**:
-
-```yaml
----
-status: NEEDS_WORK
-timestamp: "2026-01-28T16:45:00Z"
-parentId: "MOB-161"
-verificationTaskId: "MOB-186"
-durationSeconds: 85
-projectInfo:
-  projectType: "node"
-  buildSystem: "just"
-  platformTargets: []
-subtaskVerifyResults:
-  - subtaskId: "MOB-177"
-    title: "Create context generator"
-    command: "bun run typecheck"
-    exitCode: 1
-    passed: false
-criteriaResults:
-  met: 3
-  total: 5
-  details:
-    - criterion: "SDK infrastructure replaces MCP"
-      status: PASS
-      evidence: "src/lib/linear.ts"
-    - criterion: "Tests pass"
-      status: FAIL
-      evidence: "2 tests failing"
-verificationChecks:
-  tests:
-    status: FAIL
-    command: "just test"
-  typecheck:
-    status: PASS
-    command: "just typecheck"
-  lint:
-    status: PASS
-    command: "just lint"
-  cicd: FAIL
-failingSubtasks:
-  - id: "uuid-here"
-    identifier: "MOB-177"
-    issues:
-      - type: "critical"
-        description: "Tests failing in context-generator"
-        file: "src/lib/context-generator.test.ts"
-        line: 45
-reworkIteration: 1
-feedbackComments:
-  - subtaskId: "MOB-177"
-    comment: |
-      ## Verification Feedback: NEEDS_REWORK
-
-      ### Issues Found
-
-      **Critical** (must fix):
-      - Tests failing at src/lib/context-generator.test.ts:45
-
-      ### Recommended Fixes
-      Fix the async/await handling in generateContext()
-reviewComment: |
-  ## Verification Review
-
-  **Status**: NEEDS_WORK
-  **Recommendation**: REQUEST_CHANGES
-
-  ### Acceptance Criteria
-  3 of 5 criteria met.
-
-  ### Issues
-  - Tests failing in context-generator module
-
-  ### Next Steps
-  1. Fix failing tests
-  2. Re-verify after changes
----
-```
+**Requirements**: Output valid YAML at END of response. Must include `status`, `timestamp`, `parentId`, `verificationTaskId`. The `reviewComment` field contains the full review to post to parent issue.
 </structured_output>
 
 <context>
-Verification is critical for catching:
-- **Incomplete implementations**: Acceptance criteria not fully addressed
-- **Scope drift**: Changes that don't match the original intent
-- **Technical debt**: Shortcuts or workarounds that need follow-up
-- **Missing tests**: Functionality without proper test coverage
-- **Regressions**: Changes that break existing functionality
-
-The review adds a structured comment to the ticket documenting findings, making the verification visible to the team.
+Verification catches incomplete implementations, scope drift, technical debt, missing tests, and regressions. The review comment documents findings on the ticket for team visibility.
 </context>
 
 <quick_start>
 <invocation>
-Pass the issue identifier:
-
 ```
 /verify PROJ-123
-```
-
-Or invoke programmatically:
-```
-Skill: verify
-Args: PROJ-123
 ```
 </invocation>
 
 <workflow>
-1. **Detect backend** - Read backend from config (linear or jira)
-2. **Identify parent issue** - Determine the parent issue from the verification sub-task
-3. **Fetch issue context** - Get title, description, acceptance criteria, comments, sub-tasks from parent
-4. **Aggregate implementation context** - Collect files modified, comments, and status from all implementation sub-tasks
-5. **Analyze implementation** - Review recent commits, changed files, code
+1. **Detect backend** - Read from config
+2. **Identify parent issue** - From verification sub-task
+3. **Fetch issue context** - Title, description, acceptance criteria, sub-tasks
+4. **Aggregate implementation context** - Files modified, comments, status from all sub-tasks
+5. **Analyze implementation** - Review commits, changed files, code
 6. **Run verification checks** - Tests, typecheck, lint
-7. **Compare against criteria** - Check each acceptance criterion
-8. **Multi-agent critique** - Spawn 4 parallel review agents for comprehensive analysis
-9. **Generate review report** - Structured analysis with findings
-10. **Handle outcome** - On FAIL/NEEDS_WORK: reopen failing sub-tasks with feedback. On PASS: mark verification sub-task Done
-11. **Post to ticket** - Add review as comment on the parent issue
-12. **Report status** - Output STATUS marker for mobius loop
+7. **Compare against criteria** - Evaluate each acceptance criterion
+8. **Multi-agent critique** - Spawn 4 parallel review agents
+9. **Generate review report** - Structured analysis
+10. **Handle outcome** - FAIL/NEEDS_WORK: reopen failing sub-tasks. PASS: mark VG Done
+11. **Post to ticket** - Add review as comment on parent issue
+12. **Report status** - Output STATUS for mobius loop
 </workflow>
 </quick_start>
 
 <parent_story_mode>
-When verify is called on a verification sub-task (via mobius loop), operate in parent story mode:
+When verify runs on a verification sub-task (via mobius loop):
 
-1. **Identify parent issue** - Get the parent issue ID from the verification sub-task
-2. **Collect all sibling sub-tasks** - Fetch using backend list tool with parentId filter
-3. **Separate implementation vs verification sub-tasks** - Filter out the current verification sub-task from the list
-4. **Verify all implementation sub-tasks "Done"** - If any implementation sub-task is not complete, output STATUS: ALL_BLOCKED and exit
-5. **Aggregate context**:
-   - Acceptance criteria from parent + each implementation sub-task
-   - Implementation notes from all sub-task comments
-   - Files modified across all sub-tasks
-   - Coverage data from all test runs
-
-**Note**: The verification sub-task is created by refine during issue breakdown. This skill focuses on EXECUTING verification, not creating the sub-task.
-
-**Context aggregation**:
-```markdown
-# Aggregated Verification Context
-
-## Parent Issue: {ID} - {Title}
-{Parent description and acceptance criteria}
-
-## Sub-Tasks Summary
-| ID | Title | Status | Files Modified | Key Changes |
-|----|-------|--------|----------------|-------------|
-| ... | ... | Done | file1.ts, file2.ts | {summary} |
-
-## Combined Acceptance Criteria
-From parent:
-- [ ] Parent criterion 1
-- [ ] Parent criterion 2
-
-From sub-tasks:
-- [ ] {Sub-task 1 ID}: Criterion from sub-task
-- [ ] {Sub-task 2 ID}: Criterion from sub-task
-
-## All Modified Files
-{Deduplicated list of all files changed across sub-tasks}
-
-## Implementation Notes (aggregated from comments)
-{Key decisions, constraints, and context from all sub-task comments}
-```
+1. **Identify parent issue** from verification sub-task
+2. **Collect all sibling sub-tasks** from context file
+3. **Separate implementation vs verification sub-tasks**
+4. **Verify all implementation sub-tasks "Done"** - If not, output `status: ALL_BLOCKED` and exit
+5. **Aggregate context**: acceptance criteria from parent + each sub-task, implementation notes, files modified, coverage data
 </parent_story_mode>
 
 <verification_subtask_context>
-**Note**: The verification sub-task is created by the **refine** skill during issue breakdown, NOT by verify.
+The verification sub-task is created by **refine** during issue breakdown.
 
-When mobius loop encounters a "Verification Gate" sub-task (detected by title pattern), it routes execution to `/verify` instead of `/execute`.
+When mobius loop encounters a "Verification Gate" sub-task (detected by title), it routes to `/verify` instead of `/execute`.
 
-**Expected sub-task format** (created by refine):
-- **Title**: `[{parent-id}] Verification Gate` (MUST contain "Verification Gate")
-- **Blocked by**: All implementation sub-tasks
-- **Labels**: `["verification"]` (optional)
+**Expected format**: Title `[{parent-id}] Verification Gate`, blocked by all implementation sub-tasks.
 
-**Execution flow**:
-1. refine creates: implementation sub-tasks + Verification Gate sub-task
-2. mobius loop executes implementation sub-tasks via `/execute`
-3. When all implementation sub-tasks are Done, Verification Gate becomes unblocked
-4. mobius detects "Verification Gate" in title → routes to `/verify`
-5. verify runs multi-agent review on the parent issue
-6. On FAIL: reopens failing implementation sub-tasks → mobius loop continues
-7. On PASS: marks Verification Gate Done → parent issue can be completed
+**Flow**: refine creates VG → execute completes implementation tasks → VG unblocks → mobius routes to verify → on FAIL: reopens failing sub-tasks → on PASS: marks VG Done
 </verification_subtask_context>
 
 <issue_context_phase>
 <load_context>
-Load issue context from the `MOBIUS_CONTEXT_FILE` environment variable:
-
+Load from `MOBIUS_CONTEXT_FILE`:
 ```bash
-# Read full context
-cat "$MOBIUS_CONTEXT_FILE"
-
-# Or extract specific parts
 cat "$MOBIUS_CONTEXT_FILE" | jq '.parent'
 cat "$MOBIUS_CONTEXT_FILE" | jq '.subTasks'
 cat "$MOBIUS_CONTEXT_FILE" | jq '.verificationTask'
 ```
 
-Extract from parent:
-- **Title and description**: What was supposed to be built
-- **Acceptance criteria**: Checklist of requirements (look for checkbox patterns)
-- **Labels**: Bug/Feature/Improvement for context
-- **Priority**: Urgency level
+Extract: title/description, acceptance criteria (checkbox patterns), labels, priority.
 </load_context>
 
 <load_subtasks>
-Read sub-tasks from the context file:
-
-```bash
-cat "$MOBIUS_CONTEXT_FILE" | jq '.subTasks[]'
-```
-
-Or from local files:
-```bash
-ls .mobius/issues/{parentId}/tasks/
-cat .mobius/issues/{parentId}/tasks/{taskId}.json
-```
-
-Verify:
-- All implementation sub-tasks have status "done"
-- If any sub-task is not "done", output `status: ALL_BLOCKED` and stop
-- Each sub-task has description with acceptance criteria
+Read sub-tasks from context file or `.mobius/issues/{parentId}/tasks/`. Verify all implementation sub-tasks have status "done" — if any not "done", output `status: ALL_BLOCKED` and stop.
 </load_subtasks>
 
 <subtask_verify_commands>
-**Execute sub-task verify commands from the context file.**
+Execute `subTaskVerifyCommands` from context file (`jq '.subTaskVerifyCommands // []'`).
 
-After loading sub-tasks, read and execute the `subTaskVerifyCommands` array from the context file. These are per-sub-task verification commands extracted during refinement.
+Each entry: `{ subtaskId, title, command }`. Execute ALL commands (even if some fail), capture exit code/output, record results. Apply safety checks (block `rm -rf`, `sudo`, `curl|bash`, etc.). Include failures in overall assessment.
 
-**Reading verify commands**:
-```bash
-cat "$MOBIUS_CONTEXT_FILE" | jq '.subTaskVerifyCommands // []'
-```
-
-Each entry has the structure: `{ subtaskId: string, title: string, command: string }`
-
-**Execution flow**:
-
-1. Read `subTaskVerifyCommands` array from context file
-2. If array is empty or missing, skip this phase (it's optional)
-3. For EACH entry in the array:
-   a. Log: `Sub-task {subtaskId}: {title} — executing verify command`
-   b. Execute the `command` via Bash tool with 60-second timeout
-   c. Capture exit code and output
-   d. Record result: `{ subtaskId, title, command, exitCode, passed: exitCode === 0 }`
-4. Continue executing ALL commands even if some fail (gather all results)
-5. After all commands complete, log summary:
-   ```
-   Sub-task verify results:
-   - {subtaskId}: {title} — {command} — PASS/FAIL
-   - {subtaskId}: {title} — {command} — PASS/FAIL
-   ```
-6. If ANY command fails, include in the overall failure assessment during criteria comparison
-
-**Safety**: Apply the same safety checks as the execute skill's verify command execution — block dangerous patterns (`rm -rf`, `sudo`, `curl | bash`, etc.) before running.
-
-**Result tracking**: Store all results in a `subtaskVerifyResults` array for inclusion in the structured output:
-
-```yaml
-subtaskVerifyResults:
-  - subtaskId: "MOB-177"
-    title: "Define types"
-    command: "bun run typecheck"
-    exitCode: 0
-    passed: true
-  - subtaskId: "MOB-178"
-    title: "Create service"
-    command: "bun test service.test.ts"
-    exitCode: 1
-    passed: false
-```
-
-**If no `subTaskVerifyCommands` in context**: This is normal for older issues. Skip silently and proceed to standard verification checks.
+If `subTaskVerifyCommands` is missing/empty, skip silently.
 </subtask_verify_commands>
 
 <context_summary>
-Build verification context from local files:
-
-```markdown
-# Verification Context
-
-## Issue: {ID} - {Title}
-**Type**: {Bug/Feature/Improvement}
-**Priority**: {level}
-
-## Description
-{Full description from parent.description}
-
-## Acceptance Criteria
-- [ ] Criterion 1 (from parent description)
-- [ ] Criterion 2
-- [ ] Criterion 3
-
-## Sub-tasks (from subTasks array)
-| ID | Title | Status | Target File |
-|----|-------|--------|-------------|
-| ... | ... | done | ... |
-
-## Implementation Notes (from sub-task descriptions)
-{Key decisions, constraints, from sub-task descriptions}
-```
+Build verification context combining: parent issue details, acceptance criteria, sub-tasks table (ID/title/status/target file), and implementation notes from sub-task descriptions.
 </context_summary>
 </issue_context_phase>
 
 <implementation_analysis_phase>
 <git_analysis>
-Analyze recent commits related to the issue:
-
+Analyze commits related to the issue:
 ```bash
-# Find commits referencing the issue
 git log --oneline --all --grep="{issue-id}" | head -20
-
-# Get the branch if working on feature branch
-git branch --contains | head -5
-
-# Show files changed in recent commits
 git log --oneline --name-only -10
 ```
-
-Extract:
-- Commit messages and hashes
-- Files created or modified
-- Commit authors and dates
+Extract: commit messages/hashes, files created/modified, authors, dates.
 </git_analysis>
 
 <code_review>
-For each modified file, perform code review:
-
-1. **Read the file** to understand what was implemented
-2. **Check for patterns**: Does it follow codebase conventions?
-3. **Verify completeness**: Does the code address the acceptance criteria?
-4. **Identify concerns**: Any potential bugs, edge cases, or issues?
-
-Focus areas:
-- Error handling
-- Input validation
-- Edge cases
-- Type safety
-- Test coverage
-- Documentation
+For each modified file: read the file, check codebase convention adherence, verify acceptance criteria coverage, identify bugs/edge cases/concerns. Focus: error handling, input validation, edge cases, type safety, test coverage.
 </code_review>
 
 <test_file_review>
-Review corresponding test files:
-
-- Do tests exist for new functionality?
-- Do tests cover edge cases mentioned in acceptance criteria?
-- Are tests meaningful (not just coverage padding)?
-- Do test names describe behavior clearly?
+Review test files for: existence, edge case coverage, meaningfulness (not coverage padding), clear behavior-describing names.
 </test_file_review>
 </implementation_analysis_phase>
 
 <verification_checks_phase>
 <run_dynamic_checks>
-**Use dynamic commands from `projectInfo.availableCommands` in the context file.**
+Use `projectInfo.availableCommands` from context file. Resolution order: context commands → `just {check}` fallback → hardcoded default with warning.
 
-Read project detection results:
-```bash
-cat "$MOBIUS_CONTEXT_FILE" | jq '.projectInfo'
-```
+Run **typecheck**, **lint**, **tests** using resolved commands. Run **platform builds** if `platformTargets` includes android/ios.
 
-The `projectInfo` object contains:
-- `availableCommands`: `{ test?, typecheck?, lint?, build?, platformBuild? }`
-- `platformTargets`: `string[]` (e.g., `["android", "ios"]`)
-- `projectType`: Project type string
-- `buildSystem`: Build system string
-
-**Command resolution order** (for each check):
-
-1. Use `projectInfo.availableCommands.{check}` if present in context
-2. Fall back to `just {check}` if `projectInfo.hasJustfile` is true
-3. Fall back to hardcoded default with a warning: `⚠ projectInfo not available, using hardcoded fallback`
-
-**Run typecheck**:
-```bash
-# Dynamic: use availableCommands.typecheck from context
-# Example: "just typecheck" or "bun run typecheck" or "cargo check"
-# Fallback: just typecheck
-```
-
-If `projectInfo.availableCommands.typecheck` exists, run it; otherwise try `just typecheck`.
-Capture any type errors or warnings.
-
-**Run lint**:
-```bash
-# Dynamic: use availableCommands.lint from context
-# Example: "just lint" or "bun run lint" or "cargo clippy"
-# Fallback: just lint
-```
-
-If `projectInfo.availableCommands.lint` exists, run it; otherwise try `just lint`.
-Note any linting issues.
-
-**Run tests**:
-```bash
-# Dynamic: use availableCommands.test from context
-# Example: "just test" or "bun test" or "cargo test"
-# Fallback: just test
-```
-
-If `projectInfo.availableCommands.test` exists, run it; otherwise try `just test`.
-Capture pass/fail count, any failures with error messages, and coverage information if available.
-
-**Run platform-specific builds** (if applicable):
-
-If `projectInfo.platformTargets` includes `'android'`:
-```bash
-# Run: projectInfo.availableCommands.platformBuild.android
-```
-
-If `projectInfo.platformTargets` includes `'ios'`:
-```bash
-# Run: projectInfo.availableCommands.platformBuild.ios
-```
-
-Platform builds are optional — only run when platform targets are detected.
-
-**Fallback warning**: If `projectInfo` is missing from the context file entirely, log:
-```
-⚠ projectInfo not found in context file. Using hardcoded fallback commands:
-  typecheck: just typecheck
-  lint: just lint
-  test: just test
-```
-And proceed with hardcoded commands.
+If `projectInfo` missing entirely, warn and use `just typecheck`, `just lint`, `just test`.
 </run_dynamic_checks>
 
 <check_cicd_status>
-Verify CI/CD pipeline status before approving:
+Check CI/CD via: `gh pr view --json number,state,statusCheckRollup` or `gh run list --branch $(git branch --show-current) --limit 5`.
 
-```bash
-# Check if there's an open PR for the current branch
-gh pr view --json number,state,statusCheckRollup 2>/dev/null
+- PR exists: use `statusCheckRollup` (all pass=PASS, any fail=FAIL, any pending=PENDING)
+- No PR: check latest workflow run conclusion
+- No CI configured: N/A
 
-# If no PR, check the latest workflow runs for the branch
-gh run list --branch $(git branch --show-current) --limit 5
-
-# Get detailed status of the most recent run
-gh run view --json status,conclusion,jobs
-```
-
-**CI/CD Check Logic**:
-
-1. **If PR exists**: Use `statusCheckRollup` to get all check statuses
-   - All checks PASS: CI status = PASS
-   - Any check PENDING: CI status = PENDING (wait or note in review)
-   - Any check FAILURE: CI status = FAIL
-
-2. **If no PR**: Check latest workflow run on branch
-   - `conclusion: success`: CI status = PASS
-   - `conclusion: failure`: CI status = FAIL
-   - `status: in_progress`: CI status = PENDING
-
-3. **If no CI configured**: Note this in review (CI status = N/A)
-
-**Important**: A failing CI/CD status should block PASS recommendation. The implementation may be correct, but if CI is failing, it's not ready to merge.
-
-```bash
-# Example: Parse PR check status
-gh pr view --json statusCheckRollup --jq '.statusCheckRollup[] | "\(.name): \(.conclusion // .status)"'
-
-# Example: Get workflow run conclusion
-gh run list --branch $(git branch --show-current) --limit 1 --json conclusion,status --jq '.[0]'
-```
+**Failing CI blocks PASS** — implementation may be correct but not ready to merge.
 </check_cicd_status>
 
 <verification_summary>
-Compile verification results:
-
-```markdown
-## Verification Checks
-
-| Check | Status | Details |
-|-------|--------|---------|
-| Tests | PASS/FAIL | X passed, Y failed |
-| Typecheck | PASS/FAIL | {error count if any} |
-| Lint | PASS/FAIL | {warning count if any} |
-| CI/CD | PASS/FAIL/PENDING/N/A | {workflow status, failed jobs if any} |
-```
-
-**CI/CD blocking logic**: If CI/CD status is FAIL, the overall verification status cannot be PASS, even if all other checks pass. A failing pipeline indicates the code is not ready for merge.
+Compile results table: Tests, Typecheck, Lint, CI/CD with status and details. CI/CD FAIL prevents overall PASS.
 </verification_summary>
 </verification_checks_phase>
 
 <criteria_comparison_phase>
-<criterion_by_criterion>
-For each acceptance criterion, evaluate:
+For each acceptance criterion, evaluate: addressed? complete? testable? correct?
 
-1. **Is it addressed?** - Code exists that implements this requirement
-2. **Is it complete?** - All aspects of the criterion are handled
-3. **Is it testable?** - There are tests verifying this behavior
-4. **Is it correct?** - The implementation matches the intent
+Mark as: **PASS** (fully implemented+tested), **PARTIAL** (incomplete/missing tests), **FAIL** (not implemented/broken), **UNCLEAR** (can't determine).
 
-Mark each criterion:
-- **PASS**: Fully implemented, tested, and working
-- **PARTIAL**: Implemented but incomplete or missing tests
-- **FAIL**: Not implemented or broken
-- **UNCLEAR**: Cannot determine from code review alone
-</criterion_by_criterion>
-
-<criteria_matrix>
-Build a criteria evaluation matrix:
-
-```markdown
-## Acceptance Criteria Evaluation
-
-| # | Criterion | Status | Evidence | Notes |
-|---|-----------|--------|----------|-------|
-| 1 | {criterion text} | PASS | {file:line or test name} | {any notes} |
-| 2 | {criterion text} | PARTIAL | {what's missing} | {recommendations} |
-| 3 | {criterion text} | FAIL | {what's wrong} | {fix needed} |
-```
-</criteria_matrix>
+Build criteria matrix: `| # | Criterion | Status | Evidence | Notes |`
 </criteria_comparison_phase>
 
 <duration_sanity_check>
-**Check for suspiciously fast verification completion.**
-
-Record the start time at the beginning of skill execution (before any context loading). After all verification commands complete (tests, typecheck, lint, platform builds, sub-task verify commands), calculate elapsed time.
-
-**Duration check logic**:
-
-1. Record `startTime` at skill initialization (use `Date.now()` or equivalent)
-2. After all verification checks complete, calculate `elapsedSeconds = (Date.now() - startTime) / 1000`
-3. If `elapsedSeconds < 5`:
-   - Log warning: `⚠ VG completed in {elapsedSeconds}s — suspiciously fast. Re-running all checks with verbose output.`
-   - Re-execute ALL verification commands (typecheck, lint, tests, platform builds)
-   - Use verbose flags where available (e.g., `--verbose`, `-v`)
-   - If re-run also completes in <5 seconds, accept the results but note the fast duration
-4. Include `durationSeconds` in the structured output regardless of whether re-run was triggered
-
-**Why this matters**: A verification gate completing in under 5 seconds likely means commands were skipped, failed silently, or the project has no meaningful checks configured. The re-run with verbose output helps catch these cases.
-
-**Duration in structured output**:
-```yaml
-durationSeconds: 45  # Total VG execution time in seconds
-```
+Record start time at skill initialization. After all checks complete, if elapsed < 5 seconds: warn and re-run all checks with verbose flags. Include `durationSeconds` in structured output.
 </duration_sanity_check>
 
 <multi_agent_review>
-**ALWAYS spawn all 4 review agents — do NOT skip any agent regardless of issue size or perceived simplicity.**
+**ALWAYS spawn all 4 review agents — do NOT skip any.**
 
-If the Task tool is unavailable (e.g., in piped mode with `claude -p`), perform the 4 reviews INLINE sequentially using the same prompts below. Each review must still be performed — the only difference is sequential execution instead of parallel.
+If Task tool unavailable (piped mode), perform reviews INLINE sequentially. Wait for ALL results before aggregation.
 
-Wait for ALL agent results before continuing to aggregation. Do not proceed with partial results.
+| Agent | Focus | Output Fields |
+|-------|-------|---------------|
+| Bug & Logic (code-reviewer) | Logic errors, off-by-one, edge cases, error handling | CRITICAL, IMPORTANT, EDGE_CASES_MISSING, PASS |
+| Code Structure (code-reviewer) | Convention adherence, code smells, readability, abstractions | CODE_SMELLS, PATTERN_VIOLATIONS, ARCHITECTURE_CONCERNS, PASS |
+| Performance & Security (code-reviewer) | N+1 queries, memory leaks, input validation, auth, sensitive data | PERFORMANCE_ISSUES, SECURITY_VULNERABILITIES, PASS |
+| Test Quality (code-reviewer) | Coverage %, test meaningfulness, edge case tests, mock appropriateness | COVERAGE_PERCENT, THRESHOLD_MET, MISSING_TESTS, TEST_QUALITY_ISSUES, PASS |
 
-Spawn four specialized review agents IN PARALLEL using Task tool:
+Each agent receives: issue context, acceptance criteria, modified files list.
 
-### Agent 1: Bug & Logic Detection
-```
-Task tool:
-  subagent_type: feature-dev:code-reviewer
-  prompt: |
-    Analyze implementation for bugs and logic errors.
-
-    Context:
-    - Issue: {parent_id} - {title}
-    - Acceptance Criteria: {all_criteria}
-    - Files: {all_modified_files}
-
-    Focus:
-    - Logic errors, off-by-one bugs
-    - Business logic vs requirements
-    - Edge case handling
-    - Error handling completeness
-
-    Output (structured):
-    CRITICAL: [list with file:line]
-    IMPORTANT: [list]
-    EDGE_CASES_MISSING: [list]
-    PASS: true/false
-```
-
-### Agent 2: Code Structure & Best Practices
-```
-Task tool:
-  subagent_type: feature-dev:code-reviewer
-  prompt: |
-    Review code structure and codebase patterns.
-
-    Files: {all_modified_files}
-
-    Focus:
-    - Codebase convention adherence
-    - Code smells and anti-patterns
-    - Readability and maintainability
-    - Appropriate abstractions
-
-    Output (structured):
-    CODE_SMELLS: [list with file:line]
-    PATTERN_VIOLATIONS: [list]
-    ARCHITECTURE_CONCERNS: [list]
-    PASS: true/false
-```
-
-### Agent 3: Performance & Security
-```
-Task tool:
-  subagent_type: feature-dev:code-reviewer
-  prompt: |
-    Analyze performance and security.
-
-    Files: {all_modified_files}
-
-    Focus:
-    - N+1 queries, unnecessary loops
-    - Memory leaks, resource cleanup
-    - Input validation
-    - Authorization checks
-    - Sensitive data handling
-
-    Output (structured):
-    PERFORMANCE_ISSUES: [list with severity]
-    SECURITY_VULNERABILITIES: [list with severity]
-    PASS: true/false
-```
-
-### Agent 4: Test Quality & Coverage
-```
-Task tool:
-  subagent_type: feature-dev:code-reviewer
-  prompt: |
-    Evaluate test quality and coverage.
-
-    Run: just test --coverage (or equivalent)
-    Threshold: {coverage_threshold}% (default 80%)
-
-    Test Files: {test_files}
-    Source Files: {source_files}
-
-    Focus:
-    - Coverage percentage vs threshold
-    - Test meaningfulness (not coverage padding)
-    - Edge case test presence
-    - Mock appropriateness
-
-    Output (structured):
-    COVERAGE_PERCENT: number
-    THRESHOLD_MET: true/false
-    MISSING_TESTS: [list]
-    TEST_QUALITY_ISSUES: [list]
-    PASS: true/false
-```
-
-### Multi-Grader Aggregation
-
-After all agents complete, aggregate using this logic:
+### Aggregation
 
 ```
-if any(agent.CRITICAL or agent.SECURITY_VULNERABILITIES with severity=high):
+if any(CRITICAL or SECURITY_VULNERABILITIES with severity=high):
     overall = FAIL
-elif any(agent.IMPORTANT) or not test_agent.THRESHOLD_MET:
+elif any(IMPORTANT) or not THRESHOLD_MET:
     overall = NEEDS_WORK
-elif all(agent.PASS):
+elif all(PASS):
     overall = PASS
 else:
     overall = PASS_WITH_NOTES
-```
-
-**Aggregation Report Format**:
-```markdown
-## Multi-Agent Verification Results
-
-### Agent 1: Bug & Logic Detection
-Status: {PASS/FAIL}
-{findings summary}
-
-### Agent 2: Code Structure
-Status: {PASS/FAIL}
-{findings summary}
-
-### Agent 3: Performance & Security
-Status: {PASS/FAIL}
-{findings summary}
-
-### Agent 4: Test Quality
-Status: {PASS/FAIL}
-Coverage: {X}% (threshold: {Y}%)
-{findings summary}
-
-### Overall Status: {PASS/PASS_WITH_NOTES/NEEDS_WORK/FAIL}
 ```
 </multi_agent_review>
 
 <identify_improvements>
 Categorize findings from all agents:
 
-**Critical Issues** (must fix):
-- Bugs that break functionality
-- Missing critical acceptance criteria
-- Security vulnerabilities (high severity)
-- Logic errors identified by Agent 1
-
-**Important Issues** (should fix):
-- Missing edge case handling
-- Incomplete test coverage (below threshold)
-- Code quality concerns from Agent 2
-- Performance issues from Agent 3
-
-**Suggestions** (nice to have):
-- Refactoring opportunities
-- Performance optimizations
-- Documentation improvements
-
-**Questions** (need clarification):
-- Ambiguous requirements
-- Design decisions to verify
-- Edge cases not specified
+- **Critical** (must fix): bugs, missing criteria, security vulnerabilities (high), logic errors
+- **Important** (should fix): missing edge cases, incomplete coverage, code quality, performance issues
+- **Suggestions** (nice to have): refactoring, optimizations, documentation
+- **Questions** (need clarification): ambiguous requirements, design decisions, unspecified edge cases
 </identify_improvements>
 
 <rework_loop>
-**AUTONOMOUS ACTION**: On FAIL or NEEDS_WORK, IMMEDIATELY implement the rework loop without asking the user. Reopening failing sub-tasks with feedback is a required part of the verification workflow.
+**AUTONOMOUS ACTION**: On FAIL/NEEDS_WORK, implement immediately without asking the user.
 
-On FAIL or NEEDS_WORK, implement the rework loop:
+1. **Map findings to sub-tasks**: Match file:line references to responsible sub-tasks via git blame or sub-task comments
+2. **Prepare feedback**: Include in `feedbackComments` structured output field (format: `## Verification Feedback: NEEDS_REWORK` with Critical/Important issues and recommended fixes)
+3. **Include status transitions**: `failingSubtasks` field tells mobius loop which sub-tasks to reopen
+4. **Track iteration**: Include `reworkIteration` count. After `max_rework_iterations` (default 3), include `escalation` in output
 
-### 1. Map Findings to Sub-Tasks
-
-Match each finding's file to the sub-task that modified it:
-```
-For each finding with file:line reference:
-  1. Check git blame or sub-task comments for file ownership
-  2. Map finding to the responsible sub-task
-  3. Group all findings by sub-task ID
-```
-
-### 2. Prepare Feedback in Structured Output
-
-Include feedback comments in the `feedbackComments` field of the structured output. The mobius loop will create these comments via SDK:
-
-```markdown
-## Verification Feedback: NEEDS_REWORK
-
-### Issues Found
-
-**Critical** (must fix):
-- {issue with file:line reference}
-
-**Important** (should fix):
-- {issue description}
-
-### Recommended Fixes
-{Specific guidance from review agents}
-
-### Re-verification
-After addressing these issues, the verification gate will automatically re-run when all implementation sub-tasks are complete again.
-
----
-*Feedback from verify multi-agent review*
-```
-
-### 3. Include Status Transitions in Structured Output
-
-The structured output `failingSubtasks` field tells the mobius loop which sub-tasks need to be moved back to "To Do" / "Backlog" status. The loop handles the actual status transitions via SDK.
-
-### 4. Document Rework Iteration
-
-Include the rework iteration count in the structured output's `reworkIteration` field. The mobius loop tracks this and handles escalation after `max_rework_iterations` (default 3) cycles.
-
-### Loop Continuation
-
-The loop continues naturally after processing the structured output:
-1. Mobius loop parses structured output
-2. Reopens failing sub-tasks via SDK
-3. Posts feedback comments via SDK
-4. Loop polls for ready tasks
-5. Picks up reopened sub-tasks
-6. Executes them via execute
-7. When all implementation sub-tasks Done, verification sub-task unblocks
-8. Verification runs again
-
-**Max Iterations**: After `max_rework_iterations` (default 3) rework cycles, include `escalation` in structured output:
-- Escalation reason and history
-- The loop will add "escalation-needed" label
-- Loop stops with escalation notification
-
-### On PASS or PASS_WITH_NOTES
-
-Include in structured output:
-1. `status: PASS` or `status: PASS_WITH_NOTES`
-2. `criteriaResults` with all criteria evaluations
-3. `reviewComment` with full verification report
-
-The mobius loop will:
-1. Mark verification sub-task Done via SDK
-2. Post verification report to parent issue as comment
-3. Parent can now be completed (no longer blocked by verification sub-task)
+### On PASS/PASS_WITH_NOTES
+Include `status`, `criteriaResults`, and `reviewComment` in structured output. Mobius loop marks VG Done and posts report to parent.
 </rework_loop>
 
 <review_report_phase>
 <report_structure>
-Generate a structured review report:
+Generate structured review report:
 
 ```markdown
 ## Verification Report: {Issue ID}
@@ -1110,196 +318,75 @@ Generate a structured review report:
 ### Summary
 **Overall Status**: PASS / PASS_WITH_NOTES / NEEDS_WORK / FAIL
 **Criteria Met**: X of Y
-**Tests**: PASS / FAIL
-**Typecheck**: PASS / FAIL
+**Tests**: PASS / FAIL | **Typecheck**: PASS / FAIL
 
 ### Acceptance Criteria Evaluation
 | # | Criterion | Status | Notes |
 |---|-----------|--------|-------|
-| 1 | ... | PASS | ... |
-| 2 | ... | PARTIAL | ... |
-
-### Verification Checks
-- Tests: X passed, Y failed
-- Typecheck: {status}
-- Lint: {status}
 
 ### Implementation Review
-
-**What was done well**:
-- {positive observation 1}
-- {positive observation 2}
-
-**Critical Issues** (must fix before closing):
-- {issue 1}
-- {issue 2}
-
-**Important Issues** (should address):
-- {issue 1}
-- {issue 2}
-
-**Suggestions** (consider for future):
-- {suggestion 1}
-- {suggestion 2}
+**Done well**: {positives}
+**Critical Issues**: {must fix}
+**Important Issues**: {should address}
+**Suggestions**: {consider for future}
 
 ### Files Reviewed
-- `{file1}` - {summary}
-- `{file2}` - {summary}
+- `{file}` - {summary}
 
 ### Recommendation
 {APPROVE / REQUEST_CHANGES / DISCUSS}
-
-{Closing summary with next steps}
 ```
 </report_structure>
 
 <status_definitions>
-**Overall Status meanings**:
-
 | Status | Meaning | Action |
 |--------|---------|--------|
-| PASS | All criteria met, tests pass, no issues | Close issue |
-| PASS_WITH_NOTES | Criteria met with minor suggestions | Close issue, optionally address suggestions |
+| PASS | All criteria met, all checks pass | Close issue |
+| PASS_WITH_NOTES | Criteria met with minor suggestions | Close, optionally address suggestions |
 | NEEDS_WORK | Some criteria not met or tests fail | Keep open, address issues |
 | FAIL | Critical issues or many criteria not met | Keep open, major rework needed |
-
-**Recommendation meanings**:
-
-| Recommendation | Meaning |
-|----------------|---------|
-| APPROVE | Ready to close, no blocking issues |
-| REQUEST_CHANGES | Issues need resolution before closing |
-| DISCUSS | Ambiguities need team input |
 </status_definitions>
 </review_report_phase>
 
 <ticket_update_phase>
 <post_review_comment>
-Include the review as the `reviewComment` field in the structured output. The mobius loop will post it to the parent issue via SDK:
-
-```markdown
-## Verification Review
-
-**Status**: {PASS/PASS_WITH_NOTES/NEEDS_WORK/FAIL}
-**Recommendation**: {APPROVE/REQUEST_CHANGES/DISCUSS}
-
-### Acceptance Criteria
-{criteria evaluation matrix}
-
-### Checks
-- Tests: {status}
-- Typecheck: {status}
-
-### Findings
-{condensed findings - critical issues and important issues}
-
-### Next Steps
-{clear action items}
-
----
-*Automated verification by verify*
-```
+Include review as `reviewComment` field in structured output. Mobius loop posts it to parent issue via SDK.
 </post_review_comment>
 
 <update_issue_status>
-The structured output `status` field determines what the mobius loop does:
-
-**If PASS or PASS_WITH_NOTES**:
-The mobius loop will:
-- Move verification sub-task to "Done" via SDK
-- Post reviewComment to parent issue via SDK
-
-**If NEEDS_WORK or FAIL**:
-The mobius loop will:
-- Move failing sub-tasks back to "To Do" / "Backlog" via SDK
-- Post feedback comments to failing sub-tasks via SDK
-- Verification sub-task remains "In Progress"
-
-The structured output drives all status transitions - no direct MCP/SDK calls from this skill.
+Structured output `status` drives mobius loop actions:
+- **PASS/PASS_WITH_NOTES**: Loop marks VG Done, posts reviewComment to parent
+- **NEEDS_WORK/FAIL**: Loop reopens failing sub-tasks, posts feedback comments, VG stays "In Progress"
 </update_issue_status>
 
 <update_local_context>
-**CRITICAL: After verification completes, update the local context files.**
+**CRITICAL: Update local context files after verification.**
 
-The local context files must be updated so that `mobius sync` can push changes to Linear/Jira.
+On **PASS/PASS_WITH_NOTES**:
+- Update `.mobius/issues/{parentId}/tasks/{verificationTaskId}.json`: status → "done"
+- Update `context.json`: verificationTask.status → "done", metadata.updatedAt → current timestamp
 
-**Files to update**:
+On **NEEDS_WORK/FAIL**:
+- Keep verification task "in_progress"
+- Revert failing sub-task files: status "done" → "pending"
+- Update `context.json`: failing sub-tasks status → "pending", metadata.updatedAt → current timestamp
 
-1. **Verification task file**: `.mobius/issues/{parentId}/tasks/{verificationTaskId}.json`
-   - On PASS/PASS_WITH_NOTES: Change `"status": "in_progress"` to `"status": "done"`
-   - On NEEDS_WORK/FAIL: Keep `"status": "in_progress"`
-
-2. **Failing sub-task files** (on NEEDS_WORK/FAIL): `.mobius/issues/{parentId}/tasks/{failingTaskId}.json`
-   - Change `"status": "done"` back to `"status": "pending"` for each failing sub-task
-
-3. **Main context file**: `.mobius/issues/{parentId}/context.json`
-   - Update the `verificationTask.status` field accordingly
-   - For failing sub-tasks, update their status in the `subTasks` array to `"pending"`
-   - Update `metadata.updatedAt` to current ISO-8601 timestamp
-
-**Example using Edit tool for PASS**:
-
-```
-# Update verification task file
-Edit .mobius/issues/MOB-161/tasks/MOB-186.json
-  old_string: "status": "in_progress"
-  new_string: "status": "done"
-
-# Update context.json - verification task status
-Edit .mobius/issues/MOB-161/context.json
-  old_string: [find verificationTask block with "status": "in_progress"]
-  new_string: [same block with "status": "done"]
-
-# Update the updatedAt timestamp
-Edit .mobius/issues/MOB-161/context.json
-  old_string: "updatedAt": "2026-01-28T19:05:00.000Z"
-  new_string: "updatedAt": "{current ISO-8601 timestamp}"
-```
-
-**Example using Edit tool for NEEDS_WORK**:
-
-```
-# Reopen failing sub-task files
-Edit .mobius/issues/MOB-161/tasks/MOB-177.json
-  old_string: "status": "done"
-  new_string: "status": "pending"
-
-# Update context.json - reopen failing sub-tasks in subTasks array
-Edit .mobius/issues/MOB-161/context.json
-  old_string: [find the failing subtask block with "status": "done"]
-  new_string: [same block with "status": "pending"]
-
-# Update the updatedAt timestamp
-Edit .mobius/issues/MOB-161/context.json
-  old_string: "updatedAt": "2026-01-28T19:05:00.000Z"
-  new_string: "updatedAt": "{current ISO-8601 timestamp}"
-```
-
-**Why this matters**:
-- The `mobius sync` command reads local context files and pushes changes to Linear/Jira
-- Without updating these files, verification status changes won't propagate to the issue tracker
-- The structured YAML output alone is not sufficient - local files MUST be updated
-- Reopening failing sub-tasks in local files ensures the loop correctly picks them up again
+Local files must be updated for `mobius sync` to propagate changes to Linear/Jira.
 </update_local_context>
 </ticket_update_phase>
 
 <completion_report>
 <report_format>
-Output a summary for the user:
-
 ```markdown
 # Verification Complete
 
 ## Issue: {ID} - {Title}
-
 **Status**: {PASS/PASS_WITH_NOTES/NEEDS_WORK/FAIL}
 **Recommendation**: {APPROVE/REQUEST_CHANGES/DISCUSS}
 
 ### Summary
 - Acceptance Criteria: {X of Y} met
-- Tests: {status}
-- Typecheck: {status}
-- Lint: {status}
+- Tests: {status} | Typecheck: {status} | Lint: {status}
 
 ### Key Findings
 {Top 3-5 findings}
@@ -1315,213 +402,27 @@ Output a summary for the user:
 </report_format>
 
 <follow_up_issues>
-If critical or important issues are found that won't be fixed immediately, include them in the structured output's `followUpIssues` field. The mobius loop can create these via SDK:
-
-```yaml
-followUpIssues:
-  - title: "Technical debt: Refactor X for performance"
-    description: |
-      Discovered during verification of MOB-161.
-      The current implementation works but could be optimized.
-    labels: ["follow-up", "tech-debt"]
-    relatedTo: "MOB-161"
-```
-
-Link follow-up issues in the verification comment.
+Include non-blocking issues in `followUpIssues` structured output field for mobius loop to create via SDK.
 </follow_up_issues>
 
 <status_markers>
-**IMPORTANT**: The structured output `status` field at the end of execution determines the outcome.
-
-**Valid status values**:
-- `PASS` - All criteria met, verification sub-task will be marked Done
-- `PASS_WITH_NOTES` - Criteria met with suggestions, verification sub-task will be marked Done
-- `NEEDS_WORK` - Issues found, failing sub-tasks will be reopened
-- `FAIL` - Critical issues, failing sub-tasks will be reopened
-- `ALL_BLOCKED` - Not all implementation sub-tasks are Done
-
-The mobius loop parses the structured YAML/JSON output to determine execution results and take appropriate actions.
+Structured output `status` field determines outcome: `PASS`, `PASS_WITH_NOTES`, `NEEDS_WORK`, `FAIL`, `ALL_BLOCKED`. Mobius loop parses YAML to take appropriate actions.
 </status_markers>
 </completion_report>
 
-<examples>
-<pass_example>
-**Input**: `/verify PROJ-100`
-
-**Issue**: PROJ-100 - Add dark mode support
-
-**Findings**:
-- All 5 acceptance criteria met
-- Tests pass (12 new tests added)
-- Typecheck clean
-- Code follows existing patterns
-
-**Output**:
-```markdown
-## Verification Review
-
-**Status**: PASS
-**Recommendation**: APPROVE
-
-### Acceptance Criteria
-| # | Criterion | Status |
-|---|-----------|--------|
-| 1 | Theme follows system preference by default | PASS |
-| 2 | Settings screen has theme toggle | PASS |
-| 3 | All text maintains 4.5:1 contrast ratio | PASS |
-| 4 | Theme preference persists across restarts | PASS |
-| 5 | No flash of wrong theme on launch | PASS |
-
-### Checks
-- Tests: 12 passed, 0 failed
-- Typecheck: PASS
-
-### What was done well
-- Clean separation of theme logic into ThemeProvider
-- Comprehensive test coverage for all modes
-- Proper localStorage persistence
-
-All criteria met. Ready to close.
-```
-</pass_example>
-
-<needs_work_example>
-**Input**: `/verify PROJ-200`
-
-**Issue**: PROJ-200 - Fix schedule deactivation error
-
-**Findings**:
-- 2 of 3 acceptance criteria met
-- Tests pass but missing edge case coverage
-- Typecheck clean
-- Missing error handling for concurrent deactivation
-
-**Output**:
-```markdown
-## Verification Review
-
-**Status**: NEEDS_WORK
-**Recommendation**: REQUEST_CHANGES
-
-### Acceptance Criteria
-| # | Criterion | Status | Notes |
-|---|-----------|--------|-------|
-| 1 | User can deactivate without error | PASS | Works for single user |
-| 2 | Schedule status updates to inactive | PASS | Verified |
-| 3 | Team members see status change | PARTIAL | No sync test, potential race condition |
-
-### Checks
-- Tests: 8 passed, 0 failed
-- Typecheck: PASS
-
-### Critical Issues
-- No handling for concurrent deactivation attempts
-- Missing PowerSync conflict resolution
-
-### Next Steps
-1. Add optimistic locking or conflict resolution
-2. Add multi-user test for sync scenario
-3. Re-verify after changes
-```
-</needs_work_example>
-</examples>
-
 <anti_patterns>
-**Don't skip code review**:
-- BAD: Only run tests without reading the code
-- GOOD: Review implementation against each acceptance criterion
-
-**Don't be superficial**:
-- BAD: "Tests pass, looks good"
-- GOOD: Thorough analysis of correctness, completeness, quality
-
-**Don't nitpick on style**:
-- BAD: Flag every style preference as an issue
-- GOOD: Focus on correctness, completeness, and maintainability
-
-**Don't approve incomplete work**:
-- BAD: "2 of 5 criteria met, but PASS"
-- GOOD: NEEDS_WORK until all criteria are addressed
-
-**Don't skip the ticket comment**:
-- BAD: Tell user the results but don't post to ticket
-- GOOD: Always document verification on the ticket
-
-**Don't forget to check sub-tasks**:
-- BAD: Only verify parent issue
-- GOOD: Verify all sub-tasks are complete before overall review
-
-**Don't skip local context updates**:
-- BAD: Only output structured YAML without updating `.mobius/issues/` files
-- BAD: Mark verification complete but forget to update task JSON files
-- BAD: Reopen failing sub-tasks in output but not in local files
-- GOOD: Update both task-specific JSON and main context.json after verification
-- GOOD: Update `metadata.updatedAt` timestamp when modifying context
+- **Don't skip code review** — run tests AND read code against each criterion
+- **Don't be superficial** — thorough analysis, not just "tests pass, looks good"
+- **Don't approve incomplete work** — NEEDS_WORK until all criteria addressed
+- **Don't skip ticket comment** — always document verification on ticket
+- **Don't forget sub-task checks** — verify all sub-tasks complete before review
+- **Don't skip local context updates** — update `.mobius/issues/` files AND context.json
 </anti_patterns>
 
 <success_criteria>
-A successful verification achieves:
-
-**Configuration & Setup**:
-- [ ] Backend detected from config (linear or jira)
-- [ ] Verification config loaded (coverage_threshold, max_rework_iterations, etc.)
-- [ ] Coverage threshold configurable (default 80%)
-
-**Context Gathering** (AC 1, 2):
-- [ ] verify receives verification sub-task ID as input (from mobius loop)
-- [ ] Parent issue identified from the verification sub-task
-- [ ] Full parent issue context loaded (description, criteria, comments)
-- [ ] All sibling implementation sub-tasks collected and analyzed
-- [ ] Aggregated context from parent AND all implementation sub-tasks
-- [ ] All modified files identified across implementation sub-tasks
-
-**Quality Gate Dimensions** (evaluated during review):
-- [ ] Testing (all tests pass, coverage >= threshold)
-- [ ] Code structure (best practices, no code smells)
-- [ ] Performance (no regressions identified)
-- [ ] Security (no vulnerabilities found)
-- [ ] Business logic correctness (matches requirements)
-- [ ] User story satisfaction (solves user's problem)
-
-**Multi-Agent Review**:
-- [ ] All 4 specialized review agents spawned in parallel (multi-agent verification)
-- [ ] Agent 1: Bug & Logic Detection completed
-- [ ] Agent 2: Code Structure & Best Practices completed
-- [ ] Agent 3: Performance & Security completed
-- [ ] Agent 4: Test Quality & Coverage completed
-- [ ] Multi-grader aggregation computed overall status
-
-**Verification Checks**:
-- [ ] Tests executed and results captured
-- [ ] Coverage threshold evaluated against configurable value
-- [ ] Typecheck and lint run
-- [ ] CI/CD status checked
-
-**Criteria Evaluation**:
-- [ ] Each acceptance criterion evaluated with evidence
-- [ ] Findings categorized (Critical, Important, Suggestions, Questions)
-
-**Rework Loop** (AC 6, 7, 9 - on FAIL/NEEDS_WORK):
-- [ ] Findings mapped to responsible sub-tasks
-- [ ] Failing sub-tasks receive detailed feedback comments with file:line references
-- [ ] Failing sub-tasks moved back to "To Do" status
-- [ ] Rework iteration count tracked (up to max_rework_iterations)
-- [ ] Rework iteration documented on verification sub-task
-- [ ] Loop continues naturally (reopened tasks picked up by normal polling)
-
-**Completion** (AC 8 - on PASS/PASS_WITH_NOTES):
-- [ ] Verification sub-task marked Done when quality checks pass
-- [ ] Verification report posted to parent issue
-- [ ] Parent issue unblocked for completion (no longer blocked by verification sub-task)
-
-**Local Context Updates**:
-- [ ] **Local context files updated** (`.mobius/issues/{parentId}/` task and context.json)
-- [ ] Verification task status updated in local files (to "done" on PASS, stays "in_progress" on FAIL)
-- [ ] Failing sub-task statuses reverted to "pending" in local files (on NEEDS_WORK/FAIL)
-- [ ] `metadata.updatedAt` timestamp updated in context.json
-
-**Reporting**:
-- [ ] Structured review report generated
-- [ ] Review comment posted to ticket
-- [ ] Clear next steps communicated to user
+- [ ] Context gathered (parent + sub-tasks + files)
+- [ ] Quality gates evaluated (tests, typecheck, lint, CI/CD, coverage)
+- [ ] Multi-agent review completed (4 agents + aggregation)
+- [ ] Rework loop executed on FAIL/NEEDS_WORK (feedback, status transitions, iteration tracking)
+- [ ] Completion handled (status updates, comments, local file updates)
 </success_criteria>
