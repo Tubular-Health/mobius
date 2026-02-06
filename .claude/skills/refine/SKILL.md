@@ -155,7 +155,11 @@ Task tool:
     Dependency hints: Depends on {work unit N}, enables {work unit M}
 
     ## Your Task
-    Analyze the target file(s) and related areas deeply. Then produce a complete sub-task description using this exact template:
+    Analyze the target file(s) and related areas deeply. Also assess the complexity and risk of this work unit to enable per-task model routing.
+    Complexity: how much code, logic density, cross-module dependencies (1=trivial, 10=very complex)
+    Risk: test coverage gaps, API surface changes, data migration (1=safe, 10=high risk)
+
+    Then produce a complete sub-task description using this exact template:
 
     ## Summary
     {1-2 sentences: what this sub-task accomplishes}
@@ -187,12 +191,16 @@ Task tool:
     - **Blocked by**: {work unit numbers this depends on, or "None"}
     - **Enables**: {work unit numbers this unblocks}
 
+    ## Scoring Proposal
+    - **Complexity**: {1-10} — {brief justification referencing file count, logic density, cross-module deps}
+    - **Risk**: {1-10} — {brief justification referencing test gaps, API surface, data changes}
+
     IMPORTANT: Be specific. Reference actual file paths, function names, and patterns you find in the codebase. Do not use generic placeholders.
 ```
 </subagent_prompt_template>
 
 <subagent_output_handling>
-**Validation**: After each subagent returns, verify all template sections are present, file paths are concrete, verify command is executable, and acceptance criteria are measurable.
+**Validation**: After each subagent returns, verify all template sections are present (Summary, Context, Target Files, Action, Avoid, Acceptance Criteria, Verify Command, Dependencies, Scoring Proposal), file paths are concrete, verify command is executable, and acceptance criteria are measurable.
 
 - **On failure**: Retry once with clarifying note. If retry also fails, main agent writes description manually using Phase 1 data.
 - **On success**: Store write-up keyed by work unit number for Phase 4 aggregation.
@@ -246,6 +254,47 @@ In the standard flow, `feature-dev:code-architect` subagents (Phase 3) produce t
 
 **Parallelization**: Independent services, unrelated UI components, and tests for different features can run in parallel.
 </ordering_principles>
+
+<scoring_rubric>
+**Score each sub-task for complexity and risk to enable per-task model routing.**
+
+The scoring rubric enables the executor to route sub-tasks to appropriately-sized models. Scores are proposed by Phase 3 subagents and normalized by the main agent in Phase 4.
+
+### Complexity Scale (1-10)
+
+| Range | Label | Criteria |
+|-------|-------|----------|
+| 1-3 | Low | Type definitions, config files, re-exports, simple constants. <50 lines changed. Single concern, no branching logic. |
+| 4-6 | Moderate | Business logic, pattern implementations (providers, hooks, services). 50-200 lines changed. Moderate cross-file awareness needed. |
+| 7-10 | High | New modules or subsystems, algorithms, complex state machines. >200 lines changed. Complex cross-module dependencies, multiple interacting concerns. |
+
+### Risk Scale (1-10)
+
+| Range | Label | Criteria |
+|-------|-------|----------|
+| 1-3 | Low | Internal types, UI-only changes, existing test coverage in place. No API surface changes, no data format changes. |
+| 4-6 | Moderate | Business logic changes, API endpoint modifications, state management updates. Moderate test gaps, may affect downstream consumers. |
+| 7-10 | High | Auth/security logic, payment processing, database migrations, breaking API changes. Significant test gaps, data integrity implications. |
+
+### Model Mapping Formula
+
+Compute `combined = complexity + risk`, then apply thresholds:
+
+| Combined Score | Recommended Model | Rationale |
+|----------------|-------------------|-----------|
+| ≤6 | `haiku` | Simple tasks that don't need heavy reasoning |
+| ≤12 | `sonnet` | Moderate tasks requiring good code understanding |
+| >12 | `opus` | Complex/high-risk tasks requiring deep reasoning |
+
+These thresholds match the Rust `ModelRoutingConfig` defaults (`haiku_max_score: 6`, `sonnet_max_score: 12`).
+
+### Edge Cases
+
+- **Scores outside 1-10 range**: Clamp to 1 (minimum) or 10 (maximum) before computing combined score
+- **All tasks score identically**: Valid if tasks are truly similar in scope — do not artificially spread scores
+- **Verification Gate**: Always complexity 1, risk 1, `recommendedModel: "haiku"` — verification tasks are lightweight by definition
+- **Scoring is optional**: The Rust `scoring` field is `Option<TaskScoring>` with `serde(default)`, so omitting it is backward-compatible but not recommended
+</scoring_rubric>
 
 <aggregation_phase>
 **Phase 4**: Collect all sub-task write-ups and assemble the final breakdown.
