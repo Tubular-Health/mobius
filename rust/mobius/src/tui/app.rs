@@ -25,6 +25,8 @@ pub struct App {
     pub auto_exit_tick: Option<u8>,
     pub agent_todos: HashMap<String, AgentTodoFile>,
     pub max_parallel_agents: usize,
+    pub token_history: Vec<u64>,
+    last_token_total: u64,
 }
 
 impl App {
@@ -52,6 +54,8 @@ impl App {
             auto_exit_tick: None,
             agent_todos: HashMap::new(),
             max_parallel_agents,
+            token_history: Vec::new(),
+            last_token_total: 0,
         }
     }
 
@@ -119,6 +123,31 @@ impl App {
                 *ticks -= 1;
             }
         }
+
+        // Sample token usage for sparkline history
+        let current = self.current_total_tokens();
+        if current != self.last_token_total {
+            self.token_history.push(current);
+            if self.token_history.len() > 60 {
+                self.token_history.remove(0);
+            }
+            self.last_token_total = current;
+        }
+    }
+
+    /// Get combined total tokens (input + output) from runtime state.
+    fn current_total_tokens(&self) -> u64 {
+        self.runtime_state
+            .as_ref()
+            .map(|s| {
+                s.total_input_tokens.unwrap_or(0) + s.total_output_tokens.unwrap_or(0)
+            })
+            .unwrap_or(0)
+    }
+
+    /// Get the token history slice for sparkline rendering.
+    pub fn token_history(&self) -> &[u64] {
+        &self.token_history
     }
 
     /// Handle 'q' key press.
