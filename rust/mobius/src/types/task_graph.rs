@@ -659,8 +659,14 @@ mod tests {
                 relations: Some(Relations {
                     blocked_by: vec![],
                     blocks: vec![
-                        Relation { id: "b".to_string(), identifier: "MOB-201".to_string() },
-                        Relation { id: "c".to_string(), identifier: "MOB-202".to_string() },
+                        Relation {
+                            id: "b".to_string(),
+                            identifier: "MOB-201".to_string(),
+                        },
+                        Relation {
+                            id: "c".to_string(),
+                            identifier: "MOB-202".to_string(),
+                        },
                     ],
                 }),
             },
@@ -671,8 +677,14 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-200".to_string() }],
-                    blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-203".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-200".to_string(),
+                    }],
+                    blocks: vec![Relation {
+                        id: "d".to_string(),
+                        identifier: "MOB-203".to_string(),
+                    }],
                 }),
             },
             LinearIssue {
@@ -682,8 +694,14 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-200".to_string() }],
-                    blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-203".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-200".to_string(),
+                    }],
+                    blocks: vec![Relation {
+                        id: "d".to_string(),
+                        identifier: "MOB-203".to_string(),
+                    }],
                 }),
             },
             LinearIssue {
@@ -694,8 +712,14 @@ mod tests {
                 git_branch_name: String::new(),
                 relations: Some(Relations {
                     blocked_by: vec![
-                        Relation { id: "b".to_string(), identifier: "MOB-201".to_string() },
-                        Relation { id: "c".to_string(), identifier: "MOB-202".to_string() },
+                        Relation {
+                            id: "b".to_string(),
+                            identifier: "MOB-201".to_string(),
+                        },
+                        Relation {
+                            id: "c".to_string(),
+                            identifier: "MOB-202".to_string(),
+                        },
                     ],
                     blocks: vec![],
                 }),
@@ -747,9 +771,18 @@ mod tests {
                 relations: Some(Relations {
                     blocked_by: vec![],
                     blocks: vec![
-                        Relation { id: "b".to_string(), identifier: "MOB-301".to_string() },
-                        Relation { id: "c".to_string(), identifier: "MOB-302".to_string() },
-                        Relation { id: "d".to_string(), identifier: "MOB-303".to_string() },
+                        Relation {
+                            id: "b".to_string(),
+                            identifier: "MOB-301".to_string(),
+                        },
+                        Relation {
+                            id: "c".to_string(),
+                            identifier: "MOB-302".to_string(),
+                        },
+                        Relation {
+                            id: "d".to_string(),
+                            identifier: "MOB-303".to_string(),
+                        },
                     ],
                 }),
             },
@@ -760,7 +793,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-300".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-300".to_string(),
+                    }],
                     blocks: vec![],
                 }),
             },
@@ -771,7 +807,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-300".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-300".to_string(),
+                    }],
                     blocks: vec![],
                 }),
             },
@@ -782,7 +821,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-300".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-300".to_string(),
+                    }],
                     blocks: vec![],
                 }),
             },
@@ -866,7 +908,10 @@ mod tests {
                 git_branch_name: String::new(),
                 relations: Some(Relations {
                     blocked_by: vec![],
-                    blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-501".to_string() }],
+                    blocks: vec![Relation {
+                        id: "b".to_string(),
+                        identifier: "MOB-501".to_string(),
+                    }],
                 }),
             },
             LinearIssue {
@@ -876,8 +921,14 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-500".to_string() }],
-                    blocks: vec![Relation { id: "c".to_string(), identifier: "MOB-502".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-500".to_string(),
+                    }],
+                    blocks: vec![Relation {
+                        id: "c".to_string(),
+                        identifier: "MOB-502".to_string(),
+                    }],
                 }),
             },
             LinearIssue {
@@ -887,8 +938,14 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "b".to_string(), identifier: "MOB-501".to_string() }],
-                    blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-503".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "b".to_string(),
+                        identifier: "MOB-501".to_string(),
+                    }],
+                    blocks: vec![Relation {
+                        id: "d".to_string(),
+                        identifier: "MOB-503".to_string(),
+                    }],
                 }),
             },
             LinearIssue {
@@ -898,7 +955,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "c".to_string(), identifier: "MOB-502".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "c".to_string(),
+                        identifier: "MOB-502".to_string(),
+                    }],
                     blocks: vec![],
                 }),
             },
@@ -934,7 +994,10 @@ mod tests {
                 git_branch_name: String::new(),
                 relations: Some(Relations {
                     blocked_by: vec![],
-                    blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-601".to_string() }],
+                    blocks: vec![Relation {
+                        id: "b".to_string(),
+                        identifier: "MOB-601".to_string(),
+                    }],
                 }),
             },
             LinearIssue {
@@ -944,7 +1007,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-600".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-600".to_string(),
+                    }],
                     blocks: vec![],
                 }),
             },
@@ -956,7 +1022,10 @@ mod tests {
                 git_branch_name: String::new(),
                 relations: Some(Relations {
                     blocked_by: vec![],
-                    blocks: vec![Relation { id: "y".to_string(), identifier: "MOB-603".to_string() }],
+                    blocks: vec![Relation {
+                        id: "y".to_string(),
+                        identifier: "MOB-603".to_string(),
+                    }],
                 }),
             },
             LinearIssue {
@@ -966,7 +1035,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "x".to_string(), identifier: "MOB-602".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "x".to_string(),
+                        identifier: "MOB-602".to_string(),
+                    }],
                     blocks: vec![],
                 }),
             },
@@ -995,7 +1067,10 @@ mod tests {
                 git_branch_name: String::new(),
                 relations: Some(Relations {
                     blocked_by: vec![],
-                    blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-701".to_string() }],
+                    blocks: vec![Relation {
+                        id: "b".to_string(),
+                        identifier: "MOB-701".to_string(),
+                    }],
                 }),
             },
             LinearIssue {
@@ -1005,7 +1080,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-700".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-700".to_string(),
+                    }],
                     blocks: vec![],
                 }),
             },
@@ -1027,19 +1105,55 @@ mod tests {
         let graph = build_task_graph("p1", "MOB-100", &issues);
 
         let stats = get_graph_stats(&graph);
-        assert_eq!(stats, GraphStats { total: 3, done: 0, ready: 1, blocked: 2, in_progress: 0 });
+        assert_eq!(
+            stats,
+            GraphStats {
+                total: 3,
+                done: 0,
+                ready: 1,
+                blocked: 2,
+                in_progress: 0
+            }
+        );
 
         let graph = update_task_status(&graph, "a", TaskStatus::Done);
         let stats = get_graph_stats(&graph);
-        assert_eq!(stats, GraphStats { total: 3, done: 1, ready: 1, blocked: 1, in_progress: 0 });
+        assert_eq!(
+            stats,
+            GraphStats {
+                total: 3,
+                done: 1,
+                ready: 1,
+                blocked: 1,
+                in_progress: 0
+            }
+        );
 
         let graph = update_task_status(&graph, "b", TaskStatus::Done);
         let stats = get_graph_stats(&graph);
-        assert_eq!(stats, GraphStats { total: 3, done: 2, ready: 1, blocked: 0, in_progress: 0 });
+        assert_eq!(
+            stats,
+            GraphStats {
+                total: 3,
+                done: 2,
+                ready: 1,
+                blocked: 0,
+                in_progress: 0
+            }
+        );
 
         let graph = update_task_status(&graph, "c", TaskStatus::Done);
         let stats = get_graph_stats(&graph);
-        assert_eq!(stats, GraphStats { total: 3, done: 3, ready: 0, blocked: 0, in_progress: 0 });
+        assert_eq!(
+            stats,
+            GraphStats {
+                total: 3,
+                done: 3,
+                ready: 0,
+                blocked: 0,
+                in_progress: 0
+            }
+        );
     }
 
     #[test]
@@ -1077,31 +1191,70 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "ip1".to_string(), identifier: "MOB-801".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "ip1".to_string(),
+                        identifier: "MOB-801".to_string(),
+                    }],
                     blocks: vec![],
                 }),
             },
         ];
         let graph = build_task_graph("p1", "MOB-100", &issues);
         let stats = get_graph_stats(&graph);
-        assert_eq!(stats, GraphStats { total: 4, done: 1, ready: 1, blocked: 1, in_progress: 1 });
+        assert_eq!(
+            stats,
+            GraphStats {
+                total: 4,
+                done: 1,
+                ready: 1,
+                blocked: 1,
+                in_progress: 1
+            }
+        );
     }
 
     #[test]
     fn test_graph_stats_after_cascade() {
         let graph = build_task_graph("p1", "MOB-100", &make_diamond_issues());
         let stats = get_graph_stats(&graph);
-        assert_eq!(stats, GraphStats { total: 4, done: 0, ready: 1, blocked: 3, in_progress: 0 });
+        assert_eq!(
+            stats,
+            GraphStats {
+                total: 4,
+                done: 0,
+                ready: 1,
+                blocked: 3,
+                in_progress: 0
+            }
+        );
 
         // A done → B and C become ready, D still blocked
         let graph = update_task_status(&graph, "a", TaskStatus::Done);
         let stats = get_graph_stats(&graph);
-        assert_eq!(stats, GraphStats { total: 4, done: 1, ready: 2, blocked: 1, in_progress: 0 });
+        assert_eq!(
+            stats,
+            GraphStats {
+                total: 4,
+                done: 1,
+                ready: 2,
+                blocked: 1,
+                in_progress: 0
+            }
+        );
 
         // B and C done → D becomes ready
         let graph = update_task_status(&graph, "b", TaskStatus::Done);
         let graph = update_task_status(&graph, "c", TaskStatus::Done);
         let stats = get_graph_stats(&graph);
-        assert_eq!(stats, GraphStats { total: 4, done: 3, ready: 1, blocked: 0, in_progress: 0 });
+        assert_eq!(
+            stats,
+            GraphStats {
+                total: 4,
+                done: 3,
+                ready: 1,
+                blocked: 0,
+                in_progress: 0
+            }
+        );
     }
 }

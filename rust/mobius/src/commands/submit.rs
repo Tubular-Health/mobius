@@ -1,14 +1,15 @@
-//! Submit command - Create a pull request via Claude CLI
+//! Submit command - Create a pull request via configured runtime CLI
 
 use colored::Colorize;
 use std::process::Command;
 
-use crate::config::loader::read_config;
+use crate::config::loader::read_config_with_env;
 use crate::config::paths::resolve_paths;
+use crate::runtime_adapter;
 // Session reading not needed here currently
 use crate::jira::JiraClient;
 use crate::local_state::{read_parent_spec, write_parent_spec};
-use crate::types::enums::Backend;
+use crate::types::enums::{AgentRuntime, Backend};
 
 pub fn run(
     task_id: Option<&str>,
@@ -18,33 +19,44 @@ pub fn run(
     skip_status_update: bool,
 ) -> anyhow::Result<()> {
     let paths = resolve_paths();
-    let config = read_config(&paths.config_path).unwrap_or_default();
+    let config = read_config_with_env(&paths.config_path).unwrap_or_default();
     let backend: Backend = if let Some(b) = backend_override {
         b.parse().unwrap_or(config.backend)
     } else {
         config.backend
     };
-    let model = model_override.unwrap_or(&config.execution.model.to_string()).to_string();
+    let mut execution_config = config.execution.clone();
+    if config.runtime == AgentRuntime::Claude {
+        if let Some(override_model) = model_override {
+            if let Ok(model) = override_model.parse() {
+                execution_config.model = model;
+            }
+        }
+    }
+    let model_override = if config.runtime == AgentRuntime::Opencode {
+        model_override
+    } else {
+        None
+    };
+    let model =
+        runtime_adapter::effective_model_for_runtime(config.runtime, &execution_config, model_override);
 
     // Validate task ID format if provided
     if let Some(tid) = task_id {
         if !validate_task_id(tid, &backend) {
             eprintln!(
                 "{}",
-                format!(
-                    "Error: Invalid task ID format for {}: {}",
-                    backend, tid
-                )
-                .red()
+                format!("Error: Invalid task ID format for {}: {}", backend, tid).red()
             );
             return Err(anyhow::anyhow!("Invalid task ID format"));
         }
     }
 
-    let task_label = task_id
-        .map(|t| format!(" for {}", t))
-        .unwrap_or_default();
-    println!("{}", format!("\nCreating pull request{}...\n", task_label).cyan());
+    let task_label = task_id.map(|t| format!(" for {}", t)).unwrap_or_default();
+    println!(
+        "{}",
+        format!("\nCreating pull request{}...\n", task_label).cyan()
+    );
 
     // Build skill invocation
     let mut skill_args = Vec::new();
@@ -74,23 +86,9 @@ pub fn run(
 
     // Check if cclean is available
     let use_cclean = which::which("cclean").is_ok();
-    let output_format = if use_cclean {
-        "--output-format=stream-json"
-    } else {
-        "--output-format=text"
-    };
+    let full_cmd = runtime_adapter::build_submit_command(config.runtime, &model, use_cclean);
 
-    let claude_cmd = format!(
-        "claude -p --dangerously-skip-permissions --verbose {} --model {}",
-        output_format, model
-    );
-    let full_cmd = if use_cclean {
-        format!("{} | cclean", claude_cmd)
-    } else {
-        claude_cmd
-    };
-
-    // Execute Claude with the PR skill
+    // Execute configured runtime with the PR skill
     let status = Command::new("sh")
         .args(["-c", &full_cmd])
         .stdin(std::process::Stdio::piped())
@@ -110,7 +108,7 @@ pub fn run(
             println!("{}", "\n✓ Submit complete".green());
         }
         Ok(_) | Err(_) => {
-            eprintln!("{}", "Error running Claude CLI".red());
+            eprintln!("{}", format!("Error running {} CLI", config.runtime).red());
             return Err(anyhow::anyhow!("Submit failed"));
         }
     }
@@ -140,11 +138,8 @@ fn update_parent_status_to_review(task_id: &str, backend: &Backend) {
                         {
                             Ok(()) => println!(
                                 "{}",
-                                format!(
-                                    "✓ Updated {} status to \"{}\"",
-                                    task_id, review_status
-                                )
-                                .green()
+                                format!("✓ Updated {} status to \"{}\"", task_id, review_status)
+                                    .green()
                             ),
                             Err(_) => eprintln!(
                                 "{}",
@@ -164,7 +159,10 @@ fn update_parent_status_to_review(task_id: &str, backend: &Backend) {
             if let Some(rt) = rt {
                 rt.block_on(async {
                     if let Ok(client) = JiraClient::new() {
-                        match client.update_jira_issue_status(task_id, review_status).await {
+                        match client
+                            .update_jira_issue_status(task_id, review_status)
+                            .await
+                        {
                             Ok(()) => println!(
                                 "{}",
                                 format!("✓ Updated {} status to \"{}\"", task_id, review_status)

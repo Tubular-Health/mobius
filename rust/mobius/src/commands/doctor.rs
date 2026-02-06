@@ -4,9 +4,9 @@ use colored::Colorize;
 use std::path::Path;
 use std::process::Command;
 
-use crate::config::loader::read_config;
+use crate::config::loader::{read_config, read_config_with_env};
 use crate::config::paths::resolve_paths;
-use crate::types::enums::Backend;
+use crate::types::enums::{AgentRuntime, Backend};
 
 struct CheckResult {
     name: String,
@@ -68,11 +68,42 @@ fn check_command_version(name: &str) -> Option<String> {
     }
 }
 
-fn check_claude() -> CheckResult {
-    if check_command_exists("claude") {
-        let version = check_command_version("claude").unwrap_or_else(|| "unknown version".into());
+struct RuntimeCliSpec {
+    command: &'static str,
+    display_name: &'static str,
+    install_hint: &'static str,
+}
+
+fn runtime_cli_spec(runtime: AgentRuntime) -> RuntimeCliSpec {
+    match runtime {
+        AgentRuntime::Claude => RuntimeCliSpec {
+            command: "claude",
+            display_name: "Claude CLI",
+            install_hint: "Install: npm install -g @anthropic-ai/claude-code",
+        },
+        AgentRuntime::Opencode => RuntimeCliSpec {
+            command: "opencode",
+            display_name: "OpenCode CLI",
+            install_hint: "Install opencode and ensure it is available in PATH",
+        },
+    }
+}
+
+fn check_runtime_cli_with<F, G>(
+    runtime: AgentRuntime,
+    command_exists: F,
+    command_version: G,
+) -> CheckResult
+where
+    F: Fn(&str) -> bool,
+    G: Fn(&str) -> Option<String>,
+{
+    let spec = runtime_cli_spec(runtime);
+
+    if command_exists(spec.command) {
+        let version = command_version(spec.command).unwrap_or_else(|| "unknown version".into());
         CheckResult {
-            name: "Claude CLI".into(),
+            name: spec.display_name.into(),
             status: CheckStatus::Pass,
             message: format!("Installed ({})", version),
             required: true,
@@ -80,13 +111,17 @@ fn check_claude() -> CheckResult {
         }
     } else {
         CheckResult {
-            name: "Claude CLI".into(),
+            name: spec.display_name.into(),
             status: CheckStatus::Fail,
             message: "Not found".into(),
             required: true,
-            details: Some("Install: npm install -g @anthropic-ai/claude-code".into()),
+            details: Some(spec.install_hint.into()),
         }
     }
+}
+
+fn check_runtime_cli(runtime: AgentRuntime) -> CheckResult {
+    check_runtime_cli_with(runtime, check_command_exists, check_command_version)
 }
 
 fn check_config(config_path: &str) -> CheckResult {
@@ -241,9 +276,7 @@ fn check_tmux() -> CheckResult {
             status: CheckStatus::Warn,
             message: "Not found".into(),
             required: false,
-            details: Some(
-                "Install: brew install tmux (macOS) or apt install tmux (Linux)".into(),
-            ),
+            details: Some("Install: brew install tmux (macOS) or apt install tmux (Linux)".into()),
         }
     }
 }
@@ -324,11 +357,13 @@ pub fn run() -> anyhow::Result<()> {
 
     let paths = resolve_paths();
 
-    // Try to read config for sandbox and backend settings
+    // Try to read config for runtime, sandbox, and backend settings
+    let mut runtime = AgentRuntime::Claude;
     let mut sandbox_enabled = false;
     let mut backend = Backend::Linear;
 
-    if let Ok(config) = read_config(&paths.config_path) {
+    if let Ok(config) = read_config_with_env(&paths.config_path) {
+        runtime = config.runtime;
         sandbox_enabled = config.execution.sandbox;
         backend = config.backend;
     }
@@ -338,9 +373,9 @@ pub fn run() -> anyhow::Result<()> {
 
     println!("{}", "Required:".bold());
 
-    let claude_result = check_claude();
-    println!("{}", format_result(&claude_result));
-    results.push(claude_result);
+    let runtime_result = check_runtime_cli(runtime);
+    println!("{}", format_result(&runtime_result));
+    results.push(runtime_result);
 
     let config_result = check_config(&paths.config_path);
     println!("{}", format_result(&config_result));
@@ -422,4 +457,47 @@ pub fn run() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_cli_spec_uses_expected_command_and_label() {
+        let claude = runtime_cli_spec(AgentRuntime::Claude);
+        assert_eq!(claude.command, "claude");
+        assert_eq!(claude.display_name, "Claude CLI");
+
+        let opencode = runtime_cli_spec(AgentRuntime::Opencode);
+        assert_eq!(opencode.command, "opencode");
+        assert_eq!(opencode.display_name, "OpenCode CLI");
+    }
+
+    #[test]
+    fn opencode_runtime_does_not_require_claude_cli() {
+        let result = check_runtime_cli_with(
+            AgentRuntime::Opencode,
+            |command| command == "opencode",
+            |_| Some("opencode 1.0.0".to_string()),
+        );
+
+        assert!(matches!(result.status, CheckStatus::Pass));
+        assert_eq!(result.name, "OpenCode CLI");
+        assert!(result.message.contains("opencode 1.0.0"));
+    }
+
+    #[test]
+    fn opencode_runtime_failure_uses_opencode_install_hint() {
+        let result = check_runtime_cli_with(AgentRuntime::Opencode, |_| false, |_| None);
+
+        assert!(matches!(result.status, CheckStatus::Fail));
+        assert_eq!(result.name, "OpenCode CLI");
+        assert_eq!(result.message, "Not found");
+        assert!(result
+            .details
+            .as_deref()
+            .unwrap_or_default()
+            .contains("opencode"));
+    }
 }

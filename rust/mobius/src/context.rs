@@ -277,10 +277,7 @@ pub fn generate_context(
             let fetched = rt.and_then(|rt| {
                 rt.block_on(async {
                     let client = crate::linear::LinearClient::new().ok()?;
-                    let issue = client
-                        .fetch_linear_issue(parent_identifier)
-                        .await
-                        .ok()?;
+                    let issue = client.fetch_linear_issue(parent_identifier).await.ok()?;
                     Some(crate::types::context::ParentIssueContext {
                         id: issue.id,
                         identifier: issue.identifier,
@@ -300,10 +297,7 @@ pub fn generate_context(
             let fetched = rt.and_then(|rt| {
                 rt.block_on(async {
                     let client = crate::jira::JiraClient::new().ok()?;
-                    let issue = client
-                        .fetch_jira_issue(parent_identifier)
-                        .await
-                        .ok()?;
+                    let issue = client.fetch_jira_issue(parent_identifier).await.ok()?;
                     Some(crate::types::context::ParentIssueContext {
                         id: issue.id,
                         identifier: issue.identifier,
@@ -626,10 +620,7 @@ pub fn read_pending_updates(parent_identifier: &str) -> PendingUpdatesQueue {
 }
 
 /// Write pending updates queue to disk.
-pub fn write_pending_updates(
-    parent_identifier: &str,
-    queue: &PendingUpdatesQueue,
-) -> Result<()> {
+pub fn write_pending_updates(parent_identifier: &str, queue: &PendingUpdatesQueue) -> Result<()> {
     let path = get_pending_updates_path(parent_identifier);
     atomic_write_json(&path, queue)
 }
@@ -638,16 +629,15 @@ pub fn write_pending_updates(
 ///
 /// Only unsynced updates (no `synced_at` and no `error`) block duplicates.
 /// Once an update is synced or errored, new equivalent updates are allowed.
-pub fn queue_pending_update(
-    parent_identifier: &str,
-    update: &PendingUpdateInput,
-) -> Result<()> {
+pub fn queue_pending_update(parent_identifier: &str, update: &PendingUpdateInput) -> Result<()> {
     ensure_context_directories(parent_identifier)?;
     let mut queue = read_pending_updates(parent_identifier);
 
     // Check for duplicates among unsynced, non-errored updates
     let is_dup = queue.updates.iter().any(|existing| {
-        existing.synced_at.is_none() && existing.error.is_none() && is_duplicate_update(existing, update)
+        existing.synced_at.is_none()
+            && existing.error.is_none()
+            && is_duplicate_update(existing, update)
     });
 
     if is_dup {
@@ -749,8 +739,12 @@ pub fn delete_session(parent_id: &str) {
 pub fn set_current_session_pointer(parent_id: &str) -> Result<()> {
     local_state::ensure_project_mobius_dir()?;
     let path = get_current_session_pointer_path();
-    fs::write(&path, parent_id)
-        .with_context(|| format!("Failed to write current-session pointer: {}", path.display()))?;
+    fs::write(&path, parent_id).with_context(|| {
+        format!(
+            "Failed to write current-session pointer: {}",
+            path.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -810,10 +804,7 @@ pub fn resolve_task_context(
     if provided_backend.is_some() {
         return (task_id, provided_backend);
     }
-    let backend = task_id
-        .as_deref()
-        .and_then(read_session)
-        .map(|s| s.backend);
+    let backend = task_id.as_deref().and_then(read_session).map(|s| s.backend);
     (task_id, backend)
 }
 
@@ -1171,10 +1162,7 @@ impl Drop for RuntimeWatchHandle {
 /// when new active tasks are detected.
 ///
 /// Returns a handle that can be used to stop watching.
-pub fn watch_runtime_state<F>(
-    parent_id: &str,
-    callback: F,
-) -> Result<RuntimeWatchHandle>
+pub fn watch_runtime_state<F>(parent_id: &str, callback: F) -> Result<RuntimeWatchHandle>
 where
     F: Fn(Option<RuntimeState>) + Send + 'static,
 {
@@ -1243,8 +1231,7 @@ where
                     }
 
                     // Set debounce for other changes
-                    debounce_deadline =
-                        Some(Instant::now() + Duration::from_millis(DEBOUNCE_MS));
+                    debounce_deadline = Some(Instant::now() + Duration::from_millis(DEBOUNCE_MS));
                 }
             }
 
@@ -1282,16 +1269,13 @@ fn has_new_active_tasks(
         None => return !new_tasks.is_empty(),
     };
 
-    new_tasks.iter().any(|new_task| {
-        !old_tasks.iter().any(|old_task| old_task.id == new_task.id)
-    })
+    new_tasks
+        .iter()
+        .any(|new_task| !old_tasks.iter().any(|old_task| old_task.id == new_task.id))
 }
 
 /// Check if runtime state content has changed (ignoring updated_at).
-fn has_content_changed(
-    old_state: &Option<RuntimeState>,
-    new_state: &Option<RuntimeState>,
-) -> bool {
+fn has_content_changed(old_state: &Option<RuntimeState>, new_state: &Option<RuntimeState>) -> bool {
     match (old_state, new_state) {
         (None, None) => false,
         (Some(_), None) | (None, Some(_)) => true,
@@ -1343,9 +1327,12 @@ fn backend_statuses_equal(
             if a_map.len() != b_map.len() {
                 return false;
             }
-            a_map
-                .iter()
-                .all(|(k, v)| b_map.get(k).map(|bv| bv.status == v.status).unwrap_or(false))
+            a_map.iter().all(|(k, v)| {
+                b_map
+                    .get(k)
+                    .map(|bv| bv.status == v.status)
+                    .unwrap_or(false)
+            })
         }
     }
 }
@@ -1425,8 +1412,13 @@ fn atomic_write_json<T: Serialize>(path: &Path, data: &T) -> Result<()> {
 
     fs::write(&tmp_path, &json)
         .with_context(|| format!("Failed to write temp file {}", tmp_path.display()))?;
-    fs::rename(&tmp_path, path)
-        .with_context(|| format!("Failed to rename {} -> {}", tmp_path.display(), path.display()))?;
+    fs::rename(&tmp_path, path).with_context(|| {
+        format!(
+            "Failed to rename {} -> {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -1439,8 +1431,6 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-
 
     fn setup_test_dir() -> TempDir {
         TempDir::new().expect("Failed to create temp dir")
@@ -2200,7 +2190,10 @@ echo "test"
 
         // Verify session.json exists on disk
         let session_path = get_session_path(parent_id);
-        assert!(session_path.exists(), "session.json should exist after create");
+        assert!(
+            session_path.exists(),
+            "session.json should exist after create"
+        );
 
         // Update session status
         let updated = update_session(parent_id, Some(SessionStatus::Paused), None);
@@ -2221,8 +2214,14 @@ echo "test"
         // Delete session
         delete_session(parent_id);
         let after_delete = read_session(parent_id);
-        assert!(after_delete.is_none(), "session should be gone after delete");
-        assert!(!session_path.exists(), "session.json should not exist after delete");
+        assert!(
+            after_delete.is_none(),
+            "session should be gone after delete"
+        );
+        assert!(
+            !session_path.exists(),
+            "session.json should not exist after delete"
+        );
 
         cleanup_test_parent(parent_id);
     }
@@ -2233,8 +2232,8 @@ echo "test"
         cleanup_test_parent(parent_id);
 
         // Create session sets the pointer
-        let _session = create_session(parent_id, Backend::Local, None)
-            .expect("create_session should succeed");
+        let _session =
+            create_session(parent_id, Backend::Local, None).expect("create_session should succeed");
 
         // Read pointer back
         let raw = get_current_session_parent_id_raw();
@@ -2261,7 +2260,10 @@ echo "test"
         let _sb = create_session(parent_id_b, Backend::Local, None).unwrap();
 
         // Pointer should be B
-        assert_eq!(get_current_session_parent_id_raw().as_deref(), Some(parent_id_b));
+        assert_eq!(
+            get_current_session_parent_id_raw().as_deref(),
+            Some(parent_id_b)
+        );
 
         // Clearing pointer for A should NOT clear it (it doesn't match)
         clear_current_session_pointer(parent_id_a);
@@ -2297,7 +2299,11 @@ echo "test"
         let updated = update_session(parent_id, None, Some("/new-path".to_string()));
         assert!(updated.is_some());
         let s = updated.unwrap();
-        assert_eq!(s.status, SessionStatus::Active, "status should remain Active");
+        assert_eq!(
+            s.status,
+            SessionStatus::Active,
+            "status should remain Active"
+        );
         assert_eq!(s.worktree_path.as_deref(), Some("/new-path"));
 
         // Update only status, worktree should remain
@@ -2305,7 +2311,11 @@ echo "test"
         assert!(updated2.is_some());
         let s2 = updated2.unwrap();
         assert_eq!(s2.status, SessionStatus::Failed);
-        assert_eq!(s2.worktree_path.as_deref(), Some("/new-path"), "worktree should persist");
+        assert_eq!(
+            s2.worktree_path.as_deref(),
+            Some("/new-path"),
+            "worktree should persist"
+        );
 
         delete_session(parent_id);
         cleanup_test_parent(parent_id);
@@ -2342,7 +2352,10 @@ echo "test"
         assert!(lock_path.exists());
 
         // Acquiring should succeed by cleaning up the stale lock
-        assert!(try_acquire_lock(&lock_path), "should acquire over stale lock");
+        assert!(
+            try_acquire_lock(&lock_path),
+            "should acquire over stale lock"
+        );
 
         // The lock file should now contain a recent timestamp
         let content = fs::read_to_string(&lock_path).unwrap();
@@ -2448,7 +2461,10 @@ echo "test"
 
         // The execution dir should not exist yet
         let exec_path = get_execution_path(parent_id);
-        assert!(!exec_path.exists(), "execution dir should not exist before test");
+        assert!(
+            !exec_path.exists(),
+            "execution dir should not exist before test"
+        );
 
         // with_runtime_state_sync should create the necessary directories
         let result = with_runtime_state_sync(parent_id, |_current| RuntimeState {
@@ -2467,7 +2483,10 @@ echo "test"
         });
 
         assert!(result.is_ok(), "with_runtime_state_sync should succeed");
-        assert!(exec_path.exists(), "execution directory should be auto-created");
+        assert!(
+            exec_path.exists(),
+            "execution directory should be auto-created"
+        );
 
         // Runtime file should exist
         let runtime_path = get_runtime_path(parent_id);
@@ -2498,7 +2517,10 @@ echo "test"
         };
 
         let summary = get_progress_summary(Some(&state));
-        assert!(summary.is_complete, "should be complete with no active tasks and some completed");
+        assert!(
+            summary.is_complete,
+            "should be complete with no active tasks and some completed"
+        );
         assert_eq!(summary.completed, 2);
         assert_eq!(summary.active, 0);
 
@@ -2510,7 +2532,10 @@ echo "test"
             ..state
         };
         let summary_failed = get_progress_summary(Some(&state_failed));
-        assert!(summary_failed.is_complete, "should be complete with only failed tasks");
+        assert!(
+            summary_failed.is_complete,
+            "should be complete with only failed tasks"
+        );
     }
 
     #[test]
@@ -2541,7 +2566,10 @@ echo "test"
         };
 
         let summary = get_progress_summary(Some(&state));
-        assert!(!summary.is_complete, "should NOT be complete while tasks are active");
+        assert!(
+            !summary.is_complete,
+            "should NOT be complete while tasks are active"
+        );
         assert_eq!(summary.active, 1);
 
         // Also false when all empty (no work done at all)
@@ -2552,7 +2580,10 @@ echo "test"
             ..state
         };
         let summary_empty = get_progress_summary(Some(&state_empty));
-        assert!(!summary_empty.is_complete, "should NOT be complete when nothing has run");
+        assert!(
+            !summary_empty.is_complete,
+            "should NOT be complete when nothing has run"
+        );
     }
 
     // -- File watcher helper tests --
@@ -2599,10 +2630,16 @@ echo "test"
         );
 
         // Both None → no new tasks
-        assert!(!has_new_active_tasks(&None, &None), "None→None should not detect new tasks");
+        assert!(
+            !has_new_active_tasks(&None, &None),
+            "None→None should not detect new tasks"
+        );
 
         // Old has tasks, new is None → no new tasks
-        assert!(!has_new_active_tasks(&new, &None), "Some→None should not detect new tasks");
+        assert!(
+            !has_new_active_tasks(&new, &None),
+            "Some→None should not detect new tasks"
+        );
 
         // Old has task-001, new has task-001 + task-002 → new tasks
         let new_with_extra = Some(RuntimeState {

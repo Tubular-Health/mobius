@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::enums::{Backend, BuildSystem, JiraAuthMethod, Model, Platform, ProjectType};
+use super::enums::{
+    AgentRuntime, Backend, BuildSystem, JiraAuthMethod, Model, Platform, ProjectType,
+};
 
 /// TUI dashboard configuration options
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,6 +130,8 @@ pub struct JiraConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoopConfig {
     #[serde(default)]
+    pub runtime: AgentRuntime,
+    #[serde(default)]
     pub backend: Backend,
     #[serde(default)]
     pub linear: Option<LinearConfig>,
@@ -140,6 +144,7 @@ pub struct LoopConfig {
 impl Default for LoopConfig {
     fn default() -> Self {
         Self {
+            runtime: AgentRuntime::Claude,
             backend: Backend::Linear,
             linear: None,
             jira: None,
@@ -326,6 +331,7 @@ mod tests {
     #[test]
     fn test_loop_config_default_matches_typescript() {
         let config = LoopConfig::default();
+        assert_eq!(config.runtime, AgentRuntime::Claude);
         assert_eq!(config.backend, Backend::Linear);
         assert_eq!(config.execution.delay_seconds, 3);
         assert_eq!(config.execution.max_iterations, 50);
@@ -355,6 +361,7 @@ mod tests {
         let config = LoopConfig::default();
         let json = serde_json::to_string(&config).unwrap();
         let parsed: LoopConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.runtime, config.runtime);
         assert_eq!(parsed.backend, config.backend);
         assert_eq!(
             parsed.execution.delay_seconds,
@@ -367,6 +374,7 @@ mod tests {
         let config = LoopConfig::default();
         let yaml = serde_yaml::to_string(&config).unwrap();
         let parsed: LoopConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed.runtime, config.runtime);
         assert_eq!(parsed.backend, config.backend);
         assert_eq!(parsed.execution.model, config.execution.model);
     }

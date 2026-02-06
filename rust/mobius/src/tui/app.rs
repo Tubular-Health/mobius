@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::types::context::{AgentTodoFile, RuntimeActiveTask, RuntimeCompletedTask, RuntimeState};
 use crate::types::debug::DebugEvent;
 use crate::types::enums::TaskStatus;
-use crate::types::task_graph::{TaskGraph, SubTask};
+use crate::types::task_graph::{SubTask, TaskGraph};
 
 /// Application state for the TUI dashboard.
 pub struct App {
@@ -71,10 +71,7 @@ impl App {
 
     /// Get the path to the todos directory (sibling to runtime.json).
     pub fn todos_dir(&self) -> PathBuf {
-        self.runtime_state_path
-            .parent()
-            .unwrap()
-            .join("todos")
+        self.runtime_state_path.parent().unwrap().join("todos")
     }
 
     /// Reload agent todo files from the todos directory.
@@ -139,9 +136,7 @@ impl App {
     fn current_total_tokens(&self) -> u64 {
         self.runtime_state
             .as_ref()
-            .map(|s| {
-                s.total_input_tokens.unwrap_or(0) + s.total_output_tokens.unwrap_or(0)
-            })
+            .map(|s| s.total_input_tokens.unwrap_or(0) + s.total_output_tokens.unwrap_or(0))
             .unwrap_or(0)
     }
 
@@ -206,7 +201,9 @@ impl App {
 
         // Active tasks -> in_progress (unless already done)
         for task in &state.active_tasks {
-            overrides.entry(task.id.clone()).or_insert(TaskStatus::InProgress);
+            overrides
+                .entry(task.id.clone())
+                .or_insert(TaskStatus::InProgress);
         }
 
         // Failed tasks -> failed (unless already done)
@@ -222,10 +219,7 @@ impl App {
     /// Get the effective status for a task, considering overrides.
     pub fn effective_status(&self, task: &SubTask) -> TaskStatus {
         let overrides = self.status_overrides();
-        overrides
-            .get(&task.id)
-            .copied()
-            .unwrap_or(task.status)
+        overrides.get(&task.id).copied().unwrap_or(task.status)
     }
 
     /// Get active task info by task ID.
@@ -287,9 +281,5 @@ fn extract_task_id(value: &serde_json::Value) -> Option<String> {
     if let Some(s) = value.as_str() {
         return Some(s.to_string());
     }
-    value
-        .as_object()?
-        .get("id")?
-        .as_str()
-        .map(String::from)
+    value.as_object()?.get("id")?.as_str().map(String::from)
 }

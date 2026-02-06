@@ -4,7 +4,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
-use super::theme::{HEADER_COLOR, TEXT_COLOR, MUTED_COLOR};
+use super::theme::{HEADER_COLOR, MUTED_COLOR, TEXT_COLOR};
 
 const LOGO: &[&str] = &[
     "███╗   ███╗ ██████╗ ██████╗ ██╗██╗   ██╗███████╗",

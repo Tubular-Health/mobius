@@ -7,6 +7,9 @@
 # Issue tracker backend: linear | jira | local
 backend: linear
 
+# Agent runtime: claude | opencode
+runtime: claude
+
 # Backend-specific settings
 linear:
   # Workspace context - used by skills as defaults
@@ -29,7 +32,7 @@ execution:
   # Maximum iterations (0 = unlimited)
   max_iterations: 50
 
-  # Claude model to use: opus | sonnet | haiku
+  # Model to use (Claude runtime): opus | sonnet | haiku
   model: opus
 
   # Run in Docker sandbox by default (safer for autonomous execution)

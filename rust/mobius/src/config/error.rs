@@ -66,10 +66,7 @@ mod tests {
         let err = ConfigError::ParseError("invalid YAML".to_string());
         assert!(err.to_string().contains("invalid YAML"));
 
-        let err = ConfigError::ValidationError(vec![
-            "error 1".to_string(),
-            "error 2".to_string(),
-        ]);
+        let err = ConfigError::ValidationError(vec!["error 1".to_string(), "error 2".to_string()]);
         let display = err.to_string();
         assert!(display.contains("error 1"));
         assert!(display.contains("error 2"));

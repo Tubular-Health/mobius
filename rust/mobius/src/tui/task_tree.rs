@@ -7,10 +7,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
 use crate::types::enums::TaskStatus;
-use crate::types::task_graph::{TaskGraph, SubTask};
+use crate::types::task_graph::{SubTask, TaskGraph};
 
 use super::header::format_duration;
-use super::theme::{status_color, status_icon, TEXT_COLOR, MUTED_COLOR};
+use super::theme::{status_color, status_icon, MUTED_COLOR, TEXT_COLOR};
 
 /// Information about a completed task's timing.
 pub struct CompletedInfo {
@@ -150,7 +150,11 @@ fn render_task_node(
     let mut current_y = y + 1;
     if let Some(children) = ctx.children_map.get(&task.id) {
         let child_prefix = if prefix.is_empty() {
-            if is_last { "    " } else { "│   " }
+            if is_last {
+                "    "
+            } else {
+                "│   "
+            }
         } else if is_last {
             &format!("{}    ", prefix)
         } else {

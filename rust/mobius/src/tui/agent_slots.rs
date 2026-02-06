@@ -4,7 +4,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
-use super::theme::{model_color, NORD14, MUTED_COLOR, TEXT_COLOR};
+use super::theme::{model_color, MUTED_COLOR, NORD14, TEXT_COLOR};
 
 pub struct ActiveTaskDisplay {
     pub id: String,

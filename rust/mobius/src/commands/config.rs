@@ -4,7 +4,7 @@ use colored::Colorize;
 use std::path::Path;
 use std::process::Command;
 
-use crate::config::loader::read_config;
+use crate::config::loader::read_config_with_env;
 use crate::config::paths::resolve_paths;
 
 pub fn run(edit: bool) -> anyhow::Result<()> {
@@ -26,11 +26,7 @@ pub fn run(edit: bool) -> anyhow::Result<()> {
             paths.config_type
         );
     } else {
-        println!(
-            "  {} {} (not found)",
-            "○".red(),
-            paths.config_path
-        );
+        println!("  {} {} (not found)", "○".red(), paths.config_path);
         println!(
             "\n  {}",
             "Run 'mobius setup' to create configuration.\n".dimmed()
@@ -47,10 +43,17 @@ pub fn run(edit: bool) -> anyhow::Result<()> {
     }
 
     // Read and display config
-    match read_config(&paths.config_path) {
+    match read_config_with_env(&paths.config_path) {
         Ok(config) => {
             println!("{}", "\nCurrent settings:".dimmed());
-            println!("  backend:         {}", format!("{}", config.backend).cyan());
+            println!(
+                "  runtime:         {}",
+                format!("{}", config.runtime).cyan()
+            );
+            println!(
+                "  backend:         {}",
+                format!("{}", config.backend).cyan()
+            );
             println!(
                 "  model:           {}",
                 format!("{}", config.execution.model).cyan()
@@ -74,6 +77,7 @@ pub fn run(edit: bool) -> anyhow::Result<()> {
 
             println!("{}", "\nEnvironment overrides:".dimmed());
             let env_vars = [
+                "MOBIUS_RUNTIME",
                 "MOBIUS_BACKEND",
                 "MOBIUS_DELAY_SECONDS",
                 "MOBIUS_MAX_ITERATIONS",
@@ -121,9 +125,7 @@ fn edit_config(config_path: &str) -> anyhow::Result<()> {
         format!("Opening {} in {}...\n", config_path, editor).dimmed()
     );
 
-    let status = Command::new(&editor)
-        .arg(config_path)
-        .status();
+    let status = Command::new(&editor).arg(config_path).status();
 
     match status {
         Ok(s) if s.success() => Ok(()),

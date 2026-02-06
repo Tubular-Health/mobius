@@ -16,7 +16,9 @@ pub use context::{
 };
 pub use debug::{DebugConfig, DebugEvent};
 pub use enums::{
-    Backend, BuildSystem, DebugEventType, DebugVerbosity, Model, PendingUpdateType, Platform,
-    ProjectType, SkillOutputStatus, TaskStatus,
+    AgentRuntime, Backend, BuildSystem, DebugEventType, DebugVerbosity, Model, PendingUpdateType,
+    Platform, ProjectType, SkillOutputStatus, TaskStatus,
 };
-pub use task_graph::{GraphStats, LinearIssue, ParentIssue, Relation, Relations, SubTask, TaskGraph};
+pub use task_graph::{
+    GraphStats, LinearIssue, ParentIssue, Relation, Relations, SubTask, TaskGraph,
+};

@@ -25,8 +25,7 @@ pub fn parse_justfile_recipes(content: &str) -> Vec<String> {
 
 /// Map justfile recipe names to verification commands.
 fn map_recipes_to_commands(recipes: &[String]) -> VerificationCommands {
-    let recipe_set: std::collections::HashSet<&str> =
-        recipes.iter().map(|s| s.as_str()).collect();
+    let recipe_set: std::collections::HashSet<&str> = recipes.iter().map(|s| s.as_str()).collect();
 
     let mut commands = VerificationCommands::default();
 
@@ -99,13 +98,11 @@ fn detect_build_system(project_path: &Path, has_justfile: bool) -> BuildSystem {
     if project_path.join("yarn.lock").exists() {
         return BuildSystem::Yarn;
     }
-    if project_path.join("package-lock.json").exists()
-        || project_path.join("package.json").exists()
+    if project_path.join("package-lock.json").exists() || project_path.join("package.json").exists()
     {
         return BuildSystem::Npm;
     }
-    if project_path.join("build.gradle").exists()
-        || project_path.join("build.gradle.kts").exists()
+    if project_path.join("build.gradle").exists() || project_path.join("build.gradle.kts").exists()
     {
         return BuildSystem::Gradle;
     }
@@ -158,13 +155,8 @@ pub fn detect_project_info(project_path: &str) -> Result<ProjectDetectionResult>
     if path.join("build.gradle").exists() || path.join("android").join("build.gradle").exists() {
         detected_config_files.push("build.gradle".to_string());
         platform_targets.push("android".to_string());
-        let platform_build = commands
-            .platform_build
-            .get_or_insert_with(HashMap::new);
-        platform_build.insert(
-            "android".to_string(),
-            "gradle assembleDebug".to_string(),
-        );
+        let platform_build = commands.platform_build.get_or_insert_with(HashMap::new);
+        platform_build.insert("android".to_string(), "gradle assembleDebug".to_string());
         if project_type == ProjectType::Unknown {
             project_type = ProjectType::Android;
         } else {
@@ -179,9 +171,7 @@ pub fn detect_project_info(project_path: &str) -> Result<ProjectDetectionResult>
             detected_config_files.push("Podfile".to_string());
         }
         platform_targets.push("ios".to_string());
-        let platform_build = commands
-            .platform_build
-            .get_or_insert_with(HashMap::new);
+        let platform_build = commands.platform_build.get_or_insert_with(HashMap::new);
         platform_build.insert(
             "ios".to_string(),
             "xcodebuild -workspace ios/*.xcworkspace -scheme App build".to_string(),
@@ -231,11 +221,7 @@ fn has_xcworkspace(project_path: &Path) -> bool {
     match fs::read_dir(&ios_dir) {
         Ok(entries) => entries
             .filter_map(|e| e.ok())
-            .any(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .ends_with(".xcworkspace")
-            }),
+            .any(|e| e.file_name().to_string_lossy().ends_with(".xcworkspace")),
         Err(_) => false,
     }
 }
@@ -351,7 +337,11 @@ mod tests {
     #[test]
     fn test_detect_build_system_poetry() {
         let dir = TempDir::new().unwrap();
-        create_file(dir.path(), "pyproject.toml", "[tool.poetry]\nname = \"foo\"");
+        create_file(
+            dir.path(),
+            "pyproject.toml",
+            "[tool.poetry]\nname = \"foo\"",
+        );
         assert_eq!(detect_build_system(dir.path(), false), BuildSystem::Poetry);
     }
 
@@ -381,9 +371,17 @@ mod tests {
         let result = detect_project_info(dir.path().to_str().unwrap()).unwrap();
         assert_eq!(result.project_type, ProjectType::Node);
         assert_eq!(result.build_system, BuildSystem::Npm);
-        assert!(result.detected_config_files.contains(&"package.json".to_string()));
-        assert_eq!(result.available_commands.test, Some("npm run test".to_string()));
-        assert_eq!(result.available_commands.build, Some("npm run build".to_string()));
+        assert!(result
+            .detected_config_files
+            .contains(&"package.json".to_string()));
+        assert_eq!(
+            result.available_commands.test,
+            Some("npm run test".to_string())
+        );
+        assert_eq!(
+            result.available_commands.build,
+            Some("npm run build".to_string())
+        );
     }
 
     #[test]
@@ -393,7 +391,9 @@ mod tests {
         let result = detect_project_info(dir.path().to_str().unwrap()).unwrap();
         assert_eq!(result.project_type, ProjectType::Rust);
         assert_eq!(result.build_system, BuildSystem::Cargo);
-        assert!(result.detected_config_files.contains(&"Cargo.toml".to_string()));
+        assert!(result
+            .detected_config_files
+            .contains(&"Cargo.toml".to_string()));
     }
 
     #[test]
@@ -408,7 +408,11 @@ mod tests {
     #[test]
     fn test_detect_android_project() {
         let dir = TempDir::new().unwrap();
-        create_file(dir.path(), "build.gradle", "apply plugin: 'com.android.application'");
+        create_file(
+            dir.path(),
+            "build.gradle",
+            "apply plugin: 'com.android.application'",
+        );
         let result = detect_project_info(dir.path().to_str().unwrap()).unwrap();
         assert_eq!(result.project_type, ProjectType::Android);
         assert!(result.platform_targets.contains(&"android".to_string()));
@@ -432,13 +436,19 @@ mod tests {
         let result = detect_project_info(dir.path().to_str().unwrap()).unwrap();
         assert_eq!(result.project_type, ProjectType::Ios);
         assert!(result.platform_targets.contains(&"ios".to_string()));
-        assert!(result.detected_config_files.contains(&"Podfile".to_string()));
+        assert!(result
+            .detected_config_files
+            .contains(&"Podfile".to_string()));
     }
 
     #[test]
     fn test_detect_ios_xcworkspace() {
         let dir = TempDir::new().unwrap();
-        create_file(dir.path(), "ios/App.xcworkspace/contents.xcworkspacedata", "");
+        create_file(
+            dir.path(),
+            "ios/App.xcworkspace/contents.xcworkspacedata",
+            "",
+        );
         let result = detect_project_info(dir.path().to_str().unwrap()).unwrap();
         assert_eq!(result.project_type, ProjectType::Ios);
         assert!(result.platform_targets.contains(&"ios".to_string()));
@@ -485,7 +495,11 @@ mod tests {
     #[test]
     fn test_justfile_commands_override_package_json() {
         let dir = TempDir::new().unwrap();
-        create_file(dir.path(), "justfile", "test:\n\tcargo test\n\nbuild:\n\tcargo build\n");
+        create_file(
+            dir.path(),
+            "justfile",
+            "test:\n\tcargo test\n\nbuild:\n\tcargo build\n",
+        );
         create_file(
             dir.path(),
             "package.json",
@@ -495,10 +509,19 @@ mod tests {
         assert!(result.has_justfile);
         assert_eq!(result.build_system, BuildSystem::Just);
         // justfile commands take priority
-        assert_eq!(result.available_commands.test, Some("just test".to_string()));
-        assert_eq!(result.available_commands.build, Some("just build".to_string()));
+        assert_eq!(
+            result.available_commands.test,
+            Some("just test".to_string())
+        );
+        assert_eq!(
+            result.available_commands.build,
+            Some("just build".to_string())
+        );
         // lint not in justfile, falls back to package.json
-        assert_eq!(result.available_commands.lint, Some("npm run lint".to_string()));
+        assert_eq!(
+            result.available_commands.lint,
+            Some("npm run lint".to_string())
+        );
     }
 
     #[test]
@@ -517,14 +540,24 @@ mod tests {
         let dir = TempDir::new().unwrap();
         create_file(dir.path(), "justfile", "validate:\n\tcargo clippy\n");
         let result = detect_project_info(dir.path().to_str().unwrap()).unwrap();
-        assert_eq!(result.available_commands.build, Some("just validate".to_string()));
+        assert_eq!(
+            result.available_commands.build,
+            Some("just validate".to_string())
+        );
     }
 
     #[test]
     fn test_justfile_build_takes_priority_over_validate() {
         let dir = TempDir::new().unwrap();
-        create_file(dir.path(), "justfile", "build:\n\tcargo build\n\nvalidate:\n\tcargo clippy\n");
+        create_file(
+            dir.path(),
+            "justfile",
+            "build:\n\tcargo build\n\nvalidate:\n\tcargo clippy\n",
+        );
         let result = detect_project_info(dir.path().to_str().unwrap()).unwrap();
-        assert_eq!(result.available_commands.build, Some("just build".to_string()));
+        assert_eq!(
+            result.available_commands.build,
+            Some("just build".to_string())
+        );
     }
 }

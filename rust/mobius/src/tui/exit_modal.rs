@@ -5,7 +5,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Widget};
 
 use super::header::format_duration;
-use super::theme::{NORD0, NORD13, TEXT_COLOR, MUTED_COLOR};
+use super::theme::{MUTED_COLOR, NORD0, NORD13, TEXT_COLOR};
 
 pub struct ExitModal {
     pub active_agent_count: usize,
@@ -24,7 +24,12 @@ impl Widget for ExitModal {
         let x = area.x + area.width.saturating_sub(modal_width) / 2;
         let y = area.y + area.height.saturating_sub(modal_height) / 2;
 
-        let modal_area = Rect::new(x, y, modal_width.min(area.width), modal_height.min(area.height));
+        let modal_area = Rect::new(
+            x,
+            y,
+            modal_width.min(area.width),
+            modal_height.min(area.height),
+        );
 
         // Clear the area behind the modal
         Clear.render(modal_area, buf);

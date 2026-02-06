@@ -6,7 +6,7 @@ use ratatui::widgets::Widget;
 
 use crate::types::enums::TaskStatus;
 
-use super::theme::{status_color, TEXT_COLOR, MUTED_COLOR};
+use super::theme::{status_color, MUTED_COLOR, TEXT_COLOR};
 
 pub struct Legend;
 

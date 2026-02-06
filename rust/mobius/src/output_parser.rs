@@ -374,7 +374,8 @@ verificationResults:
 
     #[test]
     fn test_parse_json_and_yaml_produce_same_result() {
-        let json_input = r#"{"status":"PASS","timestamp":"2026-01-28T16:45:00Z","details":"All good"}"#;
+        let json_input =
+            r#"{"status":"PASS","timestamp":"2026-01-28T16:45:00Z","details":"All good"}"#;
         let yaml_input = "status: PASS\ntimestamp: \"2026-01-28T16:45:00Z\"\ndetails: All good\n";
 
         let json_result = parse_skill_output(json_input).unwrap();
@@ -706,15 +707,13 @@ More noise after the JSON.
         assert!(is_success_status(&all_complete));
 
         // Failure is not success
-        let fail =
-            parse_skill_output(r#"{"status":"FAIL","timestamp":"T","reason":"r"}"#).unwrap();
+        let fail = parse_skill_output(r#"{"status":"FAIL","timestamp":"T","reason":"r"}"#).unwrap();
         assert!(!is_success_status(&fail));
     }
 
     #[test]
     fn test_is_failure_status() {
-        let fail =
-            parse_skill_output(r#"{"status":"FAIL","timestamp":"T","reason":"r"}"#).unwrap();
+        let fail = parse_skill_output(r#"{"status":"FAIL","timestamp":"T","reason":"r"}"#).unwrap();
         assert!(is_failure_status(&fail));
 
         let verification_failed = parse_skill_output(

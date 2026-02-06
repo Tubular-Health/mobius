@@ -80,7 +80,10 @@ pub fn run(backend_override: Option<&str>) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let items: Vec<&str> = choices.iter().map(|(display, _)| display.as_str()).collect();
+    let items: Vec<&str> = choices
+        .iter()
+        .map(|(display, _)| display.as_str())
+        .collect();
 
     let selection = dialoguer::Select::new()
         .with_prompt("Select an issue")

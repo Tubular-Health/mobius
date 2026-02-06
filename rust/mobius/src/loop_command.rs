@@ -23,8 +23,8 @@ use crate::tree_renderer;
 use crate::types::context::RuntimeActiveTask;
 use crate::types::enums::{Backend, Model, SessionStatus, TaskStatus};
 use crate::types::task_graph::{
-    build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks,
-    get_verification_task, update_task_status, TaskGraph,
+    build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks, get_verification_task,
+    update_task_status, TaskGraph,
 };
 use crate::worktree::{self, WorktreeConfig};
 
@@ -53,7 +53,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // 1. Resolve configuration
     // -----------------------------------------------------------------------
     let paths = config::resolve_paths();
-    let loop_config = match config::read_config(&paths.config_path) {
+    let loop_config = match config::read_config_with_env(&paths.config_path) {
         Ok(c) => c,
         Err(_) => {
             eprintln!(
@@ -93,9 +93,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
         exec_config.sandbox = false;
     }
 
-    let max_iterations = options
-        .max_iterations
-        .unwrap_or(exec_config.max_iterations);
+    let max_iterations = options.max_iterations.unwrap_or(exec_config.max_iterations);
 
     // -----------------------------------------------------------------------
     // 4. Check tmux availability
@@ -137,7 +135,10 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     if options.fresh {
         let deleted = context::delete_runtime_state(&task_id);
         if deleted {
-            println!("{}", "Cleared stale state from previous execution.".yellow());
+            println!(
+                "{}",
+                "Cleared stale state from previous execution.".yellow()
+            );
         }
     }
 
@@ -157,12 +158,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
             } else {
                 p.git_branch_name.clone()
             };
-            (
-                p.id.clone(),
-                p.identifier.clone(),
-                p.title.clone(),
-                branch,
-            )
+            (p.id.clone(), p.identifier.clone(), p.title.clone(), branch)
         }
         None => {
             eprintln!(
@@ -186,6 +182,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     let wt_config = WorktreeConfig {
         worktree_path: exec_config.worktree_path.clone(),
         base_branch: exec_config.base_branch.clone(),
+        runtime: loop_config.runtime,
     };
     let worktree_info = worktree::create_worktree(&task_id, &branch_name, &wt_config).await?;
 
@@ -230,10 +227,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // -----------------------------------------------------------------------
     let issues = local_state::read_local_subtasks_as_linear_issues(&task_id);
     if issues.is_empty() {
-        eprintln!(
-            "{}",
-            format!("No sub-tasks found for {task_id}").yellow()
-        );
+        eprintln!("{}", format!("No sub-tasks found for {task_id}").yellow());
         tmux::destroy_session(&session).await?;
         process::exit(1);
     }
@@ -277,8 +271,12 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     context::create_session(&task_id, backend, Some(&worktree_path))?;
 
     let total_tasks = graph.tasks.len() as u32;
-    let mut runtime_state =
-        context::initialize_runtime_state(&task_id, &parent_title, Some(process::id()), Some(total_tasks))?;
+    let mut runtime_state = context::initialize_runtime_state(
+        &task_id,
+        &parent_title,
+        Some(process::id()),
+        Some(total_tasks),
+    )?;
 
     // Pre-populate completed tasks from graph
     for task in graph.tasks.values() {
@@ -294,9 +292,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // -----------------------------------------------------------------------
     let mut tracker = tracker::create_tracker(
         exec_config.max_retries,
-        exec_config
-            .verification_timeout
-            .map(|v| v as u64),
+        exec_config.verification_timeout.map(|v| v as u64),
     );
 
     // -----------------------------------------------------------------------
@@ -448,10 +444,12 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
             let ctx_path_ref = context_file_path.as_deref();
             let results = executor::execute_parallel(
                 &tasks_to_execute,
+                loop_config.runtime,
                 &exec_config,
                 &worktree_path,
                 &session,
                 ctx_path_ref,
+                None,
                 None,
             )
             .await;

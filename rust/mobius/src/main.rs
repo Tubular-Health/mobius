@@ -11,6 +11,7 @@ pub mod loop_command;
 pub mod mermaid_renderer;
 pub mod output_parser;
 pub mod project_detector;
+pub mod runtime_adapter;
 pub mod status_sync;
 pub mod tmux;
 pub mod tracker;
@@ -465,8 +466,7 @@ fn main() {
                 backend,
                 clear,
             } => {
-                if let Err(e) =
-                    commands::set_id::run(task_id.as_deref(), backend.as_deref(), clear)
+                if let Err(e) = commands::set_id::run(task_id.as_deref(), backend.as_deref(), clear)
                 {
                     eprintln!("Set-id error: {}", e);
                     std::process::exit(1);
@@ -503,7 +503,8 @@ fn main() {
                 // Load config to get max_parallel_agents
                 let paths = config::resolve_paths();
                 let loop_config = config::read_config(&paths.config_path).unwrap_or_default();
-                let max_parallel_agents = loop_config.execution.max_parallel_agents.unwrap_or(3) as usize;
+                let max_parallel_agents =
+                    loop_config.execution.max_parallel_agents.unwrap_or(3) as usize;
 
                 if let Err(e) = tui::dashboard::run_dashboard(
                     task_id,

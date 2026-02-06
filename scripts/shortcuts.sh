@@ -8,7 +8,7 @@
 #   source scripts/shortcuts.sh   # or add to your .bashrc/.zshrc
 #
 # Commands:
-#   md          - Define a new issue (launches Claude /define)
+#   md          - Define a new issue (launches runtime /define)
 #   mr          - Refine the current issue into sub-tasks
 #   me [args]   - Execute sub-tasks for the current issue
 #   ms [args]   - Submit/PR the current issue
@@ -30,14 +30,111 @@ task() {
   fi
 }
 
+to_lower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+runtime_from_config() {
+  local config_path="$1"
+  local line
+  local value
+
+  [ -f "$config_path" ] || return 1
+
+  while IFS= read -r line; do
+    case "$line" in
+      [[:space:]]*#* | "")
+        continue
+        ;;
+    esac
+
+    if [[ "$line" =~ ^[[:space:]]*runtime:[[:space:]]*([[:alnum:]_-]+)[[:space:]]*$ ]]; then
+      value="$(to_lower "${BASH_REMATCH[1]}")"
+      case "$value" in
+        claude|opencode)
+          printf '%s\n' "$value"
+          return 0
+          ;;
+      esac
+    fi
+  done < "$config_path"
+
+  return 1
+}
+
+find_local_config() {
+  local dir="${PWD:-$(pwd)}"
+  local candidate
+
+  while :; do
+    candidate="$dir/mobius.config.yaml"
+    if [ -f "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+
+    if [ "$dir" = "/" ]; then
+      break
+    fi
+
+    dir="$(dirname "$dir")"
+  done
+
+  return 1
+}
+
+resolve_selected_runtime() {
+  local runtime="claude"
+  local configured_runtime
+  local local_config
+  local config_base
+  local global_config
+
+  if [ -n "${MOBIUS_RUNTIME:-}" ]; then
+    runtime="$(to_lower "$MOBIUS_RUNTIME")"
+    case "$runtime" in
+      claude|opencode)
+        printf '%s\n' "$runtime"
+        return
+        ;;
+      *)
+        runtime="claude"
+        ;;
+    esac
+  fi
+
+  local_config="$(find_local_config 2>/dev/null || true)"
+  if [ -n "$local_config" ]; then
+    configured_runtime="$(runtime_from_config "$local_config" 2>/dev/null || true)"
+    if [ -n "$configured_runtime" ]; then
+      printf '%s\n' "$configured_runtime"
+      return
+    fi
+  fi
+
+  config_base="${XDG_CONFIG_HOME:-${HOME}/.config}"
+  global_config="$config_base/mobius/config.yaml"
+  configured_runtime="$(runtime_from_config "$global_config" 2>/dev/null || true)"
+  if [ -n "$configured_runtime" ]; then
+    printf '%s\n' "$configured_runtime"
+    return
+  fi
+
+  printf '%s\n' "$runtime"
+}
+
 md() {
   task
-  claude "/define $MOBIUS_TASK_ID"
+  local runtime
+  runtime="$(resolve_selected_runtime)"
+  "$runtime" "/define $MOBIUS_TASK_ID"
 }
 
 mr() {
   task
-  claude "/refine $MOBIUS_TASK_ID"
+  local runtime
+  runtime="$(resolve_selected_runtime)"
+  "$runtime" "/refine $MOBIUS_TASK_ID"
 }
 
 me() {

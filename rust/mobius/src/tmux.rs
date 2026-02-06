@@ -105,10 +105,7 @@ pub async fn create_session(session_name: &str) -> Result<TmuxSession> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parts: Vec<&str> = stdout.trim().split(':').collect();
     if parts.len() < 2 {
-        anyhow::bail!(
-            "Unexpected tmux display-message output: {}",
-            stdout.trim()
-        );
+        anyhow::bail!("Unexpected tmux display-message output: {}", stdout.trim());
     }
 
     Ok(TmuxSession {
