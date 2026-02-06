@@ -167,7 +167,7 @@ pub async fn worktree_exists(task_id: &str, config: &WorktreeConfig) -> Result<b
 }
 
 /// Check if a git branch exists (locally or remotely).
-async fn branch_exists(branch_name: &str) -> Result<BranchExistence> {
+pub async fn branch_exists(branch_name: &str) -> Result<BranchExistence> {
     let mut local = false;
     let mut remote = false;
 
@@ -200,9 +200,72 @@ async fn branch_exists(branch_name: &str) -> Result<BranchExistence> {
 }
 
 #[derive(Debug)]
-struct BranchExistence {
-    local: bool,
-    remote: bool,
+pub struct BranchExistence {
+    pub local: bool,
+    pub remote: bool,
+}
+
+/// Result of checking whether an issue's branch has been merged into the base branch.
+#[derive(Debug)]
+pub struct MergeDetectionResult {
+    /// Whether the remote branch has been deleted (indicates merge + cleanup).
+    pub remote_branch_deleted: bool,
+    /// Whether the issue identifier was found in the base branch's commit log.
+    pub found_in_base_log: bool,
+}
+
+impl MergeDetectionResult {
+    /// Returns `true` if either check indicates the branch was merged.
+    pub fn is_merged(&self) -> bool {
+        self.remote_branch_deleted || self.found_in_base_log
+    }
+}
+
+/// Check if an issue's branch has been merged into the base branch.
+///
+/// Performs two independent checks:
+/// 1. Whether the remote branch has been deleted (via `git ls-remote`)
+/// 2. Whether the issue identifier appears in the base branch's commit log
+///
+/// Both checks always execute regardless of individual results.
+pub async fn is_issue_merged_into_base(
+    branch_name: &str,
+    identifier: &str,
+    base_branch: &str,
+) -> Result<MergeDetectionResult> {
+    // Check if remote branch is deleted using ls-remote (queries remote directly)
+    let ls_remote_output = Command::new("git")
+        .args(["ls-remote", "--heads", "origin", branch_name])
+        .output()
+        .await
+        .context("failed to run git ls-remote")?;
+
+    let remote_branch_deleted = if ls_remote_output.status.success() {
+        let stdout = String::from_utf8_lossy(&ls_remote_output.stdout);
+        stdout.trim().is_empty()
+    } else {
+        // If ls-remote fails (e.g. no network), assume not deleted
+        false
+    };
+
+    // Check if identifier appears in base branch commit log
+    let log_output = Command::new("git")
+        .args(["log", base_branch, "--oneline", &format!("--grep={}", identifier)])
+        .output()
+        .await
+        .context("failed to run git log")?;
+
+    let found_in_base_log = if log_output.status.success() {
+        let stdout = String::from_utf8_lossy(&log_output.stdout);
+        !stdout.trim().is_empty()
+    } else {
+        false
+    };
+
+    Ok(MergeDetectionResult {
+        remote_branch_deleted,
+        found_in_base_log,
+    })
 }
 
 /// Symlink gitignored directories from source repo to worktree.
