@@ -223,6 +223,8 @@ impl App {
                     id: task_id.to_string(),
                     completed_at: String::new(),
                     duration: 0,
+                    input_tokens: None,
+                    output_tokens: None,
                 });
             }
         }

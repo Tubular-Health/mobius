@@ -888,6 +888,8 @@ pub fn initialize_runtime_state(
         loop_pid,
         total_tasks,
         backend_statuses: None,
+        total_input_tokens: None,
+        total_output_tokens: None,
     })
 }
 
@@ -911,6 +913,8 @@ pub fn complete_runtime_task(state: &RuntimeState, task_id: &str) -> RuntimeStat
             id: active.id,
             completed_at: Utc::now().to_rfc3339(),
             duration: 0, // Approximate; can be calculated from started_at
+            input_tokens: None,
+            output_tokens: None,
         };
         new_state
             .completed_tasks
@@ -969,6 +973,8 @@ pub fn clear_all_runtime_active_tasks(parent_id: &str) -> Option<RuntimeState> {
             loop_pid: None,
             total_tasks: None,
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         });
         s.active_tasks.clear();
         s.updated_at = Utc::now().to_rfc3339();
@@ -997,6 +1003,8 @@ pub fn update_backend_status(parent_id: &str, task_identifier: &str, status: &st
             loop_pid: None,
             total_tasks: None,
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         });
         let statuses = s.backend_statuses.get_or_insert_with(HashMap::new);
         statuses.insert(
@@ -1019,12 +1027,16 @@ pub fn normalize_completed_task(entry: &serde_json::Value) -> RuntimeCompletedTa
             id: s.to_string(),
             completed_at: String::new(),
             duration: 0,
+            input_tokens: None,
+            output_tokens: None,
         }
     } else {
         serde_json::from_value(entry.clone()).unwrap_or(RuntimeCompletedTask {
             id: String::new(),
             completed_at: String::new(),
             duration: 0,
+            input_tokens: None,
+            output_tokens: None,
         })
     }
 }
@@ -1749,6 +1761,8 @@ echo "test"
             loop_pid: None,
             total_tasks: Some(5),
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         };
 
         // Add active task
@@ -1758,6 +1772,9 @@ echo "test"
             pane: "%1".to_string(),
             started_at: "2026-01-01T00:00:00Z".to_string(),
             worktree: None,
+            model: None,
+            input_tokens: None,
+            output_tokens: None,
         };
         let state = add_runtime_active_task(&state, task);
         assert_eq!(state.active_tasks.len(), 1);
@@ -1778,6 +1795,9 @@ echo "test"
             pane: "%3".to_string(),
             started_at: "2026-01-01T00:01:00Z".to_string(),
             worktree: None,
+            model: None,
+            input_tokens: None,
+            output_tokens: None,
         };
         let state = add_runtime_active_task(&state, task2);
         let state = fail_runtime_task(&state, "task-002");
@@ -1796,6 +1816,9 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "2026-01-01T00:00:00Z".to_string(),
                 worktree: None,
+                model: None,
+                input_tokens: None,
+                output_tokens: None,
             }],
             completed_tasks: vec![],
             failed_tasks: vec![],
@@ -1804,6 +1827,8 @@ echo "test"
             loop_pid: None,
             total_tasks: None,
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         };
 
         // Re-adding same task ID should replace, not duplicate
@@ -1813,6 +1838,9 @@ echo "test"
             pane: "%5".to_string(),
             started_at: "2026-01-01T00:01:00Z".to_string(),
             worktree: None,
+            model: None,
+            input_tokens: None,
+            output_tokens: None,
         };
         let state = add_runtime_active_task(&state, task);
         assert_eq!(state.active_tasks.len(), 1);
@@ -1865,6 +1893,9 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                model: None,
+                input_tokens: None,
+                output_tokens: None,
             }],
             completed_tasks: vec![],
             failed_tasks: vec![],
@@ -1873,6 +1904,8 @@ echo "test"
             loop_pid: None,
             total_tasks: None,
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         });
 
         let new_same = old.clone();
@@ -1886,6 +1919,9 @@ echo "test"
                     pane: "%1".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    model: None,
+                    input_tokens: None,
+                    output_tokens: None,
                 },
                 RuntimeActiveTask {
                     id: "task-002".to_string(),
@@ -1893,6 +1929,9 @@ echo "test"
                     pane: "%2".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    model: None,
+                    input_tokens: None,
+                    output_tokens: None,
                 },
             ],
             ..old.as_ref().unwrap().clone()
@@ -1913,6 +1952,8 @@ echo "test"
             loop_pid: Some(1234),
             total_tasks: None,
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         };
 
         // Same except updated_at -> no change
@@ -2047,6 +2088,9 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                model: None,
+                input_tokens: None,
+                output_tokens: None,
             }],
             completed_tasks: vec![serde_json::json!("t2"), serde_json::json!("t3")],
             failed_tasks: vec![serde_json::json!("t4")],
@@ -2055,6 +2099,8 @@ echo "test"
             loop_pid: None,
             total_tasks: Some(10),
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         };
 
         let summary = get_progress_summary(Some(&state));
@@ -2097,6 +2143,9 @@ echo "test"
                     pane: "%1".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    model: None,
+                    input_tokens: None,
+                    output_tokens: None,
                 },
                 RuntimeActiveTask {
                     id: "task-002".to_string(),
@@ -2104,6 +2153,9 @@ echo "test"
                     pane: "%2".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    model: None,
+                    input_tokens: None,
+                    output_tokens: None,
                 },
             ],
             completed_tasks: vec![],
@@ -2113,6 +2165,8 @@ echo "test"
             loop_pid: None,
             total_tasks: None,
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         };
 
         let state = remove_runtime_active_task(&state, "task-001");
@@ -2408,6 +2462,8 @@ echo "test"
             loop_pid: None,
             total_tasks: None,
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         });
 
         assert!(result.is_ok(), "with_runtime_state_sync should succeed");
@@ -2437,6 +2493,8 @@ echo "test"
             loop_pid: None,
             total_tasks: Some(2),
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         };
 
         let summary = get_progress_summary(Some(&state));
@@ -2467,6 +2525,9 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                model: None,
+                input_tokens: None,
+                output_tokens: None,
             }],
             completed_tasks: vec![serde_json::json!("t1")],
             failed_tasks: vec![],
@@ -2475,6 +2536,8 @@ echo "test"
             loop_pid: None,
             total_tasks: Some(3),
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         };
 
         let summary = get_progress_summary(Some(&state));
@@ -2506,6 +2569,9 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                model: None,
+                input_tokens: None,
+                output_tokens: None,
             }],
             completed_tasks: vec![],
             failed_tasks: vec![],
@@ -2514,6 +2580,8 @@ echo "test"
             loop_pid: None,
             total_tasks: None,
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         });
         assert!(
             has_new_active_tasks(&None, &new),
@@ -2545,6 +2613,9 @@ echo "test"
                     pane: "%1".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    model: None,
+                    input_tokens: None,
+                    output_tokens: None,
                 },
                 RuntimeActiveTask {
                     id: "task-002".to_string(),
@@ -2552,6 +2623,9 @@ echo "test"
                     pane: "%2".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    model: None,
+                    input_tokens: None,
+                    output_tokens: None,
                 },
             ],
             ..new.as_ref().unwrap().clone()
@@ -2579,6 +2653,9 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                model: None,
+                input_tokens: None,
+                output_tokens: None,
             }],
             completed_tasks: vec![serde_json::json!("done-1")],
             failed_tasks: vec![serde_json::json!("fail-1")],
@@ -2587,6 +2664,8 @@ echo "test"
             loop_pid: Some(42),
             total_tasks: Some(5),
             backend_statuses: None,
+            total_input_tokens: None,
+            total_output_tokens: None,
         };
 
         // Only updated_at changed → no content change
@@ -2618,6 +2697,9 @@ echo "test"
                     pane: "%1".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    model: None,
+                    input_tokens: None,
+                    output_tokens: None,
                 },
                 RuntimeActiveTask {
                     id: "task-002".to_string(),
@@ -2625,6 +2707,9 @@ echo "test"
                     pane: "%2".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    model: None,
+                    input_tokens: None,
+                    output_tokens: None,
                 },
             ],
             ..base.clone()
