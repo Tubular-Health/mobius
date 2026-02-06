@@ -304,9 +304,18 @@ These thresholds match the Rust `ModelRoutingConfig` defaults (`haiku_max_score:
 3. **Establish blockedBy relationships** using assigned order numbers
 4. **Verify no circular dependencies** — graph must be a DAG
 5. **Aggregate verify commands** — extract each sub-task's `### Verify Command` bash block into numbered list for the Verification Gate description
-6. **Identify parallel groups** — tasks with no mutual dependencies
-7. **Add verification gate** blocked by ALL implementation tasks, with aggregated verify commands
-8. **Quality checks**: single file per task, no duplicate targets, all sections complete, verify commands executable, acceptance criteria measurable
+6. **Normalize scoring** — review all proposed scores from Phase 3 subagents and ensure consistency:
+   - **Clamp** any scores outside 1-10 range to 1 (minimum) or 10 (maximum)
+   - **Adjust outliers**: if one task's complexity is 9 but similar-scoped tasks score 3-4, recalibrate for consistency across the breakdown
+   - **Compute `recommendedModel`** for each task using combined score (`complexity + risk`):
+     - combined ≤6 → `"haiku"`
+     - combined ≤12 → `"sonnet"`
+     - combined >12 → `"opus"`
+   - **Assign Verification Gate scoring**: always complexity 1, risk 1, `recommendedModel: "haiku"`, rationale: "Verification only"
+   - Do NOT apply the global model ceiling — that is the executor's responsibility (`select_model_for_task()` in `model_router.rs`)
+7. **Identify parallel groups** — tasks with no mutual dependencies
+8. **Add verification gate** blocked by ALL implementation tasks, with aggregated verify commands
+9. **Quality checks**: single file per task, no duplicate targets, all sections complete, verify commands executable, acceptance criteria measurable, each sub-task includes `scoring` with complexity, risk, `recommendedModel`, and rationale, scoring field matches Rust `TaskScoring` serde schema (camelCase field names), `recommendedModel` values are one of: `"haiku"`, `"sonnet"`, `"opus"` (lowercase)
 </aggregation_phase>
 
 <scoring_phase>
