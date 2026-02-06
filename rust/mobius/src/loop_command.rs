@@ -3,6 +3,7 @@
 //! Coordinates worktree isolation, tmux-based agent spawning, task graph
 //! management, and runtime state updates. Ported from `src/commands/loop.ts`.
 
+use std::path::PathBuf;
 use std::process;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,15 +13,17 @@ use std::time::Instant;
 use anyhow::Result;
 use chrono::Utc;
 use colored::Colorize;
+use tokio::time::Duration;
 
 use crate::config;
 use crate::context;
 use crate::executor;
 use crate::local_state;
+use crate::stream_json;
 use crate::tmux;
 use crate::tracker;
 use crate::tree_renderer;
-use crate::types::context::RuntimeActiveTask;
+use crate::types::context::{RuntimeActiveTask, RuntimeState};
 use crate::types::enums::{Backend, Model, SessionStatus, TaskStatus};
 use crate::types::task_graph::{
     build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks,
@@ -206,6 +209,15 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     }
 
     let worktree_path = worktree_info.path.to_string_lossy().to_string();
+
+    // Create output directory for capturing raw stream-json output (token extraction)
+    let output_dir: PathBuf = std::env::temp_dir().join("mobius").join(&task_id);
+    if let Err(e) = std::fs::create_dir_all(&output_dir) {
+        eprintln!(
+            "{}",
+            format!("Warning: Could not create output dir for token tracking: {e}").yellow()
+        );
+    }
 
     // -----------------------------------------------------------------------
     // 9. Create tmux session
@@ -416,7 +428,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         pane: String::new(),
                         started_at: now.clone(),
                         worktree: Some(worktree_path.clone()),
-                        model: Some(exec_config.model.to_string()),
+                        model: Some(executor::select_model_for_task(task, exec_config.model).to_string()),
                         input_tokens: None,
                         output_tokens: None,
                     },
@@ -444,8 +456,25 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
             };
             tmux::update_status_pane(&loop_status, &session_name).await?;
 
-            // Execute tasks in parallel
+            // Execute tasks in parallel with background token tracking
             let ctx_path_ref = context_file_path.as_deref();
+
+            // Spawn background task to poll token usage from output files
+            let live_token_task_id = task_id.clone();
+            let live_token_dir = output_dir.clone();
+            let live_token_identifiers: Vec<String> = tasks_to_execute
+                .iter()
+                .map(|t| t.identifier.clone())
+                .collect();
+            let live_token_handle = tokio::spawn(async move {
+                update_live_tokens_loop(
+                    &live_token_task_id,
+                    &live_token_dir,
+                    &live_token_identifiers,
+                )
+                .await;
+            });
+
             let results = executor::execute_parallel(
                 &tasks_to_execute,
                 &exec_config,
@@ -453,16 +482,28 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                 &session,
                 ctx_path_ref,
                 None,
+                Some(&output_dir),
             )
             .await;
 
-            // Update runtime state with real pane IDs
+            // Stop background token tracking
+            live_token_handle.abort();
+
+            // Update runtime state with real pane IDs and token data
             for result in &results {
                 if let Some(ref pane_id) = result.pane_id {
                     runtime_state = context::update_runtime_task_pane(
                         &runtime_state,
                         &result.identifier,
                         pane_id,
+                    );
+                }
+                if result.input_tokens.is_some() || result.output_tokens.is_some() {
+                    runtime_state = context::update_runtime_task_tokens(
+                        &runtime_state,
+                        &result.identifier,
+                        result.input_tokens,
+                        result.output_tokens,
                     );
                 }
             }
@@ -623,7 +664,8 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                 }
             }
 
-            // Write updated runtime state
+            // Recalculate total tokens and write updated runtime state
+            runtime_state = context::recalculate_total_tokens(&runtime_state);
             context::write_runtime_state(&runtime_state)?;
 
             // Check for permanent failures
@@ -764,6 +806,59 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Periodically poll output files and update runtime state with live token data.
+///
+/// Runs every 3 seconds, reading current token usage from each agent's output file
+/// and updating the runtime state on disk (with file locking for safe concurrent access).
+async fn update_live_tokens_loop(parent_id: &str, output_dir: &std::path::Path, identifiers: &[String]) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        let _ = context::with_runtime_state_sync(parent_id, |state| {
+            let mut s = match state {
+                Some(s) => s,
+                None => return RuntimeState {
+                    parent_id: parent_id.to_string(),
+                    parent_title: String::new(),
+                    active_tasks: vec![],
+                    completed_tasks: vec![],
+                    failed_tasks: vec![],
+                    started_at: Utc::now().to_rfc3339(),
+                    updated_at: Utc::now().to_rfc3339(),
+                    loop_pid: None,
+                    total_tasks: None,
+                    backend_statuses: None,
+                    total_input_tokens: None,
+                    total_output_tokens: None,
+                },
+            };
+
+            let mut changed = false;
+            for identifier in identifiers {
+                let output_file = output_dir.join(format!("{}.jsonl", identifier));
+                if let Some(usage) = stream_json::parse_current_tokens(&output_file) {
+                    if let Some(task) = s.active_tasks.iter_mut().find(|t| t.id == *identifier) {
+                        let new_input = Some(usage.input_tokens);
+                        let new_output = Some(usage.output_tokens);
+                        if task.input_tokens != new_input || task.output_tokens != new_output {
+                            task.input_tokens = new_input;
+                            task.output_tokens = new_output;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+
+            if changed {
+                // Recalculate totals inline
+                s = context::recalculate_total_tokens(&s);
+            }
+
+            s
+        });
+    }
 }
 
 /// Re-sync the task graph from local state files.

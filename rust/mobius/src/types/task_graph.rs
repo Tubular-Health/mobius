@@ -2,7 +2,17 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::enums::TaskStatus;
+use super::enums::{Model, TaskStatus};
+
+/// Scoring data for per-task model routing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskScoring {
+    pub complexity: u8,
+    pub risk: u8,
+    pub recommended_model: Model,
+    pub rationale: String,
+}
 
 /// Represents a sub-task in the dependency graph
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +25,8 @@ pub struct SubTask {
     pub blocked_by: Vec<String>,
     pub blocks: Vec<String>,
     pub git_branch_name: String,
+    #[serde(default)]
+    pub scoring: Option<TaskScoring>,
 }
 
 /// The complete task dependency graph
@@ -59,6 +71,8 @@ pub struct LinearIssue {
     pub git_branch_name: String,
     #[serde(default)]
     pub relations: Option<Relations>,
+    #[serde(default)]
+    pub scoring: Option<TaskScoring>,
 }
 
 /// Blocking relations for an issue
@@ -158,6 +172,7 @@ pub fn build_task_graph(
             blocked_by: blocked_by_ids.clone(),
             blocks: blocks_ids,
             git_branch_name: issue.git_branch_name.clone(),
+            scoring: issue.scoring.clone(),
         };
 
         tasks.insert(issue.id.clone(), task);
@@ -386,6 +401,7 @@ mod tests {
                         identifier: "MOB-125".to_string(),
                     }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -403,6 +419,7 @@ mod tests {
                         identifier: "MOB-126".to_string(),
                     }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "c".to_string(),
@@ -417,6 +434,7 @@ mod tests {
                     }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ]
     }
@@ -460,6 +478,7 @@ mod tests {
                 }],
                 blocks: vec![],
             }),
+            scoring: None,
         }];
         let graph = build_task_graph("parent-1", "MOB-100", &issues);
         assert_eq!(graph.tasks.get("x").unwrap().status, TaskStatus::Ready);
@@ -475,6 +494,7 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: None,
+                scoring: None,
             },
             LinearIssue {
                 id: "vg".to_string(),
@@ -483,6 +503,7 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: None,
+                scoring: None,
             },
         ];
         let graph = build_task_graph("parent-1", "MOB-100", &issues);
@@ -586,6 +607,7 @@ mod tests {
             blocked_by: vec![],
             blocks: vec!["b".to_string()],
             git_branch_name: "feature/mob-124".to_string(),
+            scoring: None,
         };
         let json = serde_json::to_string(&task).unwrap();
         let parsed: SubTask = serde_json::from_str(&json).unwrap();
@@ -608,6 +630,7 @@ mod tests {
                 }],
                 blocks: vec![],
             }),
+            scoring: None,
         };
         let json = serde_json::to_string(&issue).unwrap();
         let parsed: LinearIssue = serde_json::from_str(&json).unwrap();
@@ -624,6 +647,7 @@ mod tests {
             status: "Done".to_string(),
             git_branch_name: String::new(),
             relations: None,
+                scoring: None,
         }];
         let graph = build_task_graph("parent-1", "MOB-100", &issues);
         assert_eq!(graph.tasks.get("d").unwrap().status, TaskStatus::Done);
@@ -638,6 +662,7 @@ mod tests {
             status: "In Progress".to_string(),
             git_branch_name: String::new(),
             relations: None,
+                scoring: None,
         }];
         let graph = build_task_graph("parent-1", "MOB-100", &issues);
         let ready = get_ready_tasks(&graph);
@@ -663,6 +688,7 @@ mod tests {
                         Relation { id: "c".to_string(), identifier: "MOB-202".to_string() },
                     ],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -674,6 +700,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-200".to_string() }],
                     blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-203".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "c".to_string(),
@@ -685,6 +712,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-200".to_string() }],
                     blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-203".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "d".to_string(),
@@ -699,6 +727,7 @@ mod tests {
                     ],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ]
     }
@@ -752,6 +781,7 @@ mod tests {
                         Relation { id: "d".to_string(), identifier: "MOB-303".to_string() },
                     ],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -763,6 +793,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-300".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "c".to_string(),
@@ -774,6 +805,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-300".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "d".to_string(),
@@ -785,6 +817,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-300".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ];
         let graph = build_task_graph("p1", "MOB-100", &issues);
@@ -824,6 +857,7 @@ mod tests {
             status: "Backlog".to_string(),
             git_branch_name: String::new(),
             relations: None,
+            scoring: None,
         }];
         let graph = build_task_graph("p1", "MOB-100", &issues);
         assert_eq!(graph.tasks.len(), 1);
@@ -846,6 +880,7 @@ mod tests {
                 }],
                 blocks: vec![],
             }),
+            scoring: None,
         }];
         let graph = build_task_graph("p1", "MOB-100", &issues);
         // External blocker not in graph → assumed done → task is Ready
@@ -868,6 +903,7 @@ mod tests {
                     blocked_by: vec![],
                     blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-501".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -879,6 +915,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-500".to_string() }],
                     blocks: vec![Relation { id: "c".to_string(), identifier: "MOB-502".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "c".to_string(),
@@ -890,6 +927,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "b".to_string(), identifier: "MOB-501".to_string() }],
                     blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-503".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "d".to_string(),
@@ -901,6 +939,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "c".to_string(), identifier: "MOB-502".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ];
         let graph = build_task_graph("p1", "MOB-100", &issues);
@@ -936,6 +975,7 @@ mod tests {
                     blocked_by: vec![],
                     blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-601".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -947,6 +987,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-600".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "x".to_string(),
@@ -958,6 +999,7 @@ mod tests {
                     blocked_by: vec![],
                     blocks: vec![Relation { id: "y".to_string(), identifier: "MOB-603".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "y".to_string(),
@@ -969,6 +1011,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "x".to_string(), identifier: "MOB-602".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ];
         let graph = build_task_graph("p1", "MOB-100", &issues);
@@ -997,6 +1040,7 @@ mod tests {
                     blocked_by: vec![],
                     blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-701".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -1008,6 +1052,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-700".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ];
         let graph = build_task_graph("p1", "MOB-100", &issues);
@@ -1053,6 +1098,7 @@ mod tests {
                 status: "Done".to_string(),
                 git_branch_name: String::new(),
                 relations: None,
+                scoring: None,
             },
             LinearIssue {
                 id: "ip1".to_string(),
@@ -1061,6 +1107,7 @@ mod tests {
                 status: "In Progress".to_string(),
                 git_branch_name: String::new(),
                 relations: None,
+                scoring: None,
             },
             LinearIssue {
                 id: "ready1".to_string(),
@@ -1069,6 +1116,7 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: None,
+                scoring: None,
             },
             LinearIssue {
                 id: "blocked1".to_string(),
@@ -1080,6 +1128,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "ip1".to_string(), identifier: "MOB-801".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ];
         let graph = build_task_graph("p1", "MOB-100", &issues);
@@ -1103,5 +1152,87 @@ mod tests {
         let graph = update_task_status(&graph, "c", TaskStatus::Done);
         let stats = get_graph_stats(&graph);
         assert_eq!(stats, GraphStats { total: 4, done: 3, ready: 1, blocked: 0, in_progress: 0 });
+    }
+
+    // ── TaskScoring Tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_task_scoring_serde_roundtrip() {
+        let scoring = TaskScoring {
+            complexity: 7,
+            risk: 3,
+            recommended_model: Model::Sonnet,
+            rationale: "Moderate complexity, low risk".to_string(),
+        };
+        let json = serde_json::to_string(&scoring).unwrap();
+        assert!(json.contains("\"recommendedModel\":\"sonnet\""));
+        let parsed: TaskScoring = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.complexity, 7);
+        assert_eq!(parsed.risk, 3);
+        assert_eq!(parsed.recommended_model, Model::Sonnet);
+    }
+
+    #[test]
+    fn test_subtask_with_scoring_serde_roundtrip() {
+        let task = SubTask {
+            id: "a".to_string(),
+            identifier: "MOB-124".to_string(),
+            title: "Task A".to_string(),
+            status: TaskStatus::Ready,
+            blocked_by: vec![],
+            blocks: vec![],
+            git_branch_name: "feature/mob-124".to_string(),
+            scoring: Some(TaskScoring {
+                complexity: 9,
+                risk: 5,
+                recommended_model: Model::Opus,
+                rationale: "High complexity".to_string(),
+            }),
+        };
+        let json = serde_json::to_string(&task).unwrap();
+        let parsed: SubTask = serde_json::from_str(&json).unwrap();
+        assert!(parsed.scoring.is_some());
+        let scoring = parsed.scoring.unwrap();
+        assert_eq!(scoring.complexity, 9);
+        assert_eq!(scoring.recommended_model, Model::Opus);
+    }
+
+    #[test]
+    fn test_subtask_without_scoring_backward_compat() {
+        // JSON without scoring field should deserialize with scoring: None
+        let json = r#"{
+            "id": "a",
+            "identifier": "MOB-124",
+            "title": "Task A",
+            "status": "ready",
+            "blockedBy": [],
+            "blocks": [],
+            "gitBranchName": "feature/mob-124"
+        }"#;
+        let parsed: SubTask = serde_json::from_str(json).unwrap();
+        assert!(parsed.scoring.is_none());
+        assert_eq!(parsed.identifier, "MOB-124");
+    }
+
+    #[test]
+    fn test_linear_issue_with_scoring_serde_roundtrip() {
+        let issue = LinearIssue {
+            id: "abc".to_string(),
+            identifier: "MOB-124".to_string(),
+            title: "Test".to_string(),
+            status: "Backlog".to_string(),
+            git_branch_name: String::new(),
+            relations: None,
+            scoring: Some(TaskScoring {
+                complexity: 3,
+                risk: 1,
+                recommended_model: Model::Haiku,
+                rationale: "Simple task".to_string(),
+            }),
+        };
+        let json = serde_json::to_string(&issue).unwrap();
+        let parsed: LinearIssue = serde_json::from_str(&json).unwrap();
+        assert!(parsed.scoring.is_some());
+        assert_eq!(parsed.scoring.unwrap().recommended_model, Model::Haiku);
     }
 }

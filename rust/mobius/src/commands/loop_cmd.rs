@@ -13,7 +13,7 @@ use crate::context::{
     generate_context, initialize_runtime_state, remove_runtime_active_task,
     update_runtime_task_pane, write_full_context_file, write_runtime_state,
 };
-use crate::executor::{calculate_parallelism, execute_parallel};
+use crate::executor::{calculate_parallelism, execute_parallel, select_model_for_task};
 use crate::jira::JiraClient;
 use crate::types::task_graph::ParentIssue;
 use crate::local_state::{
@@ -382,7 +382,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     pane: String::new(),
                     started_at: chrono::Utc::now().to_rfc3339(),
                     worktree: Some(worktree_info.path.display().to_string()),
-                    model: Some(execution_config.model.to_string()),
+                    model: Some(select_model_for_task(task, execution_config.model).to_string()),
                     input_tokens: None,
                     output_tokens: None,
                 },
@@ -418,6 +418,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
             &worktree_info.path.display().to_string(),
             &session,
             Some(&context_file_str),
+            None,
             None,
         ));
 

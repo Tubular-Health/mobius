@@ -150,6 +150,7 @@ mod tests {
                         Relation { id: "b".to_string(), identifier: "MOB-102".to_string() },
                     ],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -161,6 +162,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-101".to_string() }],
                     blocks: vec![Relation { id: "c".to_string(), identifier: "MOB-103".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "c".to_string(),
@@ -172,6 +174,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "b".to_string(), identifier: "MOB-102".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ]
     }
@@ -322,6 +325,7 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: None,
+                scoring: None,
             },
         ];
         let graph = build_task_graph("parent-1", "MOB-400", &issues);
