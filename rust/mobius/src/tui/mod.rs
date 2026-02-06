@@ -9,3 +9,4 @@ pub mod header;
 pub mod legend;
 pub mod task_tree;
 pub mod theme;
+pub mod token_metrics;
