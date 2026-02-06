@@ -17,7 +17,7 @@ use ratatui::Terminal;
 use crate::types::task_graph::TaskGraph;
 
 use super::agent_progress::{AgentProgress, calculate_height};
-use super::agent_slots::{AgentSlots, AGENT_SLOTS_HEIGHT};
+use super::agent_slots::{ActiveTaskDisplay, AgentSlots, AGENT_SLOTS_HEIGHT};
 use super::app::App;
 use super::debug_panel::{DebugPanel, DEBUG_PANEL_HEIGHT};
 use super::events::{EventHandler, TuiEvent};
@@ -229,14 +229,22 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
     let agent_area = chunks[chunk_idx];
     chunk_idx += 1;
 
-    let active_ids: Vec<String> = app
+    let active_displays: Vec<ActiveTaskDisplay> = app
         .runtime_state
         .as_ref()
-        .map(|s| s.active_tasks.iter().map(|t| t.id.clone()).collect())
+        .map(|s| {
+            s.active_tasks
+                .iter()
+                .map(|t| ActiveTaskDisplay {
+                    id: t.id.clone(),
+                    model: t.model.clone(),
+                })
+                .collect()
+        })
         .unwrap_or_default();
 
     let agent_slots = AgentSlots {
-        active_tasks: &active_ids,
+        active_tasks: &active_displays,
         max_slots: app.max_parallel_agents,
     };
     frame.render_widget(agent_slots, agent_area);
