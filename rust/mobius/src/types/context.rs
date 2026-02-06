@@ -162,6 +162,12 @@ pub struct RuntimeActiveTask {
     pub pane: String,
     pub started_at: String,
     pub worktree: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
 }
 
 /// Completed or failed task with timing info (runtime monitoring)
@@ -171,6 +177,10 @@ pub struct RuntimeCompletedTask {
     pub id: String,
     pub completed_at: String,
     pub duration: u64,
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
 }
 
 /// A single todo task from a Claude Code agent
@@ -214,6 +224,10 @@ pub struct RuntimeState {
     pub loop_pid: Option<u32>,
     pub total_tasks: Option<u32>,
     pub backend_statuses: Option<std::collections::HashMap<String, BackendStatusEntry>>,
+    #[serde(default)]
+    pub total_input_tokens: Option<u64>,
+    #[serde(default)]
+    pub total_output_tokens: Option<u64>,
 }
 
 /// Complete issue context stored locally

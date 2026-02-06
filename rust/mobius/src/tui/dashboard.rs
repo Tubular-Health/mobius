@@ -12,12 +12,13 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, BorderType};
 use ratatui::Terminal;
 
 use crate::types::task_graph::TaskGraph;
 
 use super::agent_progress::{AgentProgress, calculate_height};
-use super::agent_slots::{AgentSlots, AGENT_SLOTS_HEIGHT};
+use super::agent_slots::{ActiveTaskDisplay, AgentSlots, AGENT_SLOTS_HEIGHT};
 use super::app::App;
 use super::debug_panel::{DebugPanel, DEBUG_PANEL_HEIGHT};
 use super::events::{EventHandler, TuiEvent};
@@ -25,7 +26,8 @@ use super::exit_modal::ExitModal;
 use super::header::{Header, HEADER_HEIGHT};
 use super::legend::{Legend, LEGEND_HEIGHT};
 use super::task_tree::{CompletedInfo, TaskTreeWidget};
-use super::theme::{NORD0, NORD14, NORD11, TEXT_COLOR, MUTED_COLOR};
+use super::theme::{BORDER_COLOR, HEADER_COLOR, NORD0, NORD14, NORD11, TEXT_COLOR, MUTED_COLOR};
+use super::token_metrics::{TokenMetrics, TOKEN_METRICS_HEIGHT};
 
 /// Run the TUI dashboard.
 pub fn run_dashboard(
@@ -140,17 +142,18 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
     // Calculate layout constraints
     let has_agent_progress = !app.agent_todos.is_empty();
     let mut constraints = vec![
-        Constraint::Length(HEADER_HEIGHT),     // Header
-        Constraint::Min(5),                    // Main content (task tree + backend status)
-        Constraint::Length(AGENT_SLOTS_HEIGHT), // Agent slots
+        Constraint::Length(HEADER_HEIGHT),             // Header (borderless)
+        Constraint::Min(5 + 2),                        // Task tree + borders
+        Constraint::Length(AGENT_SLOTS_HEIGHT + 2),    // Agent slots + borders
+        Constraint::Length(TOKEN_METRICS_HEIGHT),       // Token metrics (already includes borders)
     ];
 
     if has_agent_progress {
-        constraints.push(Constraint::Length(calculate_height(app.agent_todos.len())));
+        constraints.push(Constraint::Length(calculate_height(app.agent_todos.len()) + 2));
     }
 
     if app.show_legend {
-        constraints.push(Constraint::Length(LEGEND_HEIGHT));
+        constraints.push(Constraint::Length(LEGEND_HEIGHT + 2));
     }
 
     if app.show_debug {
@@ -217,45 +220,121 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
         }
     }
 
+    let task_tree_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(BORDER_COLOR))
+        .title(Span::styled(" Task Tree ", Style::default().fg(HEADER_COLOR)));
+    let task_tree_inner = task_tree_block.inner(main_area);
+    frame.render_widget(task_tree_block, main_area);
+
     let task_tree = TaskTreeWidget {
         graph: &app.graph,
         status_overrides: &status_overrides,
         active_elapsed: &active_elapsed,
         completed_info: &completed_info,
     };
-    frame.render_widget(task_tree, main_area);
+    frame.render_widget(task_tree, task_tree_inner);
 
     // Render agent slots
     let agent_area = chunks[chunk_idx];
     chunk_idx += 1;
 
-    let active_ids: Vec<String> = app
+    let agent_slots_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(BORDER_COLOR))
+        .title(Span::styled(" Agents ", Style::default().fg(HEADER_COLOR)));
+    let agent_slots_inner = agent_slots_block.inner(agent_area);
+    frame.render_widget(agent_slots_block, agent_area);
+
+    let active_displays: Vec<ActiveTaskDisplay> = app
         .runtime_state
         .as_ref()
-        .map(|s| s.active_tasks.iter().map(|t| t.id.clone()).collect())
+        .map(|s| {
+            s.active_tasks
+                .iter()
+                .map(|t| ActiveTaskDisplay {
+                    id: t.id.clone(),
+                    model: t.model.clone(),
+                })
+                .collect()
+        })
         .unwrap_or_default();
 
     let agent_slots = AgentSlots {
-        active_tasks: &active_ids,
+        active_tasks: &active_displays,
         max_slots: app.max_parallel_agents,
     };
-    frame.render_widget(agent_slots, agent_area);
+    frame.render_widget(agent_slots, agent_slots_inner);
+
+    // Render token metrics
+    let token_area = chunks[chunk_idx];
+    chunk_idx += 1;
+
+    let mut per_model: HashMap<String, (u64, u64)> = HashMap::new();
+    if let Some(state) = &app.runtime_state {
+        for task in &state.active_tasks {
+            if let Some(ref model) = task.model {
+                let entry = per_model.entry(model.clone()).or_insert((0, 0));
+                entry.0 += task.input_tokens.unwrap_or(0);
+                entry.1 += task.output_tokens.unwrap_or(0);
+            }
+        }
+    }
+
+    let (total_input, total_output) = app
+        .runtime_state
+        .as_ref()
+        .map(|s| {
+            (
+                s.total_input_tokens.unwrap_or(0),
+                s.total_output_tokens.unwrap_or(0),
+            )
+        })
+        .unwrap_or((0, 0));
+
+    let token_metrics = TokenMetrics {
+        total_input,
+        total_output,
+        per_model: &per_model,
+        token_history: app.token_history(),
+    };
+    frame.render_widget(token_metrics, token_area);
 
     // Render agent progress (if any todos exist)
     if has_agent_progress {
         let progress_area = chunks[chunk_idx];
         chunk_idx += 1;
 
+        let progress_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(BORDER_COLOR))
+            .title(Span::styled(" Agent Progress ", Style::default().fg(HEADER_COLOR)));
+        let progress_inner = progress_block.inner(progress_area);
+        frame.render_widget(progress_block, progress_area);
+
         let agent_progress = AgentProgress {
             todos: &app.agent_todos,
         };
-        frame.render_widget(agent_progress, progress_area);
+        frame.render_widget(agent_progress, progress_inner);
     }
 
     // Render legend (if shown)
     if app.show_legend {
-        frame.render_widget(Legend, chunks[chunk_idx]);
+        let legend_area = chunks[chunk_idx];
         chunk_idx += 1;
+
+        let legend_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(BORDER_COLOR))
+            .title(Span::styled(" Legend ", Style::default().fg(HEADER_COLOR)));
+        let legend_inner = legend_block.inner(legend_area);
+        frame.render_widget(legend_block, legend_area);
+
+        frame.render_widget(Legend, legend_inner);
     }
 
     // Render debug panel (if shown)

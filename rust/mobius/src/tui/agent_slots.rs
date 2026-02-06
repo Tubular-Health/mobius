@@ -4,10 +4,15 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
 
-use super::theme::{NORD14, MUTED_COLOR, TEXT_COLOR};
+use super::theme::{model_color, NORD14, MUTED_COLOR, TEXT_COLOR};
+
+pub struct ActiveTaskDisplay {
+    pub id: String,
+    pub model: Option<String>,
+}
 
 pub struct AgentSlots<'a> {
-    pub active_tasks: &'a [String],
+    pub active_tasks: &'a [ActiveTaskDisplay],
     pub max_slots: usize,
 }
 
@@ -26,11 +31,27 @@ impl Widget for AgentSlots<'_> {
 
         for i in 0..self.max_slots {
             if i < self.active_tasks.len() {
+                let task = &self.active_tasks[i];
                 spans.push(Span::styled("● ", Style::default().fg(NORD14)));
                 spans.push(Span::styled(
-                    self.active_tasks[i].to_string(),
+                    task.id.clone(),
                     Style::default().fg(TEXT_COLOR),
                 ));
+                if let Some(ref model) = task.model {
+                    let short = if model.contains("opus") {
+                        "opus"
+                    } else if model.contains("sonnet") {
+                        "sonnet"
+                    } else if model.contains("haiku") {
+                        "haiku"
+                    } else {
+                        model.as_str()
+                    };
+                    spans.push(Span::styled(
+                        format!(" [{}]", short),
+                        Style::default().fg(model_color(model)),
+                    ));
+                }
             } else {
                 spans.push(Span::styled("○", Style::default().fg(MUTED_COLOR)));
             }
