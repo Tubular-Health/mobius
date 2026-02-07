@@ -11,6 +11,7 @@ pub mod loop_command;
 pub mod mermaid_renderer;
 pub mod output_parser;
 pub mod project_detector;
+pub mod runtime_adapter;
 pub mod status_sync;
 pub mod tmux;
 pub mod tracker;
