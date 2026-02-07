@@ -2,8 +2,12 @@ use std::fs;
 use std::path::Path;
 
 use super::error::ConfigError;
-use super::paths::{get_global_commands_dir, get_shortcuts_install_path};
+use super::paths::{
+    get_commands_dir_for_runtime, get_global_commands_dir_for_runtime,
+    get_settings_path_for_runtime, get_shortcuts_install_path,
+};
 use crate::types::config::PathConfigType;
+use crate::types::enums::AgentRuntime;
 use crate::types::PathConfig;
 
 /// Copy skills from source to target directory (recursive)
@@ -19,7 +23,11 @@ pub fn copy_skills(source_dir: &Path, target_dir: &Path) -> Result<(), ConfigErr
 }
 
 /// Copy commands from source to target directory
-pub fn copy_commands(source_dir: &Path, paths: &PathConfig) -> Result<(), ConfigError> {
+pub fn copy_commands(
+    source_dir: &Path,
+    paths: &PathConfig,
+    runtime: AgentRuntime,
+) -> Result<(), ConfigError> {
     if !source_dir.exists() {
         // Commands are optional
         return Ok(());
@@ -30,9 +38,9 @@ pub fn copy_commands(source_dir: &Path, paths: &PathConfig) -> Result<(), Config
             let config_parent = Path::new(&paths.config_path)
                 .parent()
                 .unwrap_or_else(|| Path::new("."));
-            config_parent.join(".claude").join("commands")
+            get_commands_dir_for_runtime(config_parent, runtime)
         }
-        PathConfigType::Global => get_global_commands_dir(),
+        PathConfigType::Global => get_global_commands_dir_for_runtime(runtime),
     };
 
     copy_dir_recursive(source_dir, &target_dir)
@@ -84,9 +92,12 @@ pub fn add_shortcuts_source_line(rc_file_path: &Path) -> Result<(), ConfigError>
     Ok(())
 }
 
-/// Ensure .claude/settings.json has .mobius/ permissions
-pub fn ensure_claude_settings(project_dir: &Path) -> Result<(), ConfigError> {
-    let settings_path = project_dir.join(".claude").join("settings.json");
+/// Ensure runtime settings.json has .mobius/ permissions.
+pub fn ensure_runtime_settings(
+    project_dir: &Path,
+    runtime: AgentRuntime,
+) -> Result<(), ConfigError> {
+    let settings_path = get_settings_path_for_runtime(project_dir, runtime);
     let mobius_permissions = [
         "Bash(mkdir */.mobius/*)",
         "Bash(mkdir -p */.mobius/*)",
@@ -142,6 +153,11 @@ pub fn ensure_claude_settings(project_dir: &Path) -> Result<(), ConfigError> {
     Ok(())
 }
 
+/// Backwards-compatible wrapper for Claude settings path.
+pub fn ensure_claude_settings(project_dir: &Path) -> Result<(), ConfigError> {
+    ensure_runtime_settings(project_dir, AgentRuntime::Claude)
+}
+
 /// Recursively copy a directory
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), ConfigError> {
     if !dst.exists() {
@@ -183,10 +199,7 @@ mod tests {
     #[test]
     fn test_copy_skills_missing_source() {
         let tmp = tempfile::tempdir().unwrap();
-        let result = copy_skills(
-            &tmp.path().join("nonexistent"),
-            &tmp.path().join("target"),
-        );
+        let result = copy_skills(&tmp.path().join("nonexistent"), &tmp.path().join("target"));
         assert!(result.is_err());
     }
 
@@ -200,8 +213,39 @@ mod tests {
             script_path: String::new(),
         };
         // Non-existent source should succeed (commands are optional)
-        let result = copy_commands(&tmp.path().join("nonexistent"), &paths);
+        let result = copy_commands(
+            &tmp.path().join("nonexistent"),
+            &paths,
+            AgentRuntime::Claude,
+        );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_copy_commands_local_runtime_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("commands-source");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(source.join("test.md"), "# Command").unwrap();
+
+        let paths = PathConfig {
+            config_type: PathConfigType::Local,
+            config_path: tmp
+                .path()
+                .join("mobius.config.yaml")
+                .to_string_lossy()
+                .to_string(),
+            skills_path: String::new(),
+            script_path: String::new(),
+        };
+
+        copy_commands(&source, &paths, AgentRuntime::Opencode).unwrap();
+        assert!(tmp
+            .path()
+            .join(".opencode")
+            .join("commands")
+            .join("test.md")
+            .exists());
     }
 
     #[test]
@@ -244,7 +288,7 @@ mod tests {
     #[test]
     fn test_ensure_claude_settings_creates_file() {
         let tmp = tempfile::tempdir().unwrap();
-        ensure_claude_settings(tmp.path()).unwrap();
+        ensure_runtime_settings(tmp.path(), AgentRuntime::Claude).unwrap();
 
         let settings_path = tmp.path().join(".claude").join("settings.json");
         assert!(settings_path.exists());
@@ -253,16 +297,14 @@ mod tests {
         let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
         let allow = settings["permissions"]["allow"].as_array().unwrap();
         assert!(allow.len() >= 8);
-        assert!(allow.contains(&serde_json::Value::String(
-            "Write(.mobius/**)".to_string()
-        )));
+        assert!(allow.contains(&serde_json::Value::String("Write(.mobius/**)".to_string())));
     }
 
     #[test]
     fn test_ensure_claude_settings_idempotent() {
         let tmp = tempfile::tempdir().unwrap();
-        ensure_claude_settings(tmp.path()).unwrap();
-        ensure_claude_settings(tmp.path()).unwrap();
+        ensure_runtime_settings(tmp.path(), AgentRuntime::Claude).unwrap();
+        ensure_runtime_settings(tmp.path(), AgentRuntime::Claude).unwrap();
 
         let settings_path = tmp.path().join(".claude").join("settings.json");
         let content = fs::read_to_string(&settings_path).unwrap();
@@ -284,9 +326,13 @@ mod tests {
             },
             "custom_key": "value"
         });
-        fs::write(&settings_path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+        fs::write(
+            &settings_path,
+            serde_json::to_string_pretty(&existing).unwrap(),
+        )
+        .unwrap();
 
-        ensure_claude_settings(tmp.path()).unwrap();
+        ensure_runtime_settings(tmp.path(), AgentRuntime::Claude).unwrap();
 
         let content = fs::read_to_string(&settings_path).unwrap();
         let settings: serde_json::Value = serde_json::from_str(&content).unwrap();
@@ -297,6 +343,15 @@ mod tests {
         assert!(allow.contains(&serde_json::Value::String("Write(.mobius/**)".to_string())));
         // Should preserve custom key
         assert_eq!(settings["custom_key"], "value");
+    }
+
+    #[test]
+    fn test_ensure_runtime_settings_opencode_creates_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        ensure_runtime_settings(tmp.path(), AgentRuntime::Opencode).unwrap();
+
+        let settings_path = tmp.path().join(".opencode").join("settings.json");
+        assert!(settings_path.exists());
     }
 
     #[test]

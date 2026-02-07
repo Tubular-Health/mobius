@@ -8,8 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use tokio::process::Command;
 
-/// Directories to symlink from source repo to worktree (gitignored but needed).
-const SYMLINK_DIRS: &[&str] = &[".claude"];
+use crate::types::enums::AgentRuntime;
 
 /// Information about a created or resumed worktree.
 #[derive(Debug, Clone)]
@@ -26,6 +25,7 @@ pub struct WorktreeInfo {
 pub struct WorktreeConfig {
     pub worktree_path: Option<String>,
     pub base_branch: Option<String>,
+    pub runtime: AgentRuntime,
 }
 
 /// Get the repository name from git remote or current directory name.
@@ -167,7 +167,7 @@ pub async fn worktree_exists(task_id: &str, config: &WorktreeConfig) -> Result<b
 }
 
 /// Check if a git branch exists (locally or remotely).
-async fn branch_exists(branch_name: &str) -> Result<BranchExistence> {
+pub async fn branch_exists(branch_name: &str) -> Result<BranchExistence> {
     let mut local = false;
     let mut remote = false;
 
@@ -200,42 +200,108 @@ async fn branch_exists(branch_name: &str) -> Result<BranchExistence> {
 }
 
 #[derive(Debug)]
-struct BranchExistence {
-    local: bool,
-    remote: bool,
+pub struct BranchExistence {
+    pub local: bool,
+    pub remote: bool,
 }
 
-/// Symlink gitignored directories from source repo to worktree.
-///
-/// This ensures directories like `.claude` (which are typically gitignored)
-/// are available in the worktree for Claude Code to use.
-fn symlink_gitignored(source_repo: &Path, worktree_path: &Path) {
-    for dir in SYMLINK_DIRS {
-        let source_path = source_repo.join(dir);
-        let target_path = worktree_path.join(dir);
+/// Result of checking whether an issue's branch has been merged into the base branch.
+#[derive(Debug)]
+pub struct MergeDetectionResult {
+    /// Whether the remote branch has been deleted (indicates merge + cleanup).
+    pub remote_branch_deleted: bool,
+    /// Whether the issue identifier was found in the base branch's commit log.
+    pub found_in_base_log: bool,
+}
 
-        // Only symlink if source exists and target doesn't
-        if source_path.exists() && !target_path.exists() {
-            if let Ok(metadata) = std::fs::symlink_metadata(&source_path) {
-                if metadata.is_dir() {
-                    #[cfg(unix)]
-                    {
-                        if let Err(e) = std::os::unix::fs::symlink(&source_path, &target_path) {
-                            tracing::warn!(
-                                "Failed to symlink {} -> {}: {}",
-                                source_path.display(),
-                                target_path.display(),
-                                e
-                            );
-                        }
-                    }
-                    #[cfg(not(unix))]
-                    {
+impl MergeDetectionResult {
+    /// Returns `true` if either check indicates the branch was merged.
+    pub fn is_merged(&self) -> bool {
+        self.remote_branch_deleted || self.found_in_base_log
+    }
+}
+
+/// Check if an issue's branch has been merged into the base branch.
+///
+/// Performs two independent checks:
+/// 1. Whether the remote branch has been deleted (via `git ls-remote`)
+/// 2. Whether the issue identifier appears in the base branch's commit log
+///
+/// Both checks always execute regardless of individual results.
+pub async fn is_issue_merged_into_base(
+    branch_name: &str,
+    identifier: &str,
+    base_branch: &str,
+) -> Result<MergeDetectionResult> {
+    // Check if remote branch is deleted using ls-remote (queries remote directly)
+    let ls_remote_output = Command::new("git")
+        .args(["ls-remote", "--heads", "origin", branch_name])
+        .output()
+        .await
+        .context("failed to run git ls-remote")?;
+
+    let remote_branch_deleted = if ls_remote_output.status.success() {
+        let stdout = String::from_utf8_lossy(&ls_remote_output.stdout);
+        stdout.trim().is_empty()
+    } else {
+        // If ls-remote fails (e.g. no network), assume not deleted
+        false
+    };
+
+    // Check if identifier appears in base branch commit log
+    let log_output = Command::new("git")
+        .args(["log", base_branch, "--oneline", &format!("--grep={}", identifier)])
+        .output()
+        .await
+        .context("failed to run git log")?;
+
+    let found_in_base_log = if log_output.status.success() {
+        let stdout = String::from_utf8_lossy(&log_output.stdout);
+        !stdout.trim().is_empty()
+    } else {
+        false
+    };
+
+    Ok(MergeDetectionResult {
+        remote_branch_deleted,
+        found_in_base_log,
+    })
+}
+
+fn runtime_config_dir(runtime: AgentRuntime) -> &'static str {
+    match runtime {
+        AgentRuntime::Claude => ".claude",
+        AgentRuntime::Opencode => ".opencode",
+    }
+}
+
+/// Symlink active runtime config directory from source repo to worktree.
+fn symlink_runtime_config_dir(source_repo: &Path, worktree_path: &Path, runtime: AgentRuntime) {
+    let runtime_dir = runtime_config_dir(runtime);
+    let source_path = source_repo.join(runtime_dir);
+    let target_path = worktree_path.join(runtime_dir);
+
+    // Only symlink if source exists and target doesn't
+    if source_path.exists() && !target_path.exists() {
+        if let Ok(metadata) = std::fs::symlink_metadata(&source_path) {
+            if metadata.is_dir() {
+                #[cfg(unix)]
+                {
+                    if let Err(e) = std::os::unix::fs::symlink(&source_path, &target_path) {
                         tracing::warn!(
-                            "Symlink not supported on this platform for {}",
-                            source_path.display()
+                            "Failed to symlink {} -> {}: {}",
+                            source_path.display(),
+                            target_path.display(),
+                            e
                         );
                     }
+                }
+                #[cfg(not(unix))]
+                {
+                    tracing::warn!(
+                        "Symlink not supported on this platform for {}",
+                        source_path.display()
+                    );
                 }
             }
         }
@@ -284,6 +350,9 @@ pub async fn create_worktree(
 
     // Check if worktree already exists (resume scenario)
     if worktree_path.exists() {
+        if let Ok(cwd) = std::env::current_dir() {
+            symlink_runtime_config_dir(&cwd, &worktree_path, config.runtime);
+        }
         return Ok(WorktreeInfo {
             path: worktree_path,
             branch: branch_name.to_string(),
@@ -298,7 +367,12 @@ pub async fn create_worktree(
     if branch.local || branch.remote {
         // Branch exists locally or on remote, create worktree pointing to it
         let output = Command::new("git")
-            .args(["worktree", "add", &worktree_path.to_string_lossy(), branch_name])
+            .args([
+                "worktree",
+                "add",
+                &worktree_path.to_string_lossy(),
+                branch_name,
+            ])
             .output()
             .await
             .context("failed to run git worktree add")?;
@@ -368,9 +442,9 @@ pub async fn create_worktree(
         }
     }
 
-    // Symlink gitignored directories (like .claude) from source repo
+    // Symlink active runtime config directory from source repo
     let cwd = std::env::current_dir().context("failed to get current directory")?;
-    symlink_gitignored(&cwd, &worktree_path);
+    symlink_runtime_config_dir(&cwd, &worktree_path, config.runtime);
 
     Ok(WorktreeInfo {
         path: worktree_path,
@@ -436,9 +510,11 @@ pub async fn list_worktrees() -> Result<Vec<WorktreeEntry>> {
         } else if line == "detached" {
             current_branch = Some("(detached)".to_string());
         } else if line.is_empty() {
-            if let (Some(path), Some(branch), Some(head)) =
-                (current_path.take(), current_branch.take(), current_head.take())
-            {
+            if let (Some(path), Some(branch), Some(head)) = (
+                current_path.take(),
+                current_branch.take(),
+                current_head.take(),
+            ) {
                 worktrees.push(WorktreeEntry { path, branch, head });
             } else {
                 // Reset partial state
@@ -450,9 +526,11 @@ pub async fn list_worktrees() -> Result<Vec<WorktreeEntry>> {
     }
 
     // Flush the last entry if the output didn't end with a blank line
-    if let (Some(path), Some(branch), Some(head)) =
-        (current_path.take(), current_branch.take(), current_head.take())
-    {
+    if let (Some(path), Some(branch), Some(head)) = (
+        current_path.take(),
+        current_branch.take(),
+        current_head.take(),
+    ) {
         worktrees.push(WorktreeEntry { path, branch, head });
     }
 
@@ -539,6 +617,7 @@ mod tests {
         let config = WorktreeConfig {
             worktree_path: None,
             base_branch: None,
+            runtime: AgentRuntime::Claude,
         };
         let path = get_worktree_path("MOB-123", &config).await;
         assert!(path.is_ok());
@@ -552,6 +631,7 @@ mod tests {
         let config = WorktreeConfig {
             worktree_path: Some("../custom-<repo>-trees/".to_string()),
             base_branch: None,
+            runtime: AgentRuntime::Claude,
         };
         let path = get_worktree_path("MOB-456", &config).await;
         assert!(path.is_ok());
@@ -564,6 +644,7 @@ mod tests {
         let config = WorktreeConfig {
             worktree_path: Some("/tmp/nonexistent-worktrees/".to_string()),
             base_branch: None,
+            runtime: AgentRuntime::Claude,
         };
         let exists = worktree_exists("nonexistent-task-xyz", &config).await;
         assert!(exists.is_ok());
@@ -588,6 +669,7 @@ mod tests {
         let config = WorktreeConfig {
             worktree_path: Some(temp_dir.parent().unwrap().to_string_lossy().to_string()),
             base_branch: None,
+            runtime: AgentRuntime::Claude,
         };
 
         // The task_id matches the temp directory name
@@ -599,5 +681,55 @@ mod tests {
 
         // Cleanup
         std::fs::remove_dir_all(&temp_dir).ok();
+    }
+
+    #[test]
+    fn test_runtime_config_dir_claude() {
+        assert_eq!(runtime_config_dir(AgentRuntime::Claude), ".claude");
+    }
+
+    #[test]
+    fn test_runtime_config_dir_opencode() {
+        assert_eq!(runtime_config_dir(AgentRuntime::Opencode), ".opencode");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_symlink_runtime_config_dir_claude() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source_repo = tmp.path().join("source");
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(source_repo.join(".claude")).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        symlink_runtime_config_dir(&source_repo, &worktree, AgentRuntime::Claude);
+
+        let link_path = worktree.join(".claude");
+        let meta = std::fs::symlink_metadata(&link_path).unwrap();
+        assert!(meta.file_type().is_symlink());
+        assert_eq!(
+            std::fs::read_link(&link_path).unwrap(),
+            source_repo.join(".claude")
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_symlink_runtime_config_dir_opencode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source_repo = tmp.path().join("source");
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(source_repo.join(".opencode")).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        symlink_runtime_config_dir(&source_repo, &worktree, AgentRuntime::Opencode);
+
+        let link_path = worktree.join(".opencode");
+        let meta = std::fs::symlink_metadata(&link_path).unwrap();
+        assert!(meta.file_type().is_symlink());
+        assert_eq!(
+            std::fs::read_link(&link_path).unwrap(),
+            source_repo.join(".opencode")
+        );
     }
 }

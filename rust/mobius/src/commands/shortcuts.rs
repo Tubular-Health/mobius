@@ -17,7 +17,11 @@ pub fn run() -> anyhow::Result<()> {
         copy_shortcuts(&bundled_shortcuts)?;
         println!(
             "{}",
-            format!("✓ Shortcuts script installed at {}", shortcuts_path.display()).green()
+            format!(
+                "✓ Shortcuts script installed at {}",
+                shortcuts_path.display()
+            )
+            .green()
         );
     } else {
         println!(
@@ -39,7 +43,10 @@ pub fn run() -> anyhow::Result<()> {
 
         if zshrc.exists() {
             add_shortcuts_source_line(&zshrc)?;
-            println!("  {}", format!("Added source line to {}", zshrc.display()).dimmed());
+            println!(
+                "  {}",
+                format!("Added source line to {}", zshrc.display()).dimmed()
+            );
         } else if bashrc.exists() {
             add_shortcuts_source_line(&bashrc)?;
             println!(
@@ -65,12 +72,24 @@ pub fn run() -> anyhow::Result<()> {
     }
 
     println!("{}", "\nAvailable shortcuts:".bold());
-    println!("  {}  - Define a new issue (launches Claude /define)", "md".cyan());
-    println!("  {}  - Refine the current issue into sub-tasks", "mr".cyan());
-    println!("  {}  - Execute sub-tasks for the current issue", "me".cyan());
+    println!(
+        "  {}  - Define a new issue (launches runtime /define)",
+        "md".cyan()
+    );
+    println!(
+        "  {}  - Refine the current issue into sub-tasks",
+        "mr".cyan()
+    );
+    println!(
+        "  {}  - Execute sub-tasks for the current issue",
+        "me".cyan()
+    );
     println!("  {}  - Submit/PR the current issue", "ms".cyan());
     println!("  {}  - List all local issues", "ml".cyan());
-    println!("  {}  - Clean completed issues from local storage", "mc".cyan());
+    println!(
+        "  {}  - Clean completed issues from local storage",
+        "mc".cyan()
+    );
     println!();
 
     Ok(())

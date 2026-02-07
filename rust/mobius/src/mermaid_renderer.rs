@@ -115,7 +115,10 @@ pub fn render_mermaid_markdown(graph: &TaskGraph) -> String {
 
 /// Generate a Mermaid diagram with a title header.
 pub fn render_mermaid_with_title(graph: &TaskGraph) -> String {
-    let title = format!("## Task Dependency Graph for {}\n\n", graph.parent_identifier);
+    let title = format!(
+        "## Task Dependency Graph for {}\n\n",
+        graph.parent_identifier
+    );
     format!("{title}{}", render_mermaid_markdown(graph))
 }
 
@@ -125,7 +128,10 @@ pub fn get_all_status_colors() -> Vec<(TaskStatus, &'static str)> {
         (TaskStatus::Done, get_status_color(TaskStatus::Done)),
         (TaskStatus::Ready, get_status_color(TaskStatus::Ready)),
         (TaskStatus::Blocked, get_status_color(TaskStatus::Blocked)),
-        (TaskStatus::InProgress, get_status_color(TaskStatus::InProgress)),
+        (
+            TaskStatus::InProgress,
+            get_status_color(TaskStatus::InProgress),
+        ),
         (TaskStatus::Pending, get_status_color(TaskStatus::Pending)),
         (TaskStatus::Failed, get_status_color(TaskStatus::Failed)),
     ]
@@ -134,7 +140,7 @@ pub fn get_all_status_colors() -> Vec<(TaskStatus, &'static str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::task_graph::{build_task_graph, LinearIssue, Relations, Relation};
+    use crate::types::task_graph::{build_task_graph, LinearIssue, Relation, Relations};
 
     fn make_sample_issues() -> Vec<LinearIssue> {
         vec![
@@ -146,10 +152,12 @@ mod tests {
                 git_branch_name: String::new(),
                 relations: Some(Relations {
                     blocked_by: vec![],
-                    blocks: vec![
-                        Relation { id: "b".to_string(), identifier: "MOB-102".to_string() },
-                    ],
+                    blocks: vec![Relation {
+                        id: "b".to_string(),
+                        identifier: "MOB-102".to_string(),
+                    }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -158,9 +166,16 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-101".to_string() }],
-                    blocks: vec![Relation { id: "c".to_string(), identifier: "MOB-103".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-101".to_string(),
+                    }],
+                    blocks: vec![Relation {
+                        id: "c".to_string(),
+                        identifier: "MOB-103".to_string(),
+                    }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "c".to_string(),
@@ -169,9 +184,13 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "b".to_string(), identifier: "MOB-102".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "b".to_string(),
+                        identifier: "MOB-102".to_string(),
+                    }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ]
     }
@@ -314,16 +333,15 @@ mod tests {
 
     #[test]
     fn test_mermaid_with_special_chars_in_title() {
-        let issues = vec![
-            LinearIssue {
-                id: "a".to_string(),
-                identifier: "MOB-401".to_string(),
-                title: "[MOB-401] Fix \"bug\" in <Component> & deploy".to_string(),
-                status: "Backlog".to_string(),
-                git_branch_name: String::new(),
-                relations: None,
-            },
-        ];
+        let issues = vec![LinearIssue {
+            id: "a".to_string(),
+            identifier: "MOB-401".to_string(),
+            title: "[MOB-401] Fix \"bug\" in <Component> & deploy".to_string(),
+            status: "Backlog".to_string(),
+            git_branch_name: String::new(),
+            relations: None,
+            scoring: None,
+        }];
         let graph = build_task_graph("parent-1", "MOB-400", &issues);
         let diagram = render_mermaid_diagram(&graph);
         // Should not contain raw special chars that break Mermaid

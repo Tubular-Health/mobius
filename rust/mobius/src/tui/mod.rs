@@ -1,6 +1,6 @@
 pub mod agent_progress;
-pub mod app;
 pub mod agent_slots;
+pub mod app;
 pub mod dashboard;
 pub mod debug_panel;
 pub mod events;
@@ -9,3 +9,4 @@ pub mod header;
 pub mod legend;
 pub mod task_tree;
 pub mod theme;
+pub mod token_metrics;

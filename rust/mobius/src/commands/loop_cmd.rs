@@ -4,22 +4,26 @@
 //! and tmux-based display.
 
 use colored::Colorize;
+use std::fs;
+use std::path::Path;
 
-use crate::config::loader::read_config;
+use anyhow::Context as AnyhowContext;
+
+use crate::config::loader::read_config_with_env;
 use crate::config::paths::resolve_paths;
 use crate::context::{
     add_runtime_active_task, clear_all_runtime_active_tasks, complete_runtime_task,
-    create_session as create_mobius_session, delete_runtime_state, end_session, generate_context,
-    initialize_runtime_state, update_runtime_task_pane, update_runtime_task_tokens,
-    write_full_context_file, write_runtime_state,
+    create_session as create_mobius_session, delete_runtime_state, end_session, fail_runtime_task,
+    generate_context, initialize_runtime_state, remove_runtime_active_task,
+    update_runtime_task_pane, write_full_context_file, write_runtime_state,
 };
-use crate::executor::{calculate_parallelism, execute_parallel};
+use crate::executor::{calculate_parallelism, execute_parallel, select_model_for_task};
 use crate::jira::JiraClient;
 use crate::local_state::{
     read_local_subtasks_as_linear_issues, read_parent_spec, read_subtasks, update_subtask_status,
     write_iteration_log, IterationLogEntry, IterationStatus,
 };
-use crate::runtime_adapter::{effective_model_for_runtime, RuntimeKind};
+use crate::runtime_adapter;
 use crate::tmux::{
     create_session, create_status_pane, destroy_session, get_session_name, update_status_pane,
     LoopStatus, TmuxSession,
@@ -28,8 +32,8 @@ use crate::tracker::{
     assign_task, create_tracker, get_retry_tasks, has_permanent_failures, process_results,
 };
 use crate::tree_renderer::render_full_tree_output;
-use crate::types::context::{RuntimeActiveTask, RuntimeState};
-use crate::types::enums::{Backend, SessionStatus, TaskStatus};
+use crate::types::context::RuntimeActiveTask;
+use crate::types::enums::{AgentRuntime, Backend, Model, SessionStatus, TaskStatus};
 use crate::types::task_graph::ParentIssue;
 use crate::types::task_graph::{
     build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks, get_verification_task,
@@ -43,6 +47,7 @@ use super::submit;
 pub struct LoopOptions<'a> {
     pub backend_override: Option<&'a str>,
     pub model_override: Option<&'a str>,
+    pub thinking_level_override: Option<&'a str>,
     pub parallel_override: Option<u32>,
     pub max_iterations_override: Option<u32>,
     pub fresh: bool,
@@ -53,6 +58,7 @@ pub struct LoopOptions<'a> {
 pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     let backend_override = opts.backend_override;
     let model_override = opts.model_override;
+    let thinking_level_override = opts.thinking_level_override;
     let parallel_override = opts.parallel_override;
     let max_iterations_override = opts.max_iterations_override;
     let fresh = opts.fresh;
@@ -63,6 +69,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
             task_id,
             backend_override,
             model_override,
+            thinking_level_override,
             parallel_override,
             max_iterations_override,
             fresh,
@@ -71,7 +78,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     }
 
     let paths = resolve_paths();
-    let config = read_config(&paths.config_path).unwrap_or_default();
+    let config = read_config_with_env(&paths.config_path).unwrap_or_default();
     let backend: Backend = if let Some(b) = backend_override {
         b.parse().unwrap_or(config.backend)
     } else {
@@ -113,9 +120,38 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     if let Some(p) = parallel_override {
         execution_config.max_parallel_agents = Some(p);
     }
-    let runtime_kind = detect_runtime_kind();
-    let runtime_model = effective_model_for_runtime(runtime_kind, &execution_config, model_override);
-    apply_effective_model_override(&mut execution_config, model_override, runtime_kind);
+    if let Some(m) = model_override {
+        let trimmed = m.trim();
+        if !trimmed.is_empty() {
+            if config.runtime == AgentRuntime::Claude {
+                execution_config.model = trimmed
+                    .parse::<Model>()
+                    .unwrap_or_else(|e| {
+                        eprintln!("{}", format!("Error: {e}").red());
+                        std::process::exit(1);
+                    })
+                    .to_string();
+            } else {
+                execution_config.model = trimmed.to_string();
+            }
+        }
+    }
+
+    let execution_model_override = if config.runtime == AgentRuntime::Opencode {
+        model_override
+    } else {
+        None
+    };
+    let execution_thinking_override = if config.runtime == AgentRuntime::Opencode {
+        thinking_level_override
+    } else {
+        None
+    };
+    let runtime_model_label = runtime_adapter::effective_model_for_runtime(
+        config.runtime,
+        &execution_config,
+        execution_model_override,
+    );
 
     let max_iterations = max_iterations_override.unwrap_or(config.execution.max_iterations);
 
@@ -168,6 +204,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     let worktree_config = WorktreeConfig {
         worktree_path: execution_config.worktree_path.clone(),
         base_branch: execution_config.base_branch.clone(),
+        runtime: config.runtime,
     };
     let worktree_info = rt.block_on(create_worktree(task_id, &branch_name, &worktree_config))?;
 
@@ -231,6 +268,18 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
             }
         }
     }
+
+    let mut worktree_context_file = mirror_issue_context_to_worktree(task_id, &worktree_info.path)
+        .with_context(|| {
+            format!(
+                "Failed to stage .mobius issue context in worktree {}",
+                worktree_info.path.display()
+            )
+        })?;
+    println!(
+        "{}",
+        format!("Worktree context file: {}", worktree_context_file).dimmed()
+    );
 
     // Display ASCII tree
     println!();
@@ -364,8 +413,17 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     pane: String::new(),
                     started_at: chrono::Utc::now().to_rfc3339(),
                     worktree: Some(worktree_info.path.display().to_string()),
-                    model: Some(runtime_model.clone()),
-                    tokens: None,
+                    model: Some(if config.runtime == AgentRuntime::Claude {
+                        select_model_for_task(
+                            task,
+                            execution_config.model.parse::<Model>().unwrap_or_default(),
+                        )
+                        .to_string()
+                    } else {
+                        runtime_model_label.clone()
+                    }),
+                    input_tokens: None,
+                    output_tokens: None,
                 },
             );
         }
@@ -391,14 +449,23 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         let _ = rt.block_on(update_status_pane(&loop_status, &session_name));
 
         // Execute tasks in parallel
-        let context_file_path = crate::context::get_full_context_path(task_id);
-        let context_file_str = context_file_path.display().to_string();
+        worktree_context_file = mirror_issue_context_to_worktree(task_id, &worktree_info.path)
+            .with_context(|| {
+                format!(
+                    "Failed to refresh .mobius issue context in worktree {}",
+                    worktree_info.path.display()
+                )
+            })?;
         let results = rt.block_on(execute_parallel(
             &tasks_to_execute,
+            config.runtime,
             &execution_config,
             &worktree_info.path.display().to_string(),
             &session,
-            Some(&context_file_str),
+            Some(worktree_context_file.as_str()),
+            execution_model_override,
+            execution_thinking_override,
+            None,
             None,
         ));
 
@@ -457,25 +524,13 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
 
         // Update graph and runtime state
         for result in &verified_results {
-            let result_tokens = extract_result_total_tokens(&results, &result.identifier);
-
             if result.success && result.backend_verified {
                 graph = update_task_status(&graph, &result.task_id, TaskStatus::Done);
-                runtime_state = apply_runtime_transition(
-                    &runtime_state,
-                    &result.identifier,
-                    result_tokens,
-                    RuntimeTaskTransition::Complete,
-                );
+                runtime_state = complete_runtime_task(&runtime_state, &result.identifier);
                 update_subtask_status(task_id, &result.identifier, "done");
                 println!("{}", format!("  ✓ {}", result.identifier).green());
             } else if result.should_retry {
-                runtime_state = apply_runtime_transition(
-                    &runtime_state,
-                    &result.identifier,
-                    result_tokens,
-                    RuntimeTaskTransition::Retry,
-                );
+                runtime_state = remove_runtime_active_task(&runtime_state, &result.identifier);
                 println!(
                     "{}",
                     format!(
@@ -486,12 +541,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     .yellow()
                 );
             } else {
-                runtime_state = apply_runtime_transition(
-                    &runtime_state,
-                    &result.identifier,
-                    result_tokens,
-                    RuntimeTaskTransition::Failed,
-                );
+                runtime_state = fail_runtime_task(&runtime_state, &result.identifier);
                 println!(
                     "{}",
                     format!(
@@ -577,7 +627,14 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         let original_cwd = std::env::current_dir().ok();
         let _ = std::env::set_current_dir(&worktree_info.path);
 
-        match submit::run(Some(task_id), backend_override, model_override, false, true) {
+        match submit::run(
+            Some(task_id),
+            backend_override,
+            model_override,
+            thinking_level_override,
+            false,
+            true,
+        ) {
             Ok(()) => println!("{}", "Pull request created successfully.".green()),
             Err(e) => {
                 println!("{}", format!("⚠ PR submission failed: {}", e).yellow());
@@ -617,6 +674,7 @@ fn run_with_tui(
     task_id: &str,
     backend_override: Option<&str>,
     model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
     parallel_override: Option<u32>,
     max_iterations_override: Option<u32>,
     fresh: bool,
@@ -651,6 +709,9 @@ fn run_with_tui(
     if let Some(m) = model_override {
         args.extend(["--model".into(), m.to_string()]);
     }
+    if let Some(level) = thinking_level_override {
+        args.extend(["--thinking-level".into(), level.to_string()]);
+    }
     if let Some(p) = parallel_override {
         args.extend(["--parallel".into(), p.to_string()]);
     }
@@ -672,7 +733,7 @@ fn run_with_tui(
     let log_path = log_dir.join("loop-subprocess.log");
     let log_file = std::fs::File::create(&log_path)?;
 
-    let _child = std::process::Command::new(std::env::current_exe()?)
+    let mut child = std::process::Command::new(std::env::current_exe()?)
         .args(&args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -681,7 +742,7 @@ fn run_with_tui(
 
     // 5. Load config to get max_parallel_agents
     let paths = resolve_paths();
-    let config = read_config(&paths.config_path).unwrap_or_default();
+    let config = read_config_with_env(&paths.config_path).unwrap_or_default();
     let max_parallel_agents = if let Some(p) = parallel_override {
         p as usize
     } else {
@@ -689,13 +750,19 @@ fn run_with_tui(
     };
 
     // 6. Run TUI dashboard (blocks until user exits or execution completes)
-    crate::tui::dashboard::run_dashboard(
+    let dashboard_result = crate::tui::dashboard::run_dashboard(
         parent_id,
         parent_title,
         graph,
         runtime_state_path,
         max_parallel_agents,
-    )?;
+    );
+
+    // Reap the child if it already exited (avoids lingering zombies), but do not
+    // block if the user intentionally left the dashboard while execution continues.
+    let _ = child.try_wait();
+
+    dashboard_result?;
 
     Ok(())
 }
@@ -761,6 +828,58 @@ async fn fetch_parent_issue(task_id: &str, backend: &Backend) -> Result<ParentIs
     }
 }
 
+fn mirror_issue_context_to_worktree(task_id: &str, worktree_path: &Path) -> anyhow::Result<String> {
+    let source_issue_path = crate::context::get_context_path(task_id);
+    if !source_issue_path.exists() {
+        anyhow::bail!("Issue context not found at {}", source_issue_path.display());
+    }
+
+    let target_mobius_path = worktree_path.join(".mobius");
+    let target_issue_path = target_mobius_path.join("issues").join(task_id);
+
+    if source_issue_path != target_issue_path {
+        copy_dir_recursive(&source_issue_path, &target_issue_path)?;
+    }
+
+    let gitignore_path = target_mobius_path.join(".gitignore");
+    if !gitignore_path.exists() {
+        fs::create_dir_all(&target_mobius_path)?;
+        fs::write(&gitignore_path, "state/\n")?;
+    }
+
+    let context_file = target_issue_path.join("context.json");
+    if !context_file.exists() {
+        anyhow::bail!(
+            "Mirrored context file not found at {}",
+            context_file.display()
+        );
+    }
+
+    Ok(context_file.to_string_lossy().to_string())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    if !src.exists() {
+        anyhow::bail!("Source directory does not exist: {}", src.display());
+    }
+
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn format_elapsed(duration: std::time::Duration) -> String {
     let seconds = duration.as_secs();
     let minutes = seconds / 60;
@@ -775,75 +894,12 @@ fn format_elapsed(duration: std::time::Duration) -> String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeTaskTransition {
-    Complete,
-    Retry,
-    Failed,
-}
-
-fn extract_result_total_tokens(
-    results: &[crate::executor::ExecutionResult],
-    task_identifier: &str,
-) -> Option<u64> {
-    results
-        .iter()
-        .find(|result| result.identifier == task_identifier)
-        .and_then(|result| result.token_usage.as_ref())
-        .and_then(|usage| usage.total_tokens)
-}
-
-fn apply_runtime_transition(
-    state: &RuntimeState,
-    task_id: &str,
-    tokens: Option<u64>,
-    transition: RuntimeTaskTransition,
-) -> RuntimeState {
-    let merged_state = update_runtime_task_tokens(state, task_id, tokens);
-
-    match transition {
-        RuntimeTaskTransition::Complete => complete_runtime_task(&merged_state, task_id),
-        RuntimeTaskTransition::Retry => {
-            crate::context::remove_runtime_active_task(&merged_state, task_id)
-        }
-        RuntimeTaskTransition::Failed => crate::context::fail_runtime_task(&merged_state, task_id),
-    }
-}
-
 fn ctrlc_handler(task_id: &str) {
     let task_id = task_id.to_string();
     let _ = ctrlc::set_handler(move || {
         clear_all_runtime_active_tasks(&task_id);
         std::process::exit(130);
     });
-}
-
-fn detect_runtime_kind() -> RuntimeKind {
-    match std::env::var("MOBIUS_RUNTIME") {
-        Ok(raw) if raw.eq_ignore_ascii_case("opencode") => RuntimeKind::Opencode,
-        Ok(raw) if raw.eq_ignore_ascii_case("claude") => RuntimeKind::Claude,
-        _ => std::env::current_exe()
-            .ok()
-            .and_then(|path| {
-                path.file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .map(|stem| stem.to_ascii_lowercase())
-            })
-            .filter(|stem| stem.contains("opencode"))
-            .map(|_| RuntimeKind::Opencode)
-            .unwrap_or(RuntimeKind::Claude),
-    }
-}
-
-fn apply_effective_model_override(
-    execution_config: &mut crate::types::ExecutionConfig,
-    model_override: Option<&str>,
-    runtime_kind: RuntimeKind,
-) {
-    let effective = effective_model_for_runtime(runtime_kind, execution_config, model_override);
-    if let Ok(model) = effective.parse() {
-        execution_config.model = model;
-    }
 }
 
 fn validate_task_id(task_id: &str, backend: &Backend) -> bool {
@@ -853,41 +909,4 @@ fn validate_task_id(task_id: &str, backend: &Backend) -> bool {
         Backend::Local => regex::Regex::new(r"^(LOC-\d+|task-\d+)$").unwrap(),
     };
     pattern.is_match(task_id)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{apply_effective_model_override, RuntimeKind};
-    use crate::types::enums::Model;
-    use crate::types::ExecutionConfig;
-
-    #[test]
-    fn test_apply_effective_model_override_claude_ignores_raw_override() {
-        let mut config = ExecutionConfig::default();
-        config.model = Model::Opus;
-
-        apply_effective_model_override(&mut config, Some("gpt-5-mini"), RuntimeKind::Claude);
-
-        assert_eq!(config.model, Model::Opus);
-    }
-
-    #[test]
-    fn test_apply_effective_model_override_opencode_uses_parseable_override() {
-        let mut config = ExecutionConfig::default();
-        config.model = Model::Opus;
-
-        apply_effective_model_override(&mut config, Some("haiku"), RuntimeKind::Opencode);
-
-        assert_eq!(config.model, Model::Haiku);
-    }
-
-    #[test]
-    fn test_apply_effective_model_override_opencode_keeps_existing_for_unparseable_override() {
-        let mut config = ExecutionConfig::default();
-        config.model = Model::Sonnet;
-
-        apply_effective_model_override(&mut config, Some("gpt-5-mini"), RuntimeKind::Opencode);
-
-        assert_eq!(config.model, Model::Sonnet);
-    }
 }

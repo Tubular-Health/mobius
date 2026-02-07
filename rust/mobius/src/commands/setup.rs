@@ -3,16 +3,16 @@
 use colored::Colorize;
 use std::path::Path;
 
-use crate::config::loader::{config_exists, write_config};
+use crate::config::loader::{config_exists, read_config_with_env, write_config};
 use crate::config::paths::{
-    find_local_config, get_global_config_dir, get_paths_for_type, get_shortcuts_install_path,
-    resolve_paths,
+    find_local_config, get_global_config_dir, get_paths_for_type_with_runtime,
+    get_settings_path_for_runtime, get_shortcuts_install_path, resolve_paths,
 };
 use crate::config::setup::{
-    add_shortcuts_source_line, copy_commands, copy_shortcuts, copy_skills, ensure_claude_settings,
+    add_shortcuts_source_line, copy_commands, copy_shortcuts, copy_skills, ensure_runtime_settings,
 };
 use crate::types::config::{ExecutionConfig, LoopConfig, PathConfigType};
-use crate::types::enums::{Backend, Model};
+use crate::types::enums::{AgentRuntime, Backend, Model};
 
 pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyhow::Result<()> {
     // --update-skills: Skip config wizard, just update skills/commands
@@ -22,7 +22,10 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
         let has_global_config = global_config_path.exists();
 
         if local_config.is_none() && !has_global_config {
-            eprintln!("{}", "\nError: No existing Mobius installation found.".red());
+            eprintln!(
+                "{}",
+                "\nError: No existing Mobius installation found.".red()
+            );
             eprintln!(
                 "{}",
                 "Run `mobius setup` first to create a configuration.\n".dimmed()
@@ -33,6 +36,9 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
         println!("{}", "\nUpdating skills and commands...\n".bold());
 
         let paths = resolve_paths();
+        let runtime = read_config_with_env(&paths.config_path)
+            .map(|c| c.runtime)
+            .unwrap_or(AgentRuntime::Claude);
         let bundled_skills = get_bundled_skills_dir();
 
         if bundled_skills.exists() {
@@ -46,18 +52,23 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
         let bundled_commands = get_bundled_commands_dir();
         if bundled_commands.exists() {
             println!("{}", "Copying commands...".dimmed());
-            copy_commands(&bundled_commands, &paths)?;
+            copy_commands(&bundled_commands, &paths, runtime)?;
         }
 
         if paths.config_type == PathConfigType::Local {
             let config_parent = Path::new(&paths.config_path)
                 .parent()
                 .unwrap_or(Path::new("."));
+            let settings_path = get_settings_path_for_runtime(config_parent, runtime);
             println!(
                 "{}",
-                "Ensuring .mobius/ permissions in .claude/settings.json...".dimmed()
+                format!(
+                    "Ensuring .mobius/ permissions in {}...",
+                    settings_path.display()
+                )
+                .dimmed()
             );
-            ensure_claude_settings(config_parent)?;
+            ensure_runtime_settings(config_parent, runtime)?;
         }
 
         println!("{}", "\n✓ Skills and commands updated!\n".green());
@@ -105,9 +116,10 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
     let install_type_idx = dialoguer::Select::new()
         .with_prompt("Installation type")
         .items(&[
-            "Local (this project) - Config at ./mobius.config.yaml, skills at ./.claude/skills/".to_string(),
+            "Local (this project) - Config at ./mobius.config.yaml, runtime assets at ./.<runtime>/"
+                .to_string(),
             format!(
-                "Global (user-wide) - Config at {}/config.yaml, skills at ~/.claude/skills/",
+                "Global (user-wide) - Config at {}/config.yaml, runtime assets at ~/.<runtime>/",
                 get_global_config_dir().display()
             ),
         ])
@@ -120,7 +132,35 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
         PathConfigType::Global
     };
 
-    let paths = get_paths_for_type(install_type, None);
+    let default_paths = get_paths_for_type_with_runtime(install_type, None, AgentRuntime::Claude);
+    let runtime = if config_exists(&default_paths.config_path) {
+        read_config_with_env(&default_paths.config_path)
+            .map(|c| c.runtime)
+            .unwrap_or(AgentRuntime::Claude)
+    } else {
+        let runtime_idx = dialoguer::Select::new()
+            .with_prompt("Agent runtime")
+            .items(&[
+                "Claude - Use Claude Code runtime",
+                "OpenCode - Use OpenCode runtime",
+            ])
+            .default(0)
+            .interact()?;
+        if runtime_idx == 0 {
+            AgentRuntime::Claude
+        } else {
+            AgentRuntime::Opencode
+        }
+    };
+
+    if config_exists(&default_paths.config_path) {
+        println!(
+            "{}",
+            format!("Using runtime from existing config: {runtime}").dimmed()
+        );
+    }
+
+    let paths = get_paths_for_type_with_runtime(install_type, None, runtime);
 
     // Check for existing config
     if config_exists(&paths.config_path) {
@@ -160,7 +200,7 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
 
     // 3. Model
     let model_idx = dialoguer::Select::new()
-        .with_prompt("Claude model")
+        .with_prompt("Model profile")
         .items(&[
             "Opus - Most capable, best for complex tasks",
             "Sonnet - Balanced speed and capability",
@@ -209,11 +249,12 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
 
     // Build config
     let config = LoopConfig {
+        runtime,
         backend,
         execution: ExecutionConfig {
             delay_seconds,
             max_iterations,
-            model,
+            model: model.to_string(),
             sandbox,
             ..ExecutionConfig::default()
         },
@@ -241,7 +282,7 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
     let bundled_commands = get_bundled_commands_dir();
     if bundled_commands.exists() {
         println!("{}", "Copying commands...".dimmed());
-        copy_commands(&bundled_commands, &paths)?;
+        copy_commands(&bundled_commands, &paths, runtime)?;
     }
 
     // Copy shortcuts
@@ -264,7 +305,10 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
 
         if zshrc.exists() {
             add_shortcuts_source_line(&zshrc)?;
-            println!("  {}", format!("Added source line to {}", zshrc.display()).dimmed());
+            println!(
+                "  {}",
+                format!("Added source line to {}", zshrc.display()).dimmed()
+            );
         } else if bashrc.exists() {
             add_shortcuts_source_line(&bashrc)?;
             println!(
@@ -285,20 +329,22 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
         let project_dir = Path::new(&paths.config_path)
             .parent()
             .unwrap_or(Path::new("."));
+        let settings_path = get_settings_path_for_runtime(project_dir, runtime);
         println!(
             "{}",
-            "Ensuring .mobius/ permissions in .claude/settings.json...".dimmed()
+            format!(
+                "Ensuring .mobius/ permissions in {}...",
+                settings_path.display()
+            )
+            .dimmed()
         );
-        ensure_claude_settings(project_dir)?;
+        ensure_runtime_settings(project_dir, runtime)?;
     }
 
     println!("{}", "\n✓ Setup complete!\n".green());
 
     println!("{}", "Next steps:".bold());
-    println!(
-        "  1. Run {} to verify installation",
-        "mobius doctor".cyan()
-    );
+    println!("  1. Run {} to verify installation", "mobius doctor".cyan());
     println!(
         "  2. Run {} to start executing tasks",
         "mobius <TASK-ID>".cyan()
@@ -311,7 +357,7 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
         "ms".cyan()
     );
 
-    if backend == Backend::Linear {
+    if backend == Backend::Linear && runtime == AgentRuntime::Claude {
         println!(
             "\n{}",
             "Note: Linear MCP should be auto-configured in Claude Code.".dimmed()

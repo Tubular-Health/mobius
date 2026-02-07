@@ -116,10 +116,7 @@ pub fn run(
     }
 
     // Execute push
-    println!(
-        "Pushing {} update(s) to {}...",
-        total_pending, backend
-    );
+    println!("Pushing {} update(s) to {}...", total_pending, backend);
 
     let rt = tokio::runtime::Runtime::new()?;
     let mut success_count = 0;
@@ -145,7 +142,12 @@ pub fn run(
             mark_update_failed(
                 issue_parent_id,
                 &results.last().unwrap().update_id,
-                results.last().unwrap().error.as_deref().unwrap_or("Unknown error"),
+                results
+                    .last()
+                    .unwrap()
+                    .error
+                    .as_deref()
+                    .unwrap_or("Unknown error"),
             );
         }
 
@@ -211,7 +213,13 @@ pub fn push_pending_updates_for_task(
 
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
-        Err(_) => return (0, pending.len(), vec!["Failed to create runtime".to_string()]),
+        Err(_) => {
+            return (
+                0,
+                pending.len(),
+                vec!["Failed to create runtime".to_string()],
+            )
+        }
     };
 
     let mut success = 0;
@@ -304,9 +312,10 @@ fn get_issues_to_push(parent_id: Option<&str>, all: bool) -> Vec<String> {
         let pending_path = get_pending_updates_path(pid);
         if pending_path.exists() {
             let queue = read_pending_updates(pid);
-            let has_pending = queue.updates.iter().any(|u| {
-                u.synced_at.is_none() && u.error.is_none()
-            });
+            let has_pending = queue
+                .updates
+                .iter()
+                .any(|u| u.synced_at.is_none() && u.error.is_none());
             if has_pending {
                 return vec![pid.to_string()];
             }
@@ -321,9 +330,10 @@ fn get_issues_to_push(parent_id: Option<&str>, all: bool) -> Vec<String> {
                 if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                     if let Some(name) = entry.file_name().to_str() {
                         let queue = read_pending_updates(name);
-                        let has_pending = queue.updates.iter().any(|u| {
-                            u.synced_at.is_none() && u.error.is_none()
-                        });
+                        let has_pending = queue
+                            .updates
+                            .iter()
+                            .any(|u| u.synced_at.is_none() && u.error.is_none());
                         if has_pending {
                             issues.push(name.to_string());
                         }
@@ -408,10 +418,7 @@ async fn push_update(update: &serde_json::Value, backend: &Backend) -> anyhow::R
                 .get("issueId")
                 .and_then(|v| v.as_str())
                 .unwrap_or(&identifier);
-            let body = update
-                .get("body")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let body = update.get("body").and_then(|v| v.as_str()).unwrap_or("");
 
             match backend {
                 Backend::Jira => {
@@ -488,7 +495,10 @@ fn log_push_result(parent_id: &str, result: &PushResult) {
 
     let context_dir = get_context_path(parent_id);
     let _ = fs::create_dir_all(&context_dir);
-    let _ = fs::write(&log_path, serde_json::to_string_pretty(&log).unwrap_or_default());
+    let _ = fs::write(
+        &log_path,
+        serde_json::to_string_pretty(&log).unwrap_or_default(),
+    );
 }
 
 fn display_pending_changes(updates: &[(String, PendingUpdate)], _backend: &Backend) {
@@ -496,10 +506,7 @@ fn display_pending_changes(updates: &[(String, PendingUpdate)], _backend: &Backe
         std::collections::HashMap::new();
 
     for (parent_id, update) in updates {
-        grouped
-            .entry(parent_id.clone())
-            .or_default()
-            .push(update);
+        grouped.entry(parent_id.clone()).or_default().push(update);
     }
 
     for (parent_id, pending_updates) in &grouped {

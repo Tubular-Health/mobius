@@ -187,8 +187,7 @@ impl JiraClient {
     pub fn new() -> Result<Self, JiraError> {
         let host = std::env::var("JIRA_HOST").map_err(|_| JiraError::MissingHost)?;
         let email = std::env::var("JIRA_EMAIL").map_err(|_| JiraError::MissingEmail)?;
-        let api_token =
-            std::env::var("JIRA_API_TOKEN").map_err(|_| JiraError::MissingApiToken)?;
+        let api_token = std::env::var("JIRA_API_TOKEN").map_err(|_| JiraError::MissingApiToken)?;
 
         // Normalize host - ensure it has https:// prefix
         let normalized_host = if host.starts_with("https://") || host.starts_with("http://") {
@@ -247,11 +246,7 @@ impl JiraClient {
         self.handle_response(resp, path).await
     }
 
-    async fn post_no_response<B: Serialize>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> Result<(), JiraError> {
+    async fn post_no_response<B: Serialize>(&self, path: &str, body: &B) -> Result<(), JiraError> {
         let url = format!("{}/{}", self.base_url, path.trim_start_matches('/'));
         let resp = self
             .client
@@ -289,8 +284,18 @@ impl JiraClient {
         }
     }
 
-    fn map_http_error<T>(&self, status: StatusCode, path: &str, body: &str) -> Result<T, JiraError> {
-        warn!("Jira API error: HTTP {} on {}: {}", status.as_u16(), path, body);
+    fn map_http_error<T>(
+        &self,
+        status: StatusCode,
+        path: &str,
+        body: &str,
+    ) -> Result<T, JiraError> {
+        warn!(
+            "Jira API error: HTTP {} on {}: {}",
+            status.as_u16(),
+            path,
+            body
+        );
         match status {
             StatusCode::UNAUTHORIZED => Err(JiraError::AuthFailed),
             StatusCode::FORBIDDEN => Err(JiraError::PermissionDenied),
@@ -327,10 +332,7 @@ impl JiraClient {
     }
 
     /// Fetch the current status name for a Jira issue.
-    pub async fn fetch_jira_issue_status(
-        &self,
-        issue_key: &str,
-    ) -> Result<String, JiraError> {
+    pub async fn fetch_jira_issue_status(&self, issue_key: &str) -> Result<String, JiraError> {
         let resp: JiraIssueResponse = self.get(&format!("issue/{issue_key}")).await?;
 
         let status_name = resp
@@ -386,6 +388,7 @@ impl JiraClient {
                         blocked_by,
                         blocks: Vec::new(),
                     }),
+                    scoring: None,
                 });
             }
         }
@@ -402,9 +405,7 @@ impl JiraClient {
         issue_key: &str,
         target_status: &str,
     ) -> Result<(), JiraError> {
-        let resp: TransitionsResponse = self
-            .get(&format!("issue/{issue_key}/transitions"))
-            .await?;
+        let resp: TransitionsResponse = self.get(&format!("issue/{issue_key}/transitions")).await?;
 
         let transitions = resp.transitions.unwrap_or_default();
         let target_lower = target_status.to_lowercase();
@@ -424,11 +425,10 @@ impl JiraClient {
                 .iter()
                 .map(|t| {
                     let name = t.name.as_deref().unwrap_or("?");
-                    let to = t
-                        .to
-                        .as_ref()
-                        .and_then(|to| to.name.as_deref())
-                        .unwrap_or("?");
+                    let to =
+                        t.to.as_ref()
+                            .and_then(|to| to.name.as_deref())
+                            .unwrap_or("?");
                     format!("{name} → {to}")
                 })
                 .collect::<Vec<_>>()
@@ -505,7 +505,10 @@ impl JiraClient {
         }
 
         if let Some(ref parent_key) = options.parent_key {
-            fields_obj.insert("parent".to_string(), serde_json::json!({ "key": parent_key }));
+            fields_obj.insert(
+                "parent".to_string(),
+                serde_json::json!({ "key": parent_key }),
+            );
         }
 
         if let Some(ref labels) = options.labels {
@@ -567,18 +570,15 @@ fn extract_blocked_by_relations(issuelinks: Option<&Vec<JiraIssueLink>>) -> Vec<
 
     for link in links {
         // Check for "is blocked by" relationship (inward link)
-        let is_blocking_relation = link
-            .link_type
-            .as_ref()
-            .is_some_and(|lt| {
-                lt.inward
+        let is_blocking_relation = link.link_type.as_ref().is_some_and(|lt| {
+            lt.inward
+                .as_ref()
+                .is_some_and(|s| s.to_lowercase().contains("blocked by"))
+                || lt
+                    .name
                     .as_ref()
-                    .is_some_and(|s| s.to_lowercase().contains("blocked by"))
-                    || lt
-                        .name
-                        .as_ref()
-                        .is_some_and(|n| n.to_lowercase() == "blocks")
-            });
+                    .is_some_and(|n| n.to_lowercase() == "blocks")
+        });
 
         if is_blocking_relation {
             if let Some(ref inward) = link.inward_issue {

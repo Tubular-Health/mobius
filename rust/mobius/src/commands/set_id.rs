@@ -82,11 +82,7 @@ pub fn run(task_id: Option<&str>, backend: Option<&str>, clear: bool) -> anyhow:
         set_current_session_pointer(task_id)?;
         println!(
             "{}",
-            format!(
-                "Current task set to {} (existing session)",
-                task_id.bold()
-            )
-            .green()
+            format!("Current task set to {} (existing session)", task_id.bold()).green()
         );
     } else {
         create_session(task_id, resolved_backend, None)?;

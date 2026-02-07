@@ -3,26 +3,30 @@
 //! Coordinates worktree isolation, tmux-based agent spawning, task graph
 //! management, and runtime state updates. Ported from `src/commands/loop.ts`.
 
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context as AnyhowContext, Result};
 use chrono::Utc;
 use colored::Colorize;
+use tokio::time::Duration;
 
 use crate::config;
 use crate::context;
 use crate::executor;
 use crate::local_state;
-use crate::runtime_adapter::{effective_model_for_runtime, RuntimeKind};
+use crate::runtime_adapter;
+use crate::stream_json;
 use crate::tmux;
 use crate::tracker;
 use crate::tree_renderer;
 use crate::types::context::{RuntimeActiveTask, RuntimeState};
-use crate::types::enums::{Backend, SessionStatus, TaskStatus};
+use crate::types::enums::{AgentRuntime, Backend, Model, SessionStatus, TaskStatus};
 use crate::types::task_graph::{
     build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks, get_verification_task,
     update_task_status, TaskGraph,
@@ -54,7 +58,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // 1. Resolve configuration
     // -----------------------------------------------------------------------
     let paths = config::resolve_paths();
-    let loop_config = match config::read_config(&paths.config_path) {
+    let loop_config = match config::read_config_with_env(&paths.config_path) {
         Ok(c) => c,
         Err(_) => {
             eprintln!(
@@ -84,10 +88,32 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     if let Some(p) = options.parallel {
         exec_config.max_parallel_agents = Some(p);
     }
-    apply_effective_model_override(&mut exec_config, options.model.as_deref(), detect_runtime_kind());
+    if let Some(ref m) = options.model {
+        if loop_config.runtime == AgentRuntime::Opencode {
+            exec_config.model = m.trim().to_string();
+        } else {
+            exec_config.model = Model::from_str(m)
+                .unwrap_or_else(|e| {
+                    eprintln!("{}", format!("Error: {e}").red());
+                    process::exit(1);
+                })
+                .to_string();
+        }
+    }
     if options.no_sandbox {
         exec_config.sandbox = false;
     }
+
+    let execution_model_override = if loop_config.runtime == AgentRuntime::Opencode {
+        options.model.as_deref()
+    } else {
+        None
+    };
+    let runtime_model_label = runtime_adapter::effective_model_for_runtime(
+        loop_config.runtime,
+        &exec_config,
+        execution_model_override,
+    );
 
     let max_iterations = options.max_iterations.unwrap_or(exec_config.max_iterations);
 
@@ -178,6 +204,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     let wt_config = WorktreeConfig {
         worktree_path: exec_config.worktree_path.clone(),
         base_branch: exec_config.base_branch.clone(),
+        runtime: loop_config.runtime,
     };
     let worktree_info = worktree::create_worktree(&task_id, &branch_name, &wt_config).await?;
 
@@ -198,6 +225,15 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     }
 
     let worktree_path = worktree_info.path.to_string_lossy().to_string();
+
+    // Create output directory for capturing raw stream-json output (token extraction)
+    let output_dir: PathBuf = std::env::temp_dir().join("mobius").join(&task_id);
+    if let Err(e) = std::fs::create_dir_all(&output_dir) {
+        eprintln!(
+            "{}",
+            format!("Warning: Could not create output dir for token tracking: {e}").yellow()
+        );
+    }
 
     // -----------------------------------------------------------------------
     // 9. Create tmux session
@@ -241,17 +277,27 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // -----------------------------------------------------------------------
     println!("{}", "Generating local context for skills...".dimmed());
     let issue_context = context::generate_context(&task_id, Some(&worktree_path), false)?;
-    let context_file_path = match issue_context {
+    match issue_context {
         Some(ref ctx) => {
             let path = context::write_full_context_file(&task_id, ctx)?;
             println!("{}", format!("Context file: {path}").dimmed());
-            Some(path)
         }
         None => {
             eprintln!("{}", "Warning: Failed to generate issue context".yellow());
-            None
         }
-    };
+    }
+
+    let mut worktree_context_file = mirror_issue_context_to_worktree(&task_id, &worktree_info.path)
+        .with_context(|| {
+            format!(
+                "Failed to stage .mobius issue context in worktree {}",
+                worktree_info.path.display()
+            )
+        })?;
+    println!(
+        "{}",
+        format!("Worktree context file: {}", worktree_context_file).dimmed()
+    );
 
     // -----------------------------------------------------------------------
     // 12. Display initial tree
@@ -407,8 +453,17 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         pane: String::new(),
                         started_at: now.clone(),
                         worktree: Some(worktree_path.clone()),
-                        model: None,
-                        tokens: None,
+                        model: Some(if loop_config.runtime == AgentRuntime::Claude {
+                            executor::select_model_for_task(
+                                task,
+                                exec_config.model.parse::<Model>().unwrap_or_default(),
+                            )
+                            .to_string()
+                        } else {
+                            runtime_model_label.clone()
+                        }),
+                        input_tokens: None,
+                        output_tokens: None,
                     },
                 );
             }
@@ -434,25 +489,63 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
             };
             tmux::update_status_pane(&loop_status, &session_name).await?;
 
-            // Execute tasks in parallel
-            let ctx_path_ref = context_file_path.as_deref();
+            // Execute tasks in parallel with refreshed context and background token tracking
+            worktree_context_file = mirror_issue_context_to_worktree(&task_id, &worktree_info.path)
+                .with_context(|| {
+                    format!(
+                        "Failed to refresh .mobius issue context in worktree {}",
+                        worktree_info.path.display()
+                    )
+                })?;
+            let ctx_path_ref = Some(worktree_context_file.as_str());
+
+            // Spawn background task to poll token usage from output files
+            let live_token_task_id = task_id.clone();
+            let live_token_dir = output_dir.clone();
+            let live_token_identifiers: Vec<String> = tasks_to_execute
+                .iter()
+                .map(|t| t.identifier.clone())
+                .collect();
+            let live_token_handle = tokio::spawn(async move {
+                update_live_tokens_loop(
+                    &live_token_task_id,
+                    &live_token_dir,
+                    &live_token_identifiers,
+                )
+                .await;
+            });
             let results = executor::execute_parallel(
                 &tasks_to_execute,
+                loop_config.runtime,
                 &exec_config,
                 &worktree_path,
                 &session,
                 ctx_path_ref,
+                execution_model_override,
                 None,
+                None,
+                Some(&output_dir),
             )
             .await;
 
-            // Update runtime state with real pane IDs
+            // Stop background token tracking
+            live_token_handle.abort();
+
+            // Update runtime state with real pane IDs and token data
             for result in &results {
                 if let Some(ref pane_id) = result.pane_id {
                     runtime_state = context::update_runtime_task_pane(
                         &runtime_state,
                         &result.identifier,
                         pane_id,
+                    );
+                }
+                if result.input_tokens.is_some() || result.output_tokens.is_some() {
+                    runtime_state = context::update_runtime_task_tokens(
+                        &runtime_state,
+                        &result.identifier,
+                        result.input_tokens,
+                        result.output_tokens,
                     );
                 }
             }
@@ -489,8 +582,6 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
 
             // Process each verified result
             for result in &verified_results {
-                let result_tokens = extract_result_total_tokens(&results, &result.identifier);
-
                 if result.success && result.backend_verified {
                     // VG fast-completion check
                     let is_vg_task = result.identifier.to_lowercase().contains("vg")
@@ -528,23 +619,15 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                                 retry_queue.push(task.clone());
                             }
                         }
-                        runtime_state = apply_runtime_transition(
-                            &runtime_state,
-                            &result.identifier,
-                            result_tokens,
-                            RuntimeTaskTransition::Retry,
-                        );
+                        runtime_state =
+                            context::remove_runtime_active_task(&runtime_state, &result.identifier);
                         continue;
                     }
 
                     // Mark done
                     graph = update_task_status(&graph, &result.task_id, TaskStatus::Done);
-                    runtime_state = apply_runtime_transition(
-                        &runtime_state,
-                        &result.identifier,
-                        result_tokens,
-                        RuntimeTaskTransition::Complete,
-                    );
+                    runtime_state =
+                        context::complete_runtime_task(&runtime_state, &result.identifier);
                     local_state::update_subtask_status(&task_id, &result.identifier, "done");
                     println!(
                         "{}",
@@ -560,12 +643,8 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         .green()
                     );
                 } else if result.should_retry {
-                    runtime_state = apply_runtime_transition(
-                        &runtime_state,
-                        &result.identifier,
-                        result_tokens,
-                        RuntimeTaskTransition::Retry,
-                    );
+                    runtime_state =
+                        context::remove_runtime_active_task(&runtime_state, &result.identifier);
                     println!(
                         "{}",
                         format!(
@@ -593,12 +672,8 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                                 retry_queue.push(task.clone());
                             }
                         }
-                        runtime_state = apply_runtime_transition(
-                            &runtime_state,
-                            &result.identifier,
-                            result_tokens,
-                            RuntimeTaskTransition::Retry,
-                        );
+                        runtime_state =
+                            context::remove_runtime_active_task(&runtime_state, &result.identifier);
                         println!(
                             "{}",
                             format!(
@@ -609,12 +684,8 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         );
                     } else {
                         // Actual permanent failure
-                        runtime_state = apply_runtime_transition(
-                            &runtime_state,
-                            &result.identifier,
-                            result_tokens,
-                            RuntimeTaskTransition::Failed,
-                        );
+                        runtime_state =
+                            context::fail_runtime_task(&runtime_state, &result.identifier);
                         println!(
                             "{}",
                             format!(
@@ -635,7 +706,8 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                 }
             }
 
-            // Write updated runtime state
+            // Recalculate total tokens and write updated runtime state
+            runtime_state = context::recalculate_total_tokens(&runtime_state);
             context::write_runtime_state(&runtime_state)?;
 
             // Check for permanent failures
@@ -778,64 +850,113 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RuntimeTaskTransition {
-    Complete,
-    Retry,
-    Failed,
-}
-
-fn extract_result_total_tokens(
-    results: &[executor::ExecutionResult],
-    task_identifier: &str,
-) -> Option<u64> {
-    results
-        .iter()
-        .find(|result| result.identifier == task_identifier)
-        .and_then(|result| result.token_usage.as_ref())
-        .and_then(|usage| usage.total_tokens)
-}
-
-fn apply_runtime_transition(
-    state: &RuntimeState,
-    task_id: &str,
-    tokens: Option<u64>,
-    transition: RuntimeTaskTransition,
-) -> RuntimeState {
-    let merged_state = context::update_runtime_task_tokens(state, task_id, tokens);
-
-    match transition {
-        RuntimeTaskTransition::Complete => context::complete_runtime_task(&merged_state, task_id),
-        RuntimeTaskTransition::Retry => context::remove_runtime_active_task(&merged_state, task_id),
-        RuntimeTaskTransition::Failed => context::fail_runtime_task(&merged_state, task_id),
+fn mirror_issue_context_to_worktree(task_id: &str, worktree_path: &Path) -> Result<String> {
+    let source_issue_path = context::get_context_path(task_id);
+    if !source_issue_path.exists() {
+        anyhow::bail!("Issue context not found at {}", source_issue_path.display());
     }
-}
 
-fn detect_runtime_kind() -> RuntimeKind {
-    match std::env::var("MOBIUS_RUNTIME") {
-        Ok(raw) if raw.eq_ignore_ascii_case("opencode") => RuntimeKind::Opencode,
-        Ok(raw) if raw.eq_ignore_ascii_case("claude") => RuntimeKind::Claude,
-        _ => std::env::current_exe()
-            .ok()
-            .and_then(|path| {
-                path.file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .map(|stem| stem.to_ascii_lowercase())
-            })
-            .filter(|stem| stem.contains("opencode"))
-            .map(|_| RuntimeKind::Opencode)
-            .unwrap_or(RuntimeKind::Claude),
+    let target_mobius_path = worktree_path.join(".mobius");
+    let target_issue_path = target_mobius_path.join("issues").join(task_id);
+
+    if source_issue_path != target_issue_path {
+        copy_dir_recursive(&source_issue_path, &target_issue_path)?;
     }
+
+    let gitignore_path = target_mobius_path.join(".gitignore");
+    if !gitignore_path.exists() {
+        fs::create_dir_all(&target_mobius_path)?;
+        fs::write(&gitignore_path, "state/\n")?;
+    }
+
+    let context_file = target_issue_path.join("context.json");
+    if !context_file.exists() {
+        anyhow::bail!(
+            "Mirrored context file not found at {}",
+            context_file.display()
+        );
+    }
+
+    Ok(context_file.to_string_lossy().to_string())
 }
 
-fn apply_effective_model_override(
-    execution_config: &mut crate::types::ExecutionConfig,
-    model_override: Option<&str>,
-    runtime_kind: RuntimeKind,
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    if !src.exists() {
+        anyhow::bail!("Source directory does not exist: {}", src.display());
+    }
+
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Periodically poll output files and update runtime state with live token data.
+///
+/// Runs every 3 seconds, reading current token usage from each agent's output file
+/// and updating the runtime state on disk (with file locking for safe concurrent access).
+async fn update_live_tokens_loop(
+    parent_id: &str,
+    output_dir: &std::path::Path,
+    identifiers: &[String],
 ) {
-    let effective = effective_model_for_runtime(runtime_kind, execution_config, model_override);
-    if let Ok(model) = effective.parse() {
-        execution_config.model = model;
+    loop {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        let _ = context::with_runtime_state_sync(parent_id, |state| {
+            let mut s = match state {
+                Some(s) => s,
+                None => {
+                    return RuntimeState {
+                        parent_id: parent_id.to_string(),
+                        parent_title: String::new(),
+                        active_tasks: vec![],
+                        completed_tasks: vec![],
+                        failed_tasks: vec![],
+                        started_at: Utc::now().to_rfc3339(),
+                        updated_at: Utc::now().to_rfc3339(),
+                        loop_pid: None,
+                        total_tasks: None,
+                        backend_statuses: None,
+                        total_input_tokens: None,
+                        total_output_tokens: None,
+                    }
+                }
+            };
+
+            let mut changed = false;
+            for identifier in identifiers {
+                let output_file = output_dir.join(format!("{}.jsonl", identifier));
+                if let Some(usage) = stream_json::parse_current_tokens(&output_file) {
+                    if let Some(task) = s.active_tasks.iter_mut().find(|t| t.id == *identifier) {
+                        let new_input = Some(usage.input_tokens);
+                        let new_output = Some(usage.output_tokens);
+                        if task.input_tokens != new_input || task.output_tokens != new_output {
+                            task.input_tokens = new_input;
+                            task.output_tokens = new_output;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+
+            if changed {
+                s = context::recalculate_total_tokens(&s);
+            }
+
+            s
+        });
     }
 }
 
@@ -874,46 +995,6 @@ fn format_elapsed(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::context::RuntimeActiveTask;
-    use crate::types::enums::Model;
-    use crate::types::ExecutionConfig;
-
-    fn make_state() -> RuntimeState {
-        RuntimeState {
-            parent_id: "MOB-263".to_string(),
-            parent_title: "Parent".to_string(),
-            active_tasks: Vec::new(),
-            completed_tasks: Vec::new(),
-            failed_tasks: Vec::new(),
-            started_at: "2026-02-06T00:00:00Z".to_string(),
-            updated_at: "2026-02-06T00:00:00Z".to_string(),
-            loop_pid: None,
-            total_tasks: Some(3),
-            tokens: None,
-            backend_statuses: None,
-        }
-    }
-
-    fn make_active_task(id: &str) -> RuntimeActiveTask {
-        RuntimeActiveTask {
-            id: id.to_string(),
-            pid: 0,
-            pane: "%1".to_string(),
-            started_at: "2026-02-06T00:00:01Z".to_string(),
-            worktree: Some("/tmp/worktree".to_string()),
-            model: None,
-            tokens: None,
-        }
-    }
-
-    fn failed_task_tokens(state: &RuntimeState, id: &str) -> Option<u64> {
-        state.failed_tasks.iter().find_map(|entry| {
-            serde_json::from_value::<RuntimeActiveTask>(entry.clone())
-                .ok()
-                .filter(|task| task.id == id)
-                .and_then(|task| task.tokens)
-        })
-    }
 
     #[test]
     fn test_format_elapsed_seconds() {
@@ -930,140 +1011,5 @@ mod tests {
     #[test]
     fn test_format_elapsed_hours() {
         assert_eq!(format_elapsed(3665000), "1h 1m 5s");
-    }
-
-    #[test]
-    fn test_apply_runtime_transition_complete_updates_completed_tokens_and_totals() {
-        let mut state = make_state();
-        state.active_tasks.push(make_active_task("task-006"));
-
-        let state = apply_runtime_transition(
-            &state,
-            "task-006",
-            Some(120),
-            RuntimeTaskTransition::Complete,
-        );
-
-        assert!(state.active_tasks.is_empty());
-        assert_eq!(state.tokens, Some(120));
-
-        let completed = context::normalize_completed_task(&state.completed_tasks[0]);
-        assert_eq!(completed.id, "task-006");
-        assert_eq!(completed.tokens, Some(120));
-    }
-
-    #[test]
-    fn test_apply_runtime_transition_retry_removes_active_and_keeps_state_coherent() {
-        let mut state = make_state();
-        state.active_tasks.push(make_active_task("task-006"));
-
-        let state =
-            apply_runtime_transition(&state, "task-006", Some(45), RuntimeTaskTransition::Retry);
-
-        assert!(state.active_tasks.is_empty());
-        assert!(state.completed_tasks.is_empty());
-        assert!(state.failed_tasks.is_empty());
-        assert_eq!(state.tokens, None);
-    }
-
-    #[test]
-    fn test_apply_runtime_transition_failure_records_task_tokens() {
-        let mut state = make_state();
-        state.active_tasks.push(make_active_task("task-006"));
-
-        let state =
-            apply_runtime_transition(&state, "task-006", Some(33), RuntimeTaskTransition::Failed);
-
-        assert!(state.active_tasks.is_empty());
-        assert_eq!(state.failed_tasks.len(), 1);
-        assert_eq!(state.tokens, Some(33));
-        assert_eq!(failed_task_tokens(&state, "task-006"), Some(33));
-    }
-
-    #[test]
-    fn test_apply_runtime_transition_mixed_outcomes_accumulates_totals() {
-        let mut state = make_state();
-        state.active_tasks.push(make_active_task("task-a"));
-        state =
-            apply_runtime_transition(&state, "task-a", Some(10), RuntimeTaskTransition::Complete);
-
-        state.active_tasks.push(make_active_task("task-b"));
-        state = apply_runtime_transition(&state, "task-b", Some(20), RuntimeTaskTransition::Retry);
-
-        state.active_tasks.push(make_active_task("task-c"));
-        state = apply_runtime_transition(&state, "task-c", Some(30), RuntimeTaskTransition::Failed);
-
-        assert!(state.active_tasks.is_empty());
-        assert_eq!(state.completed_tasks.len(), 1);
-        assert_eq!(state.failed_tasks.len(), 1);
-        assert_eq!(state.tokens, Some(40));
-    }
-
-    #[test]
-    fn test_extract_result_total_tokens_prefers_matching_identifier() {
-        let results = vec![
-            executor::ExecutionResult {
-                task_id: "1".to_string(),
-                identifier: "task-001".to_string(),
-                success: true,
-                status: executor::ExecutionStatus::SubtaskComplete,
-                token_usage: Some(executor::TokenUsage {
-                    input_tokens: Some(10),
-                    output_tokens: Some(20),
-                    total_tokens: Some(30),
-                }),
-                duration_ms: 1,
-                error: None,
-                pane_id: None,
-                raw_output: None,
-            },
-            executor::ExecutionResult {
-                task_id: "2".to_string(),
-                identifier: "task-006".to_string(),
-                success: true,
-                status: executor::ExecutionStatus::SubtaskComplete,
-                token_usage: Some(executor::TokenUsage {
-                    input_tokens: Some(1),
-                    output_tokens: Some(2),
-                    total_tokens: Some(3),
-                }),
-                duration_ms: 1,
-                error: None,
-                pane_id: None,
-                raw_output: None,
-            },
-        ];
-
-        assert_eq!(extract_result_total_tokens(&results, "task-006"), Some(3));
-    }
-
-    #[test]
-    fn test_apply_effective_model_override_claude_ignores_raw_override() {
-        let mut config = ExecutionConfig::default();
-        config.model = Model::Opus;
-
-        apply_effective_model_override(&mut config, Some("gpt-5-mini"), RuntimeKind::Claude);
-
-        assert_eq!(config.model, Model::Opus);
-    }
-
-    #[test]
-    fn test_apply_effective_model_override_opencode_uses_parseable_override() {
-        let mut config = ExecutionConfig::default();
-        config.model = Model::Opus;
-
-        apply_effective_model_override(&mut config, Some("haiku"), RuntimeKind::Opencode);
-
-        assert_eq!(config.model, Model::Haiku);
-    }
-
-    #[test]
-    fn test_apply_effective_model_override_opencode_keeps_existing_for_unparseable_override() {
-        let mut config = ExecutionConfig::default();
-        config.model = Model::Sonnet;
-
-        apply_effective_model_override(&mut config, Some("gpt-5-mini"), RuntimeKind::Opencode);
-
-        assert_eq!(config.model, Model::Sonnet);
     }
 }

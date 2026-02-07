@@ -6,15 +6,16 @@ use std::fs;
 use crate::config::loader::read_config;
 use crate::config::paths::resolve_paths;
 use crate::context::cleanup_context;
-use crate::jira::JiraClient;
 use crate::local_state::{get_project_mobius_path, read_parent_spec};
 use crate::types::enums::Backend;
+use crate::worktree::{is_issue_merged_into_base, MergeDetectionResult, remove_worktree, WorktreeConfig};
 
 struct CleanupCandidate {
     identifier: String,
     title: String,
     local_status: String,
-    backend_status: Option<String>,
+    git_branch_name: String,
+    merge_info: Option<MergeDetectionResult>,
 }
 
 fn is_completed_status(status: &str, backend: &Backend) -> bool {
@@ -38,6 +39,13 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
     } else {
         config.backend
     };
+
+    let base_branch = config
+        .execution
+        .base_branch
+        .as_deref()
+        .unwrap_or("main")
+        .to_string();
 
     println!("Scanning for completed issues...");
 
@@ -76,51 +84,41 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
                     identifier: spec.identifier,
                     title: spec.title,
                     local_status: spec.status,
-                    backend_status: None,
+                    git_branch_name: spec.git_branch_name,
+                    merge_info: None,
                 });
             }
-        } else {
-            let local_completed = is_completed_status(&spec.status, &backend);
-            if !local_completed {
-                continue;
-            }
+        } else if !spec.git_branch_name.is_empty() {
+            // Issue has a git branch — use git-based merge detection
+            let merge_result = rt.block_on(async {
+                is_issue_merged_into_base(
+                    &spec.git_branch_name,
+                    &spec.identifier,
+                    &base_branch,
+                )
+                .await
+            })?;
 
-            // Check backend status
-            let backend_status: Option<String> = match backend {
-                Backend::Jira => rt.block_on(async {
-                    match JiraClient::new() {
-                        Ok(client) => client.fetch_jira_issue_status(issue_id).await.ok(),
-                        Err(_) => None,
-                    }
-                }),
-                Backend::Linear => rt.block_on(async {
-                    match crate::linear::LinearClient::new() {
-                        Ok(client) => client.fetch_linear_issue_status(issue_id).await.ok(),
-                        Err(_) => None,
-                    }
-                }),
-                Backend::Local => None,
-            };
-
-            if let Some(ref bs) = backend_status {
-                if is_completed_status(bs, &backend) {
-                    candidates.push(CleanupCandidate {
-                        identifier: spec.identifier,
-                        title: spec.title,
-                        local_status: spec.status,
-                        backend_status: backend_status.clone(),
-                    });
-                }
-            } else if backend == Backend::Local {
-                // For local backend, we already checked local status above
+            if merge_result.is_merged() {
                 candidates.push(CleanupCandidate {
                     identifier: spec.identifier,
                     title: spec.title,
                     local_status: spec.status,
-                    backend_status: None,
+                    git_branch_name: spec.git_branch_name,
+                    merge_info: Some(merge_result),
                 });
             }
-            // If backend unreachable, skip
+        } else {
+            // No git branch name — fall back to local status check
+            if is_completed_status(&spec.status, &backend) {
+                candidates.push(CleanupCandidate {
+                    identifier: spec.identifier,
+                    title: spec.title,
+                    local_status: spec.status,
+                    git_branch_name: String::new(),
+                    merge_info: None,
+                });
+            }
         }
     }
 
@@ -137,10 +135,17 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
     println!();
 
     for candidate in &candidates {
-        let status_info = if let Some(ref bs) = candidate.backend_status {
-            format!("local: {}, backend: {}", candidate.local_status, bs)
+        let status_info = if let Some(ref mi) = candidate.merge_info {
+            let mut parts = Vec::new();
+            if mi.remote_branch_deleted {
+                parts.push("remote deleted".to_string());
+            }
+            if mi.found_in_base_log {
+                parts.push(format!("found in {}", base_branch));
+            }
+            format!("merged: {}", parts.join(" + "))
         } else {
-            format!("local: {}", candidate.local_status)
+            format!("status: {}", candidate.local_status)
         };
         println!(
             "  {}  {}  {}",
@@ -156,6 +161,7 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
         return Ok(());
     }
 
+    // Bulk confirmation for .mobius/issues/ directory cleanup
     let confirmed = dialoguer::Confirm::new()
         .with_prompt(format!(
             "Remove {} completed issue{} from local state?",
@@ -173,7 +179,72 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
     let mut success = 0;
     let mut failed = 0;
 
+    let worktree_config = WorktreeConfig {
+        worktree_path: config.execution.worktree_path.clone(),
+        base_branch: config.execution.base_branch.clone(),
+        runtime: config.runtime,
+    };
+
     for candidate in &candidates {
+        // Per-branch prompt for local branch and worktree deletion
+        if !candidate.git_branch_name.is_empty() {
+            let delete_branch = dialoguer::Confirm::new()
+                .with_prompt(format!(
+                    "Delete local branch '{}' and worktree for {}?",
+                    candidate.git_branch_name, candidate.identifier
+                ))
+                .default(false)
+                .interact()
+                .unwrap_or(false);
+
+            if delete_branch {
+                // Delete local branch
+                if let Err(e) = rt.block_on(async {
+                    let output = tokio::process::Command::new("git")
+                        .args(["branch", "-D", &candidate.git_branch_name])
+                        .output()
+                        .await?;
+                    if !output.status.success() {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        eprintln!(
+                            "  {}",
+                            format!(
+                                "Warning: Failed to delete branch '{}': {}",
+                                candidate.git_branch_name,
+                                stderr.trim()
+                            )
+                            .yellow()
+                        );
+                    }
+                    Ok::<(), anyhow::Error>(())
+                }) {
+                    eprintln!(
+                        "  {}",
+                        format!(
+                            "Warning: Error deleting branch '{}': {}",
+                            candidate.git_branch_name, e
+                        )
+                        .yellow()
+                    );
+                }
+
+                // Remove worktree
+                if let Err(e) = rt.block_on(async {
+                    remove_worktree(&candidate.identifier, &worktree_config).await
+                }) {
+                    eprintln!(
+                        "  {}",
+                        format!(
+                            "Warning: Failed to remove worktree for {}: {}",
+                            candidate.identifier, e
+                        )
+                        .yellow()
+                    );
+                }
+            }
+        }
+
+        // Always clean up the .mobius/issues/ context directory
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             cleanup_context(&candidate.identifier);
         })) {

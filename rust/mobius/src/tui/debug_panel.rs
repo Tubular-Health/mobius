@@ -8,8 +8,8 @@ use crate::types::debug::DebugEvent;
 use crate::types::enums::DebugEventType;
 
 use super::theme::{
-    BORDER_COLOR, HEADER_COLOR, MUTED_COLOR, TEXT_COLOR, NORD3, NORD8, NORD9, NORD10,
-    NORD13, NORD14, NORD15,
+    BORDER_COLOR, HEADER_COLOR, MUTED_COLOR, NORD10, NORD13, NORD14, NORD15, NORD3, NORD8, NORD9,
+    TEXT_COLOR,
 };
 
 pub struct DebugPanel<'a> {
@@ -39,7 +39,10 @@ impl Widget for DebugPanel<'_> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(BORDER_COLOR))
-            .title(Span::styled(" Debug Events ", Style::default().fg(HEADER_COLOR)))
+            .title(Span::styled(
+                " Debug Events ",
+                Style::default().fg(HEADER_COLOR),
+            ))
             .title_alignment(ratatui::layout::Alignment::Left);
 
         let inner = block.inner(area);
@@ -95,7 +98,12 @@ impl Widget for DebugPanel<'_> {
             );
             let count_y = inner.y + inner.height.saturating_sub(1);
             if count_y > inner.y + visible_events.len() as u16 {
-                buf.set_string(inner.x, count_y, &count_text, Style::default().fg(MUTED_COLOR));
+                buf.set_string(
+                    inner.x,
+                    count_y,
+                    &count_text,
+                    Style::default().fg(MUTED_COLOR),
+                );
             }
         }
     }
