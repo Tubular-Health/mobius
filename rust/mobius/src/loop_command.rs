@@ -20,7 +20,7 @@ use crate::local_state;
 use crate::tmux;
 use crate::tracker;
 use crate::tree_renderer;
-use crate::types::context::RuntimeActiveTask;
+use crate::types::context::{RuntimeActiveTask, RuntimeState};
 use crate::types::enums::{Backend, Model, SessionStatus, TaskStatus};
 use crate::types::task_graph::{
     build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks,
@@ -416,6 +416,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         pane: String::new(),
                         started_at: now.clone(),
                         worktree: Some(worktree_path.clone()),
+                        tokens: None,
                     },
                 );
             }
@@ -496,6 +497,8 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
 
             // Process each verified result
             for result in &verified_results {
+                let result_tokens = extract_result_total_tokens(&results, &result.identifier);
+
                 if result.success && result.backend_verified {
                     // VG fast-completion check
                     let is_vg_task = result.identifier.to_lowercase().contains("vg")
@@ -533,15 +536,23 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                                 retry_queue.push(task.clone());
                             }
                         }
-                        runtime_state =
-                            context::remove_runtime_active_task(&runtime_state, &result.identifier);
+                        runtime_state = apply_runtime_transition(
+                            &runtime_state,
+                            &result.identifier,
+                            result_tokens,
+                            RuntimeTaskTransition::Retry,
+                        );
                         continue;
                     }
 
                     // Mark done
                     graph = update_task_status(&graph, &result.task_id, TaskStatus::Done);
-                    runtime_state =
-                        context::complete_runtime_task(&runtime_state, &result.identifier);
+                    runtime_state = apply_runtime_transition(
+                        &runtime_state,
+                        &result.identifier,
+                        result_tokens,
+                        RuntimeTaskTransition::Complete,
+                    );
                     local_state::update_subtask_status(&task_id, &result.identifier, "done");
                     println!(
                         "{}",
@@ -557,8 +568,12 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         .green()
                     );
                 } else if result.should_retry {
-                    runtime_state =
-                        context::remove_runtime_active_task(&runtime_state, &result.identifier);
+                    runtime_state = apply_runtime_transition(
+                        &runtime_state,
+                        &result.identifier,
+                        result_tokens,
+                        RuntimeTaskTransition::Retry,
+                    );
                     println!(
                         "{}",
                         format!(
@@ -586,8 +601,12 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                                 retry_queue.push(task.clone());
                             }
                         }
-                        runtime_state =
-                            context::remove_runtime_active_task(&runtime_state, &result.identifier);
+                        runtime_state = apply_runtime_transition(
+                            &runtime_state,
+                            &result.identifier,
+                            result_tokens,
+                            RuntimeTaskTransition::Retry,
+                        );
                         println!(
                             "{}",
                             format!(
@@ -598,8 +617,12 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         );
                     } else {
                         // Actual permanent failure
-                        runtime_state =
-                            context::fail_runtime_task(&runtime_state, &result.identifier);
+                        runtime_state = apply_runtime_transition(
+                            &runtime_state,
+                            &result.identifier,
+                            result_tokens,
+                            RuntimeTaskTransition::Failed,
+                        );
                         println!(
                             "{}",
                             format!(
@@ -763,6 +786,39 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeTaskTransition {
+    Complete,
+    Retry,
+    Failed,
+}
+
+fn extract_result_total_tokens(
+    results: &[executor::ExecutionResult],
+    task_identifier: &str,
+) -> Option<u64> {
+    results
+        .iter()
+        .find(|result| result.identifier == task_identifier)
+        .and_then(|result| result.token_usage.as_ref())
+        .and_then(|usage| usage.total_tokens)
+}
+
+fn apply_runtime_transition(
+    state: &RuntimeState,
+    task_id: &str,
+    tokens: Option<u64>,
+    transition: RuntimeTaskTransition,
+) -> RuntimeState {
+    let merged_state = context::update_runtime_task_tokens(state, task_id, tokens);
+
+    match transition {
+        RuntimeTaskTransition::Complete => context::complete_runtime_task(&merged_state, task_id),
+        RuntimeTaskTransition::Retry => context::remove_runtime_active_task(&merged_state, task_id),
+        RuntimeTaskTransition::Failed => context::fail_runtime_task(&merged_state, task_id),
+    }
+}
+
 /// Re-sync the task graph from local state files.
 ///
 /// Reads fresh subtask status from `.mobius/issues/{id}/tasks/*.json`.
@@ -798,6 +854,43 @@ fn format_elapsed(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::context::RuntimeActiveTask;
+
+    fn make_state() -> RuntimeState {
+        RuntimeState {
+            parent_id: "MOB-263".to_string(),
+            parent_title: "Parent".to_string(),
+            active_tasks: Vec::new(),
+            completed_tasks: Vec::new(),
+            failed_tasks: Vec::new(),
+            started_at: "2026-02-06T00:00:00Z".to_string(),
+            updated_at: "2026-02-06T00:00:00Z".to_string(),
+            loop_pid: None,
+            total_tasks: Some(3),
+            tokens: None,
+            backend_statuses: None,
+        }
+    }
+
+    fn make_active_task(id: &str) -> RuntimeActiveTask {
+        RuntimeActiveTask {
+            id: id.to_string(),
+            pid: 0,
+            pane: "%1".to_string(),
+            started_at: "2026-02-06T00:00:01Z".to_string(),
+            worktree: Some("/tmp/worktree".to_string()),
+            tokens: None,
+        }
+    }
+
+    fn failed_task_tokens(state: &RuntimeState, id: &str) -> Option<u64> {
+        state.failed_tasks.iter().find_map(|entry| {
+            serde_json::from_value::<RuntimeActiveTask>(entry.clone())
+                .ok()
+                .filter(|task| task.id == id)
+                .and_then(|task| task.tokens)
+        })
+    }
 
     #[test]
     fn test_format_elapsed_seconds() {
@@ -814,5 +907,122 @@ mod tests {
     #[test]
     fn test_format_elapsed_hours() {
         assert_eq!(format_elapsed(3665000), "1h 1m 5s");
+    }
+
+    #[test]
+    fn test_apply_runtime_transition_complete_updates_completed_tokens_and_totals() {
+        let mut state = make_state();
+        state.active_tasks.push(make_active_task("task-006"));
+
+        let state = apply_runtime_transition(
+            &state,
+            "task-006",
+            Some(120),
+            RuntimeTaskTransition::Complete,
+        );
+
+        assert!(state.active_tasks.is_empty());
+        assert_eq!(state.tokens, Some(120));
+
+        let completed = context::normalize_completed_task(&state.completed_tasks[0]);
+        assert_eq!(completed.id, "task-006");
+        assert_eq!(completed.tokens, Some(120));
+    }
+
+    #[test]
+    fn test_apply_runtime_transition_retry_removes_active_and_keeps_state_coherent() {
+        let mut state = make_state();
+        state.active_tasks.push(make_active_task("task-006"));
+
+        let state = apply_runtime_transition(
+            &state,
+            "task-006",
+            Some(45),
+            RuntimeTaskTransition::Retry,
+        );
+
+        assert!(state.active_tasks.is_empty());
+        assert!(state.completed_tasks.is_empty());
+        assert!(state.failed_tasks.is_empty());
+        assert_eq!(state.tokens, None);
+    }
+
+    #[test]
+    fn test_apply_runtime_transition_failure_records_task_tokens() {
+        let mut state = make_state();
+        state.active_tasks.push(make_active_task("task-006"));
+
+        let state = apply_runtime_transition(
+            &state,
+            "task-006",
+            Some(33),
+            RuntimeTaskTransition::Failed,
+        );
+
+        assert!(state.active_tasks.is_empty());
+        assert_eq!(state.failed_tasks.len(), 1);
+        assert_eq!(state.tokens, Some(33));
+        assert_eq!(failed_task_tokens(&state, "task-006"), Some(33));
+    }
+
+    #[test]
+    fn test_apply_runtime_transition_mixed_outcomes_accumulates_totals() {
+        let mut state = make_state();
+        state.active_tasks.push(make_active_task("task-a"));
+        state = apply_runtime_transition(
+            &state,
+            "task-a",
+            Some(10),
+            RuntimeTaskTransition::Complete,
+        );
+
+        state.active_tasks.push(make_active_task("task-b"));
+        state = apply_runtime_transition(&state, "task-b", Some(20), RuntimeTaskTransition::Retry);
+
+        state.active_tasks.push(make_active_task("task-c"));
+        state = apply_runtime_transition(&state, "task-c", Some(30), RuntimeTaskTransition::Failed);
+
+        assert!(state.active_tasks.is_empty());
+        assert_eq!(state.completed_tasks.len(), 1);
+        assert_eq!(state.failed_tasks.len(), 1);
+        assert_eq!(state.tokens, Some(40));
+    }
+
+    #[test]
+    fn test_extract_result_total_tokens_prefers_matching_identifier() {
+        let results = vec![
+            executor::ExecutionResult {
+                task_id: "1".to_string(),
+                identifier: "task-001".to_string(),
+                success: true,
+                status: executor::ExecutionStatus::SubtaskComplete,
+                token_usage: Some(executor::TokenUsage {
+                    input_tokens: Some(10),
+                    output_tokens: Some(20),
+                    total_tokens: Some(30),
+                }),
+                duration_ms: 1,
+                error: None,
+                pane_id: None,
+                raw_output: None,
+            },
+            executor::ExecutionResult {
+                task_id: "2".to_string(),
+                identifier: "task-006".to_string(),
+                success: true,
+                status: executor::ExecutionStatus::SubtaskComplete,
+                token_usage: Some(executor::TokenUsage {
+                    input_tokens: Some(1),
+                    output_tokens: Some(2),
+                    total_tokens: Some(3),
+                }),
+                duration_ms: 1,
+                error: None,
+                pane_id: None,
+                raw_output: None,
+            },
+        ];
+
+        assert_eq!(extract_result_total_tokens(&results, "task-006"), Some(3));
     }
 }
