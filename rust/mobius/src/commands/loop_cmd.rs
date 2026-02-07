@@ -16,6 +16,7 @@ use crate::context::{
 use crate::executor::{calculate_parallelism, execute_parallel};
 use crate::jira::JiraClient;
 use crate::types::task_graph::ParentIssue;
+use crate::runtime_adapter::{effective_model_for_runtime, RuntimeKind};
 use crate::local_state::{
     read_local_subtasks_as_linear_issues, read_parent_spec, read_subtasks, update_subtask_status,
     write_iteration_log, IterationLogEntry, IterationStatus,
@@ -114,11 +115,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     if let Some(p) = parallel_override {
         execution_config.max_parallel_agents = Some(p);
     }
-    if let Some(m) = model_override {
-        if let Ok(model) = m.parse() {
-            execution_config.model = model;
-        }
-    }
+    apply_effective_model_override(&mut execution_config, model_override, detect_runtime_kind());
 
     let max_iterations = max_iterations_override.unwrap_or(config.execution.max_iterations);
 
@@ -857,6 +854,34 @@ fn ctrlc_handler(task_id: &str) {
     });
 }
 
+fn detect_runtime_kind() -> RuntimeKind {
+    match std::env::var("MOBIUS_RUNTIME") {
+        Ok(raw) if raw.eq_ignore_ascii_case("opencode") => RuntimeKind::Opencode,
+        Ok(raw) if raw.eq_ignore_ascii_case("claude") => RuntimeKind::Claude,
+        _ => std::env::current_exe()
+            .ok()
+            .and_then(|path| {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(|stem| stem.to_ascii_lowercase())
+            })
+            .filter(|stem| stem.contains("opencode"))
+            .map(|_| RuntimeKind::Opencode)
+            .unwrap_or(RuntimeKind::Claude),
+    }
+}
+
+fn apply_effective_model_override(
+    execution_config: &mut crate::types::ExecutionConfig,
+    model_override: Option<&str>,
+    runtime_kind: RuntimeKind,
+) {
+    let effective = effective_model_for_runtime(runtime_kind, execution_config, model_override);
+    if let Ok(model) = effective.parse() {
+        execution_config.model = model;
+    }
+}
+
 fn validate_task_id(task_id: &str, backend: &Backend) -> bool {
     let pattern = match backend {
         Backend::Linear => regex::Regex::new(r"^[A-Z]+-\d+$").unwrap(),
@@ -864,4 +889,49 @@ fn validate_task_id(task_id: &str, backend: &Backend) -> bool {
         Backend::Local => regex::Regex::new(r"^(LOC-\d+|task-\d+)$").unwrap(),
     };
     pattern.is_match(task_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_effective_model_override, RuntimeKind};
+    use crate::types::ExecutionConfig;
+    use crate::types::enums::Model;
+
+    #[test]
+    fn test_apply_effective_model_override_claude_ignores_raw_override() {
+        let mut config = ExecutionConfig::default();
+        config.model = Model::Opus;
+
+        apply_effective_model_override(
+            &mut config,
+            Some("gpt-5-mini"),
+            RuntimeKind::Claude,
+        );
+
+        assert_eq!(config.model, Model::Opus);
+    }
+
+    #[test]
+    fn test_apply_effective_model_override_opencode_uses_parseable_override() {
+        let mut config = ExecutionConfig::default();
+        config.model = Model::Opus;
+
+        apply_effective_model_override(&mut config, Some("haiku"), RuntimeKind::Opencode);
+
+        assert_eq!(config.model, Model::Haiku);
+    }
+
+    #[test]
+    fn test_apply_effective_model_override_opencode_keeps_existing_for_unparseable_override() {
+        let mut config = ExecutionConfig::default();
+        config.model = Model::Sonnet;
+
+        apply_effective_model_override(
+            &mut config,
+            Some("gpt-5-mini"),
+            RuntimeKind::Opencode,
+        );
+
+        assert_eq!(config.model, Model::Sonnet);
+    }
 }
