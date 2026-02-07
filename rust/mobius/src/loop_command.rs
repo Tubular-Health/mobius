@@ -17,14 +17,15 @@ use crate::config;
 use crate::context;
 use crate::executor;
 use crate::local_state;
+use crate::runtime_adapter::{effective_model_for_runtime, RuntimeKind};
 use crate::tmux;
 use crate::tracker;
 use crate::tree_renderer;
 use crate::types::context::{RuntimeActiveTask, RuntimeState};
-use crate::types::enums::{Backend, Model, SessionStatus, TaskStatus};
+use crate::types::enums::{Backend, SessionStatus, TaskStatus};
 use crate::types::task_graph::{
-    build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks,
-    get_verification_task, update_task_status, TaskGraph,
+    build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks, get_verification_task,
+    update_task_status, TaskGraph,
 };
 use crate::worktree::{self, WorktreeConfig};
 
@@ -83,19 +84,12 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     if let Some(p) = options.parallel {
         exec_config.max_parallel_agents = Some(p);
     }
-    if let Some(ref m) = options.model {
-        exec_config.model = Model::from_str(m).unwrap_or_else(|e| {
-            eprintln!("{}", format!("Error: {e}").red());
-            process::exit(1);
-        });
-    }
+    apply_effective_model_override(&mut exec_config, options.model.as_deref(), detect_runtime_kind());
     if options.no_sandbox {
         exec_config.sandbox = false;
     }
 
-    let max_iterations = options
-        .max_iterations
-        .unwrap_or(exec_config.max_iterations);
+    let max_iterations = options.max_iterations.unwrap_or(exec_config.max_iterations);
 
     // -----------------------------------------------------------------------
     // 4. Check tmux availability
@@ -137,7 +131,10 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     if options.fresh {
         let deleted = context::delete_runtime_state(&task_id);
         if deleted {
-            println!("{}", "Cleared stale state from previous execution.".yellow());
+            println!(
+                "{}",
+                "Cleared stale state from previous execution.".yellow()
+            );
         }
     }
 
@@ -157,12 +154,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
             } else {
                 p.git_branch_name.clone()
             };
-            (
-                p.id.clone(),
-                p.identifier.clone(),
-                p.title.clone(),
-                branch,
-            )
+            (p.id.clone(), p.identifier.clone(), p.title.clone(), branch)
         }
         None => {
             eprintln!(
@@ -230,10 +222,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // -----------------------------------------------------------------------
     let issues = local_state::read_local_subtasks_as_linear_issues(&task_id);
     if issues.is_empty() {
-        eprintln!(
-            "{}",
-            format!("No sub-tasks found for {task_id}").yellow()
-        );
+        eprintln!("{}", format!("No sub-tasks found for {task_id}").yellow());
         tmux::destroy_session(&session).await?;
         process::exit(1);
     }
@@ -277,8 +266,12 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     context::create_session(&task_id, backend, Some(&worktree_path))?;
 
     let total_tasks = graph.tasks.len() as u32;
-    let mut runtime_state =
-        context::initialize_runtime_state(&task_id, &parent_title, Some(process::id()), Some(total_tasks))?;
+    let mut runtime_state = context::initialize_runtime_state(
+        &task_id,
+        &parent_title,
+        Some(process::id()),
+        Some(total_tasks),
+    )?;
 
     // Pre-populate completed tasks from graph
     for task in graph.tasks.values() {
@@ -294,9 +287,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // -----------------------------------------------------------------------
     let mut tracker = tracker::create_tracker(
         exec_config.max_retries,
-        exec_config
-            .verification_timeout
-            .map(|v| v as u64),
+        exec_config.verification_timeout.map(|v| v as u64),
     );
 
     // -----------------------------------------------------------------------
@@ -819,6 +810,34 @@ fn apply_runtime_transition(
     }
 }
 
+fn detect_runtime_kind() -> RuntimeKind {
+    match std::env::var("MOBIUS_RUNTIME") {
+        Ok(raw) if raw.eq_ignore_ascii_case("opencode") => RuntimeKind::Opencode,
+        Ok(raw) if raw.eq_ignore_ascii_case("claude") => RuntimeKind::Claude,
+        _ => std::env::current_exe()
+            .ok()
+            .and_then(|path| {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(|stem| stem.to_ascii_lowercase())
+            })
+            .filter(|stem| stem.contains("opencode"))
+            .map(|_| RuntimeKind::Opencode)
+            .unwrap_or(RuntimeKind::Claude),
+    }
+}
+
+fn apply_effective_model_override(
+    execution_config: &mut crate::types::ExecutionConfig,
+    model_override: Option<&str>,
+    runtime_kind: RuntimeKind,
+) {
+    let effective = effective_model_for_runtime(runtime_kind, execution_config, model_override);
+    if let Ok(model) = effective.parse() {
+        execution_config.model = model;
+    }
+}
+
 /// Re-sync the task graph from local state files.
 ///
 /// Reads fresh subtask status from `.mobius/issues/{id}/tasks/*.json`.
@@ -855,6 +874,8 @@ fn format_elapsed(ms: u64) -> String {
 mod tests {
     use super::*;
     use crate::types::context::RuntimeActiveTask;
+    use crate::types::enums::Model;
+    use crate::types::ExecutionConfig;
 
     fn make_state() -> RuntimeState {
         RuntimeState {
@@ -934,12 +955,8 @@ mod tests {
         let mut state = make_state();
         state.active_tasks.push(make_active_task("task-006"));
 
-        let state = apply_runtime_transition(
-            &state,
-            "task-006",
-            Some(45),
-            RuntimeTaskTransition::Retry,
-        );
+        let state =
+            apply_runtime_transition(&state, "task-006", Some(45), RuntimeTaskTransition::Retry);
 
         assert!(state.active_tasks.is_empty());
         assert!(state.completed_tasks.is_empty());
@@ -952,12 +969,8 @@ mod tests {
         let mut state = make_state();
         state.active_tasks.push(make_active_task("task-006"));
 
-        let state = apply_runtime_transition(
-            &state,
-            "task-006",
-            Some(33),
-            RuntimeTaskTransition::Failed,
-        );
+        let state =
+            apply_runtime_transition(&state, "task-006", Some(33), RuntimeTaskTransition::Failed);
 
         assert!(state.active_tasks.is_empty());
         assert_eq!(state.failed_tasks.len(), 1);
@@ -969,12 +982,8 @@ mod tests {
     fn test_apply_runtime_transition_mixed_outcomes_accumulates_totals() {
         let mut state = make_state();
         state.active_tasks.push(make_active_task("task-a"));
-        state = apply_runtime_transition(
-            &state,
-            "task-a",
-            Some(10),
-            RuntimeTaskTransition::Complete,
-        );
+        state =
+            apply_runtime_transition(&state, "task-a", Some(10), RuntimeTaskTransition::Complete);
 
         state.active_tasks.push(make_active_task("task-b"));
         state = apply_runtime_transition(&state, "task-b", Some(20), RuntimeTaskTransition::Retry);
@@ -1024,5 +1033,35 @@ mod tests {
         ];
 
         assert_eq!(extract_result_total_tokens(&results, "task-006"), Some(3));
+    }
+
+    #[test]
+    fn test_apply_effective_model_override_claude_ignores_raw_override() {
+        let mut config = ExecutionConfig::default();
+        config.model = Model::Opus;
+
+        apply_effective_model_override(&mut config, Some("gpt-5-mini"), RuntimeKind::Claude);
+
+        assert_eq!(config.model, Model::Opus);
+    }
+
+    #[test]
+    fn test_apply_effective_model_override_opencode_uses_parseable_override() {
+        let mut config = ExecutionConfig::default();
+        config.model = Model::Opus;
+
+        apply_effective_model_override(&mut config, Some("haiku"), RuntimeKind::Opencode);
+
+        assert_eq!(config.model, Model::Haiku);
+    }
+
+    #[test]
+    fn test_apply_effective_model_override_opencode_keeps_existing_for_unparseable_override() {
+        let mut config = ExecutionConfig::default();
+        config.model = Model::Sonnet;
+
+        apply_effective_model_override(&mut config, Some("gpt-5-mini"), RuntimeKind::Opencode);
+
+        assert_eq!(config.model, Model::Sonnet);
     }
 }
