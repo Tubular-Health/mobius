@@ -276,6 +276,7 @@ mod tests {
             } else {
                 ExecutionStatus::VerificationFailed
             },
+            token_usage: None,
             duration_ms: 5000,
             error: if success {
                 None
