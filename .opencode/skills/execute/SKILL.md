@@ -12,6 +12,7 @@ Key behavior:
 - Implement it completely
 - Verify with tests/typecheck/lint
 - Commit and push
+- Finalize documentation (local context updates, iteration log, completion report, structured output)
 - Update issue status
 - Report completion and STOP IMMEDIATELY
 
@@ -25,8 +26,9 @@ The workflow for each invocation:
 1. Find the next ready sub-task
 2. If none ready -> output STATUS and STOP
 3. If found -> implement, verify, commit, push
-4. Update issue status
-5. Output completion STATUS and STOP
+4. Finalize documentation artifacts (context files, iteration log, completion report payload)
+5. Update issue status
+6. Output completion STATUS and STOP
 
 **NEVER**:
 - Process multiple sub-tasks in one invocation
@@ -386,8 +388,9 @@ When running in parallel mode, each agent receives a specific subtask ID to prev
 11. **Commit and push** - Create commit with conventional message, push
 12. **Update local context** - Update `.mobius/issues/{parentId}/` files with new status
 13. **Write iteration data** - Append iteration entry to `.mobius/issues/{parentId}/execution/iterations.json`
-14. **Update status** - Move sub-task to "Done" if all criteria met
-15. **Report completion** - Show what was done and what's next
+14. **Finalize documentation** - Ensure completion report + structured payload include files, verification results, and remaining/next work
+15. **Update status** - Move sub-task to "Done" if all criteria met
+16. **Report completion** - Show what was done, what was documented, and what's next
 </workflow>
 </quick_start>
 
@@ -1140,6 +1143,19 @@ mkdir -p .mobius/issues/{parentId}/execution
 - Tracks retry patterns and common failure modes
 </iteration_tracking>
 
+<finalize_documentation>
+**CRITICAL: A sub-task is not complete until final documentation is written.**
+
+Before marking a task `done`, ensure all documentation artifacts exist and are current:
+
+1. Local context updated (`tasks/{subtaskId}.json` and `context.json` with status/timestamp)
+2. Iteration entry appended (`execution/iterations.json`)
+3. Completion report prepared with files modified, acceptance criteria coverage, and verification results
+4. Structured output includes the fields required for the status (`status`, `timestamp`, `subtaskId`, plus completion/failure details)
+
+If any documentation artifact is missing or stale, keep the task `in_progress` and output `SUBTASK_PARTIAL` with explicit remaining documentation work.
+</finalize_documentation>
+
 <update_subtask_status_done>
 After successful commit with all acceptance criteria met, include status update in your structured output.
 
@@ -1150,6 +1166,7 @@ The mobius loop will execute the actual status transition via SDK based on your 
 - All verification checks pass (typecheck, tests, lint)
 - Changes are committed and pushed
 - Local context files updated (see update_local_context above)
+- Final documentation completed (completion report + structured output + iteration data)
 - No outstanding work remains for this sub-task
 </update_subtask_status_done>
 
@@ -1212,6 +1229,8 @@ Leave the task "In Progress" so the next loop iteration can continue the work.
 <report_format>
 After successful execution, report and STOP:
 
+This report is the final documentation handoff for the sub-task. Do not treat the task as complete until this report and the structured output payload are both present.
+
 ```markdown
 # Sub-task Completed
 
@@ -1235,6 +1254,11 @@ STATUS: SUBTASK_COMPLETE
 - Tests: PASS
 - Lint: PASS
 - Sub-task verify: {PASS/N/A}
+
+### Documentation Finalization
+- Local context updated: YES (`.mobius/issues/{parentId}/tasks/{subtaskId}.json`, `.mobius/issues/{parentId}/context.json`)
+- Iteration logged: YES (`.mobius/issues/{parentId}/execution/iterations.json`)
+- Structured status payload: INCLUDED
 
 ---
 
@@ -1281,6 +1305,11 @@ STATUS: SUBTASK_PARTIAL
 - Tests: {PASS/FAIL/NOT_RUN}
 - Lint: {PASS/FAIL/NOT_RUN}
 - Sub-task verify: {PASS/FAIL/NOT_RUN/N/A}
+
+### Documentation State
+- Local context updated: {YES/NO}
+- Iteration logged: {YES/NO}
+- Structured status payload: INCLUDED
 
 ### Why Stopping
 {reason - e.g., "context limit reached", "blocking issue discovered", "time constraint"}
@@ -1409,6 +1438,12 @@ Consider creating separate issues for these.
 - GOOD: Update both task-specific JSON and main context.json after commit
 - GOOD: Update `metadata.updatedAt` timestamp when modifying context
 
+**Don't skip final documentation**:
+- BAD: Mark task Done without completion report details
+- BAD: Skip iteration log entry or omit verification outcomes from final report
+- GOOD: Treat documentation as part of the definition of done
+- GOOD: Keep task In Progress if documentation is incomplete
+
 **Don't misuse status transitions**:
 - BAD: Leave task in Backlog while working on it
 - BAD: Move to Done before all acceptance criteria are met
@@ -1439,6 +1474,7 @@ A successful execution achieves:
 - [ ] Commit created with conventional message
 - [ ] Changes pushed to remote
 - [ ] **Local context files updated** (`.mobius/issues/{parentId}/` task and context.json)
+- [ ] **Final documentation completed** (iteration log + completion report + structured payload fields)
 - [ ] Sub-task moved to "Done" (if fully complete)
 - [ ] Or: Sub-task kept "In Progress" with progress comment (if partial)
 - [ ] Completion report output with STATUS marker

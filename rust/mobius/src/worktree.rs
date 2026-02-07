@@ -644,7 +644,10 @@ mod tests {
         let link_path = worktree.join(".claude");
         let meta = std::fs::symlink_metadata(&link_path).unwrap();
         assert!(meta.file_type().is_symlink());
-        assert_eq!(std::fs::read_link(&link_path).unwrap(), source_repo.join(".claude"));
+        assert_eq!(
+            std::fs::read_link(&link_path).unwrap(),
+            source_repo.join(".claude")
+        );
     }
 
     #[test]

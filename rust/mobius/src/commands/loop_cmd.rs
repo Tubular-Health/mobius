@@ -4,6 +4,10 @@
 //! and tmux-based display.
 
 use colored::Colorize;
+use std::fs;
+use std::path::Path;
+
+use anyhow::Context as AnyhowContext;
 
 use crate::config::loader::read_config_with_env;
 use crate::config::paths::resolve_paths;
@@ -29,7 +33,7 @@ use crate::tracker::{
 };
 use crate::tree_renderer::render_full_tree_output;
 use crate::types::context::RuntimeActiveTask;
-use crate::types::enums::{AgentRuntime, Backend, SessionStatus, TaskStatus};
+use crate::types::enums::{AgentRuntime, Backend, Model, SessionStatus, TaskStatus};
 use crate::types::task_graph::ParentIssue;
 use crate::types::task_graph::{
     build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks, get_verification_task,
@@ -43,6 +47,7 @@ use super::submit;
 pub struct LoopOptions<'a> {
     pub backend_override: Option<&'a str>,
     pub model_override: Option<&'a str>,
+    pub thinking_level_override: Option<&'a str>,
     pub parallel_override: Option<u32>,
     pub max_iterations_override: Option<u32>,
     pub fresh: bool,
@@ -53,6 +58,7 @@ pub struct LoopOptions<'a> {
 pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     let backend_override = opts.backend_override;
     let model_override = opts.model_override;
+    let thinking_level_override = opts.thinking_level_override;
     let parallel_override = opts.parallel_override;
     let max_iterations_override = opts.max_iterations_override;
     let fresh = opts.fresh;
@@ -63,6 +69,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
             task_id,
             backend_override,
             model_override,
+            thinking_level_override,
             parallel_override,
             max_iterations_override,
             fresh,
@@ -114,13 +121,29 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         execution_config.max_parallel_agents = Some(p);
     }
     if let Some(m) = model_override {
-        if let Ok(model) = m.parse() {
-            execution_config.model = model;
+        let trimmed = m.trim();
+        if !trimmed.is_empty() {
+            if config.runtime == AgentRuntime::Claude {
+                execution_config.model = trimmed
+                    .parse::<Model>()
+                    .unwrap_or_else(|e| {
+                        eprintln!("{}", format!("Error: {e}").red());
+                        std::process::exit(1);
+                    })
+                    .to_string();
+            } else {
+                execution_config.model = trimmed.to_string();
+            }
         }
     }
 
     let execution_model_override = if config.runtime == AgentRuntime::Opencode {
         model_override
+    } else {
+        None
+    };
+    let execution_thinking_override = if config.runtime == AgentRuntime::Opencode {
+        thinking_level_override
     } else {
         None
     };
@@ -245,6 +268,18 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
             }
         }
     }
+
+    let mut worktree_context_file = mirror_issue_context_to_worktree(task_id, &worktree_info.path)
+        .with_context(|| {
+            format!(
+                "Failed to stage .mobius issue context in worktree {}",
+                worktree_info.path.display()
+            )
+        })?;
+    println!(
+        "{}",
+        format!("Worktree context file: {}", worktree_context_file).dimmed()
+    );
 
     // Display ASCII tree
     println!();
@@ -406,16 +441,22 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         let _ = rt.block_on(update_status_pane(&loop_status, &session_name));
 
         // Execute tasks in parallel
-        let context_file_path = crate::context::get_full_context_path(task_id);
-        let context_file_str = context_file_path.display().to_string();
+        worktree_context_file = mirror_issue_context_to_worktree(task_id, &worktree_info.path)
+            .with_context(|| {
+                format!(
+                    "Failed to refresh .mobius issue context in worktree {}",
+                    worktree_info.path.display()
+                )
+            })?;
         let results = rt.block_on(execute_parallel(
             &tasks_to_execute,
             config.runtime,
             &execution_config,
             &worktree_info.path.display().to_string(),
             &session,
-            Some(&context_file_str),
+            Some(worktree_context_file.as_str()),
             execution_model_override,
+            execution_thinking_override,
             None,
         ));
 
@@ -577,7 +618,14 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         let original_cwd = std::env::current_dir().ok();
         let _ = std::env::set_current_dir(&worktree_info.path);
 
-        match submit::run(Some(task_id), backend_override, model_override, false, true) {
+        match submit::run(
+            Some(task_id),
+            backend_override,
+            model_override,
+            thinking_level_override,
+            false,
+            true,
+        ) {
             Ok(()) => println!("{}", "Pull request created successfully.".green()),
             Err(e) => {
                 println!("{}", format!("⚠ PR submission failed: {}", e).yellow());
@@ -617,6 +665,7 @@ fn run_with_tui(
     task_id: &str,
     backend_override: Option<&str>,
     model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
     parallel_override: Option<u32>,
     max_iterations_override: Option<u32>,
     fresh: bool,
@@ -651,6 +700,9 @@ fn run_with_tui(
     if let Some(m) = model_override {
         args.extend(["--model".into(), m.to_string()]);
     }
+    if let Some(level) = thinking_level_override {
+        args.extend(["--thinking-level".into(), level.to_string()]);
+    }
     if let Some(p) = parallel_override {
         args.extend(["--parallel".into(), p.to_string()]);
     }
@@ -672,7 +724,7 @@ fn run_with_tui(
     let log_path = log_dir.join("loop-subprocess.log");
     let log_file = std::fs::File::create(&log_path)?;
 
-    let _child = std::process::Command::new(std::env::current_exe()?)
+    let mut child = std::process::Command::new(std::env::current_exe()?)
         .args(&args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -689,13 +741,19 @@ fn run_with_tui(
     };
 
     // 6. Run TUI dashboard (blocks until user exits or execution completes)
-    crate::tui::dashboard::run_dashboard(
+    let dashboard_result = crate::tui::dashboard::run_dashboard(
         parent_id,
         parent_title,
         graph,
         runtime_state_path,
         max_parallel_agents,
-    )?;
+    );
+
+    // Reap the child if it already exited (avoids lingering zombies), but do not
+    // block if the user intentionally left the dashboard while execution continues.
+    let _ = child.try_wait();
+
+    dashboard_result?;
 
     Ok(())
 }
@@ -759,6 +817,58 @@ async fn fetch_parent_issue(task_id: &str, backend: &Backend) -> Result<ParentIs
             }
         }
     }
+}
+
+fn mirror_issue_context_to_worktree(task_id: &str, worktree_path: &Path) -> anyhow::Result<String> {
+    let source_issue_path = crate::context::get_context_path(task_id);
+    if !source_issue_path.exists() {
+        anyhow::bail!("Issue context not found at {}", source_issue_path.display());
+    }
+
+    let target_mobius_path = worktree_path.join(".mobius");
+    let target_issue_path = target_mobius_path.join("issues").join(task_id);
+
+    if source_issue_path != target_issue_path {
+        copy_dir_recursive(&source_issue_path, &target_issue_path)?;
+    }
+
+    let gitignore_path = target_mobius_path.join(".gitignore");
+    if !gitignore_path.exists() {
+        fs::create_dir_all(&target_mobius_path)?;
+        fs::write(&gitignore_path, "state/\n")?;
+    }
+
+    let context_file = target_issue_path.join("context.json");
+    if !context_file.exists() {
+        anyhow::bail!(
+            "Mirrored context file not found at {}",
+            context_file.display()
+        );
+    }
+
+    Ok(context_file.to_string_lossy().to_string())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
+    if !src.exists() {
+        anyhow::bail!("Source directory does not exist: {}", src.display());
+    }
+
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
+    Ok(())
 }
 
 fn format_elapsed(duration: std::time::Duration) -> String {

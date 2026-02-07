@@ -46,9 +46,13 @@ struct Cli {
     #[arg(short, long)]
     backend: Option<String>,
 
-    /// Model: opus, sonnet, or haiku
+    /// Model profile or runtime model ID (e.g., opus or openai/gpt-5.3-codex)
     #[arg(short, long)]
     model: Option<String>,
+
+    /// Thinking level for OpenCode (minimal, low, medium, high, max, xhigh)
+    #[arg(long, value_name = "LEVEL")]
+    thinking_level: Option<String>,
 
     /// Use sequential execution instead of parallel
     #[arg(short, long)]
@@ -168,9 +172,13 @@ enum Command {
         #[arg(short, long)]
         backend: Option<String>,
 
-        /// Model: opus, sonnet, or haiku
+        /// Model profile or runtime model ID (e.g., opus or openai/gpt-5.3-codex)
         #[arg(short, long)]
         model: Option<String>,
+
+        /// Thinking level for OpenCode (minimal, low, medium, high, max, xhigh)
+        #[arg(long, value_name = "LEVEL")]
+        thinking_level: Option<String>,
 
         /// Delay between iterations in seconds
         #[arg(short, long)]
@@ -194,9 +202,13 @@ enum Command {
         #[arg(short, long)]
         backend: Option<String>,
 
-        /// Model: opus, sonnet, or haiku
+        /// Model profile or runtime model ID (e.g., opus or openai/gpt-5.3-codex)
         #[arg(short, long)]
         model: Option<String>,
+
+        /// Thinking level for OpenCode (minimal, low, medium, high, max, xhigh)
+        #[arg(long, value_name = "LEVEL")]
+        thinking_level: Option<String>,
 
         /// Max parallel agents (overrides config)
         #[arg(short, long)]
@@ -232,9 +244,13 @@ enum Command {
         #[arg(short, long)]
         backend: Option<String>,
 
-        /// Model: opus, sonnet, or haiku
+        /// Model profile or runtime model ID (e.g., opus or openai/gpt-5.3-codex)
         #[arg(short, long)]
         model: Option<String>,
+
+        /// Thinking level for OpenCode (minimal, low, medium, high, max, xhigh)
+        #[arg(long, value_name = "LEVEL")]
+        thinking_level: Option<String>,
 
         /// Create as draft PR
         #[arg(short, long)]
@@ -376,8 +392,14 @@ fn main() {
                 local: _,
                 backend,
                 model,
+                thinking_level,
                 delay,
             } => {
+                if thinking_level.is_some() {
+                    eprintln!(
+                        "Warning: --thinking-level is only applied to OpenCode loop/submit flows"
+                    );
+                }
                 if let Err(e) = commands::run::run(
                     &task_id,
                     max_iterations,
@@ -396,6 +418,7 @@ fn main() {
                 local: _,
                 backend,
                 model,
+                thinking_level,
                 parallel,
                 max_iterations,
                 fresh,
@@ -408,6 +431,7 @@ fn main() {
                     &commands::loop_cmd::LoopOptions {
                         backend_override: backend.as_deref(),
                         model_override: model.as_deref(),
+                        thinking_level_override: thinking_level.as_deref(),
                         parallel_override: parallel,
                         max_iterations_override: max_iterations,
                         fresh,
@@ -423,6 +447,7 @@ fn main() {
                 task_id,
                 backend,
                 model,
+                thinking_level,
                 draft,
                 skip_status_update,
             } => {
@@ -430,6 +455,7 @@ fn main() {
                     task_id.as_deref(),
                     backend.as_deref(),
                     model.as_deref(),
+                    thinking_level.as_deref(),
                     draft,
                     skip_status_update,
                 ) {
@@ -522,6 +548,11 @@ fn main() {
             if let Some(task_id) = cli.task_id {
                 // Default command: auto-route to loop or run based on flags
                 if cli.sequential {
+                    if cli.thinking_level.is_some() {
+                        eprintln!(
+                            "Warning: --thinking-level is only applied to OpenCode loop/submit flows"
+                        );
+                    }
                     if let Err(e) = commands::run::run(
                         &task_id,
                         cli.max_iterations,
@@ -538,6 +569,7 @@ fn main() {
                     &commands::loop_cmd::LoopOptions {
                         backend_override: cli.backend.as_deref(),
                         model_override: cli.model.as_deref(),
+                        thinking_level_override: cli.thinking_level.as_deref(),
                         parallel_override: cli.parallel,
                         max_iterations_override: cli.max_iterations,
                         fresh: cli.fresh,

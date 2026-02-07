@@ -9,12 +9,13 @@ use crate::runtime_adapter;
 // Session reading not needed here currently
 use crate::jira::JiraClient;
 use crate::local_state::{read_parent_spec, write_parent_spec};
-use crate::types::enums::{AgentRuntime, Backend};
+use crate::types::enums::{AgentRuntime, Backend, Model};
 
 pub fn run(
     task_id: Option<&str>,
     backend_override: Option<&str>,
     model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
     draft: bool,
     skip_status_update: bool,
 ) -> anyhow::Result<()> {
@@ -28,9 +29,14 @@ pub fn run(
     let mut execution_config = config.execution.clone();
     if config.runtime == AgentRuntime::Claude {
         if let Some(override_model) = model_override {
-            if let Ok(model) = override_model.parse() {
-                execution_config.model = model;
-            }
+            execution_config.model = override_model
+                .trim()
+                .parse::<Model>()
+                .map(|profile| profile.to_string())
+                .unwrap_or_else(|e| {
+                    eprintln!("{}", format!("Error: {e}").red());
+                    std::process::exit(1);
+                });
         }
     }
     let model_override = if config.runtime == AgentRuntime::Opencode {
@@ -38,8 +44,11 @@ pub fn run(
     } else {
         None
     };
-    let model =
-        runtime_adapter::effective_model_for_runtime(config.runtime, &execution_config, model_override);
+    let model = runtime_adapter::effective_model_for_runtime(
+        config.runtime,
+        &execution_config,
+        model_override,
+    );
 
     // Validate task ID format if provided
     if let Some(tid) = task_id {
@@ -84,9 +93,19 @@ pub fn run(
         skill_invocation, context_note
     );
 
-    // Check if cclean is available
-    let use_cclean = which::which("cclean").is_ok();
-    let full_cmd = runtime_adapter::build_submit_command(config.runtime, &model, use_cclean);
+    // Claude output can be piped through cclean; OpenCode does not require it.
+    let use_cclean = config.runtime == AgentRuntime::Claude && which::which("cclean").is_ok();
+    let execution_thinking_override = if config.runtime == AgentRuntime::Opencode {
+        thinking_level_override
+    } else {
+        None
+    };
+    let full_cmd = runtime_adapter::build_submit_command(
+        config.runtime,
+        &model,
+        use_cclean,
+        execution_thinking_override,
+    );
 
     // Execute configured runtime with the PR skill
     let status = Command::new("sh")

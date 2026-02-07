@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::enums::{
-    AgentRuntime, Backend, BuildSystem, JiraAuthMethod, Model, Platform, ProjectType,
-};
+use super::enums::{AgentRuntime, Backend, BuildSystem, JiraAuthMethod, Platform, ProjectType};
 
 /// TUI dashboard configuration options
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,8 +60,8 @@ pub struct ExecutionConfig {
     pub delay_seconds: u32,
     #[serde(default = "default_max_iterations")]
     pub max_iterations: u32,
-    #[serde(default)]
-    pub model: Model,
+    #[serde(default = "default_model_profile")]
+    pub model: String,
     #[serde(default = "default_true")]
     pub sandbox: bool,
     #[serde(default = "default_container_name")]
@@ -93,7 +91,7 @@ impl Default for ExecutionConfig {
         Self {
             delay_seconds: 3,
             max_iterations: 50,
-            model: Model::Opus,
+            model: default_model_profile(),
             sandbox: true,
             container_name: "mobius-sandbox".to_string(),
             max_parallel_agents: Some(3),
@@ -300,6 +298,10 @@ fn default_max_iterations() -> u32 {
     50
 }
 
+fn default_model_profile() -> String {
+    "opus".to_string()
+}
+
 fn default_container_name() -> String {
     "mobius-sandbox".to_string()
 }
@@ -335,7 +337,7 @@ mod tests {
         assert_eq!(config.backend, Backend::Linear);
         assert_eq!(config.execution.delay_seconds, 3);
         assert_eq!(config.execution.max_iterations, 50);
-        assert_eq!(config.execution.model, Model::Opus);
+        assert_eq!(config.execution.model, "opus");
         assert!(config.execution.sandbox);
         assert_eq!(config.execution.container_name, "mobius-sandbox");
         assert_eq!(config.execution.max_parallel_agents, Some(3));

@@ -123,18 +123,73 @@ resolve_selected_runtime() {
   printf '%s\n' "$runtime"
 }
 
+resolve_opencode_model() {
+  local raw_model="${MOBIUS_OPENCODE_MODEL:-${MOBIUS_MODEL:-openai/gpt-5.3-codex}}"
+  local normalized
+
+  normalized="$(to_lower "$raw_model")"
+  normalized="${normalized// /-}"
+
+  case "$normalized" in
+    ""|opus|sonnet|haiku|gpt-5.3|gpt-5.3-codex)
+      printf '%s\n' "openai/gpt-5.3-codex"
+      ;;
+    gpt-5.2)
+      printf '%s\n' "openai/gpt-5.2"
+      ;;
+    gpt-5.2-codex)
+      printf '%s\n' "openai/gpt-5.2-codex"
+      ;;
+    gpt-5.1-codex)
+      printf '%s\n' "openai/gpt-5.1-codex"
+      ;;
+    gpt-5.1-codex-max)
+      printf '%s\n' "openai/gpt-5.1-codex-max"
+      ;;
+    gpt-5.1-codex-mini)
+      printf '%s\n' "openai/gpt-5.1-codex-mini"
+      ;;
+    */*)
+      printf '%s\n' "$raw_model"
+      ;;
+    *)
+      printf '%s\n' "$normalized"
+      ;;
+  esac
+}
+
+run_runtime_prompt() {
+  local runtime="$1"
+  local prompt="$2"
+
+  case "$runtime" in
+    claude)
+      claude "$prompt"
+      ;;
+    opencode)
+      local model
+      model="$(resolve_opencode_model)"
+      opencode run "$prompt" --model "$model"
+      ;;
+    *)
+      printf 'Unknown runtime: %s\n' "$runtime" >&2
+      return 1
+      ;;
+  esac
+}
+
 md() {
   task
   local runtime
   runtime="$(resolve_selected_runtime)"
-  "$runtime" "/define $MOBIUS_TASK_ID"
+  run_runtime_prompt "$runtime" "/define $MOBIUS_TASK_ID"
 }
 
 mr() {
   task
   local runtime
   runtime="$(resolve_selected_runtime)"
-  "$runtime" "/refine $MOBIUS_TASK_ID"
+  run_runtime_prompt "$runtime" "/refine $MOBIUS_TASK_ID"
 }
 
 me() {

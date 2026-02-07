@@ -254,7 +254,7 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
         execution: ExecutionConfig {
             delay_seconds,
             max_iterations,
-            model,
+            model: model.to_string(),
             sandbox,
             ..ExecutionConfig::default()
         },

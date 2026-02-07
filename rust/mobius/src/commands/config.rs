@@ -6,6 +6,7 @@ use std::process::Command;
 
 use crate::config::loader::read_config_with_env;
 use crate::config::paths::resolve_paths;
+use crate::runtime_adapter;
 
 pub fn run(edit: bool) -> anyhow::Result<()> {
     let paths = resolve_paths();
@@ -45,6 +46,12 @@ pub fn run(edit: bool) -> anyhow::Result<()> {
     // Read and display config
     match read_config_with_env(&paths.config_path) {
         Ok(config) => {
+            let effective_model = runtime_adapter::effective_model_for_runtime(
+                config.runtime,
+                &config.execution,
+                None,
+            );
+
             println!("{}", "\nCurrent settings:".dimmed());
             println!(
                 "  runtime:         {}",
@@ -55,9 +62,10 @@ pub fn run(edit: bool) -> anyhow::Result<()> {
                 format!("{}", config.backend).cyan()
             );
             println!(
-                "  model:           {}",
+                "  model_profile:   {}",
                 format!("{}", config.execution.model).cyan()
             );
+            println!("  runtime_model:   {}", effective_model.cyan());
             println!(
                 "  delay_seconds:   {}",
                 format!("{}", config.execution.delay_seconds).cyan()

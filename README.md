@@ -82,6 +82,8 @@ mobius ABC-123       # Start working on an issue
 The complete workflow transforms an idea into a merged PR through 5 steps:
 
 Use your configured runtime CLI (`claude` or `opencode`) for skill commands.
+For OpenCode, use `opencode run ...` with a provider-qualified model (default: `openai/gpt-5.3-codex`).
+Use `--thinking-level` to tune OpenCode reasoning effort (`minimal`, `low`, `medium`, `high`, `max`, `xhigh`).
 
 ### 1. `/define` — Create the Issue
 
@@ -89,7 +91,7 @@ Use Socratic questioning to create a well-defined issue with clear acceptance cr
 
 ```bash
 claude "/define"      # Claude runtime
-opencode "/define"    # OpenCode runtime
+opencode run "/define" --model openai/gpt-5.3-codex    # OpenCode runtime
 ```
 
 ### 2. `/refine` — Break into Sub-tasks
@@ -98,7 +100,7 @@ Analyze your codebase and decompose the issue into focused sub-tasks, each targe
 
 ```bash
 claude "/refine ABC-123"      # Claude runtime
-opencode "/refine ABC-123"    # OpenCode runtime
+opencode run "/refine ABC-123" --model openai/gpt-5.3-codex    # OpenCode runtime
 ```
 
 ### 3. `mobius loop` — Execute with Parallel Agents
@@ -108,6 +110,7 @@ Run the autonomous execution loop. Unblocked sub-tasks execute simultaneously in
 ```bash
 mobius loop ABC-123              # Parallel execution (default)
 mobius loop ABC-123 --parallel=5 # Up to 5 concurrent agents
+mobius loop ABC-123 --thinking-level=xhigh # OpenCode reasoning level
 mobius ABC-123 --sequential      # Sequential fallback
 ```
 
@@ -117,7 +120,7 @@ Review the implementation against acceptance criteria, run final validation, and
 
 ```bash
 claude "/verify ABC-123"      # Claude runtime
-opencode "/verify ABC-123"    # OpenCode runtime
+opencode run "/verify ABC-123" --model openai/gpt-5.3-codex    # OpenCode runtime
 ```
 
 ### 5. `mobius submit` — Create the PR
@@ -138,10 +141,10 @@ mobius submit ABC-123
 
 | Skill | Purpose | Command |
 |-------|---------|---------|
-| `/define` | Create well-defined issues with acceptance criteria | `claude "/define"` or `opencode "/define"` |
-| `/refine` | Break issues into single-file focused sub-tasks | `claude "/refine ABC-123"` or `opencode "/refine ABC-123"` |
-| `/execute` | Implement one sub-task (or use `mobius loop` for all) | `claude "/execute ABC-123"` or `opencode "/execute ABC-123"` |
-| `/verify` | Validate implementation against acceptance criteria | `claude "/verify ABC-123"` or `opencode "/verify ABC-123"` |
+| `/define` | Create well-defined issues with acceptance criteria | `claude "/define"` or `opencode run "/define" --model openai/gpt-5.3-codex` |
+| `/refine` | Break issues into single-file focused sub-tasks | `claude "/refine ABC-123"` or `opencode run "/refine ABC-123" --model openai/gpt-5.3-codex` |
+| `/execute` | Implement one sub-task (or use `mobius loop` for all) | `claude "/execute ABC-123"` or `opencode run "/execute ABC-123" --model openai/gpt-5.3-codex` |
+| `/verify` | Validate implementation against acceptance criteria | `claude "/verify ABC-123"` or `opencode run "/verify ABC-123" --model openai/gpt-5.3-codex` |
 
 Skills auto-detect your configured backend (Linear or Jira). For explicit selection, use prefixed aliases: `/linear:define`, `/jira:refine`, etc.
 
@@ -293,12 +296,14 @@ mobius doctor
 # Parallel execution (default)
 mobius loop ABC-123              # Run parallel loop until complete
 mobius loop ABC-123 --parallel=5 # Override max parallel agents
+mobius loop ABC-123 --thinking-level=xhigh # OpenCode reasoning level (xhigh -> max)
 mobius ABC-123                   # Alias for parallel loop
 
 # Sequential execution
 mobius ABC-123 --sequential      # Use bash sequential loop
 mobius ABC-123 --local           # Bypass sandbox
 mobius ABC-123 --model=sonnet    # Use specific model
+mobius ABC-123 --model=openai/gpt-5.3-codex  # OpenCode model override
 
 # Management
 mobius setup                     # Interactive setup wizard

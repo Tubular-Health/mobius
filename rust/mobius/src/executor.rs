@@ -6,8 +6,8 @@ use tokio::time::{sleep, Duration};
 
 use crate::runtime_adapter;
 use crate::tmux::{
-    capture_pane_content, create_agent_pane, kill_pane, layout_panes, run_in_pane, set_pane_title,
-    TmuxPane, TmuxSession,
+    capture_pane_content, create_agent_pane, interrupt_pane, kill_pane, layout_panes,
+    run_in_pane, set_pane_title, TmuxPane, TmuxSession,
 };
 use crate::types::AgentRuntime;
 use crate::types::{ExecutionConfig, SubTask};
@@ -37,14 +37,24 @@ struct StatusPatterns {
 impl StatusPatterns {
     fn new() -> Self {
         Self {
-            subtask_complete: Regex::new(r"STATUS:\s*SUBTASK_COMPLETE").unwrap(),
-            verification_failed: Regex::new(r"STATUS:\s*VERIFICATION_FAILED").unwrap(),
-            all_complete: Regex::new(r"STATUS:\s*ALL_COMPLETE").unwrap(),
-            all_blocked: Regex::new(r"STATUS:\s*ALL_BLOCKED").unwrap(),
-            no_subtasks: Regex::new(r"STATUS:\s*NO_SUBTASKS").unwrap(),
+            subtask_complete: status_regex("SUBTASK_COMPLETE"),
+            verification_failed: status_regex("VERIFICATION_FAILED"),
+            all_complete: status_regex("ALL_COMPLETE"),
+            all_blocked: status_regex("ALL_BLOCKED"),
+            no_subtasks: status_regex("NO_SUBTASKS"),
             execution_complete: Regex::new(r"EXECUTION_COMPLETE:\s*[\w-]+").unwrap(),
         }
     }
+}
+
+fn status_regex(status: &str) -> Regex {
+    let escaped = regex::escape(status);
+    // Supports both canonical lines (`STATUS: X`) and markdown variants
+    // emitted by some runtimes (`- Status: `X``).
+    Regex::new(&format!(
+        r"(?m)^\s*(?:[-*]\s*)?(?:\*{{1,2}}\s*)?(?:STATUS|Status|status)(?:\s*\*{{1,2}})?\s*:\s*`?{escaped}`?\s*$"
+    ))
+    .unwrap()
 }
 
 /// Result of executing a single agent task
@@ -73,6 +83,7 @@ struct AgentHandle {
     task: SubTask,
     pane: TmuxPane,
     start_time: Instant,
+    is_primary: bool,
     #[allow(dead_code)]
     command: String,
 }
@@ -108,6 +119,7 @@ pub fn build_runtime_command(
     config: &ExecutionConfig,
     context_file_path: Option<&str>,
     model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
 ) -> String {
     runtime_adapter::build_execution_command(
         runtime,
@@ -117,6 +129,7 @@ pub fn build_runtime_command(
         config,
         context_file_path,
         model_override,
+        thinking_level_override,
     )
 }
 
@@ -135,6 +148,7 @@ pub fn build_claude_command(
         worktree_path,
         config,
         context_file_path,
+        None,
         None,
     )
 }
@@ -157,6 +171,7 @@ pub async fn execute_parallel(
     session: &TmuxSession,
     context_file_path: Option<&str>,
     model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
     timeout_ms: Option<u64>,
 ) -> Vec<ExecutionResult> {
     let timeout = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
@@ -176,6 +191,7 @@ pub async fn execute_parallel(
         config,
         context_file_path,
         model_override,
+        thinking_level_override,
     )
     .await
     {
@@ -218,6 +234,7 @@ pub async fn spawn_agent_in_pane(
     config: &ExecutionConfig,
     context_file_path: Option<&str>,
     model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
 ) -> ExecutionResult {
     let start_time = Instant::now();
     let skill = select_skill_for_task(task);
@@ -229,6 +246,7 @@ pub async fn spawn_agent_in_pane(
         config,
         context_file_path,
         model_override,
+        thinking_level_override,
     );
 
     run_in_pane(&pane.id, &command, true).await;
@@ -237,6 +255,7 @@ pub async fn spawn_agent_in_pane(
         task: task.clone(),
         pane: pane.clone(),
         start_time,
+        is_primary: false,
         command,
     };
 
@@ -295,19 +314,32 @@ async fn spawn_agents(
     config: &ExecutionConfig,
     context_file_path: Option<&str>,
     model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
 ) -> Result<Vec<AgentHandle>> {
     let mut handles = Vec::with_capacity(tasks.len());
 
     for (i, task) in tasks.iter().enumerate() {
         let pane = if i == 0 {
-            // Reuse the session's initial pane for the first agent
-            let title = format!("{}: {}", task.identifier, task.title);
-            set_pane_title(&session.initial_pane_id, &title).await;
-            TmuxPane {
-                id: session.initial_pane_id.clone(),
-                session_id: session.id.clone(),
-                task_id: Some(task.identifier.clone()),
-                pane_type: crate::tmux::PaneType::Agent,
+            // Reuse the session's initial pane for the first agent when available.
+            if crate::tmux::is_pane_still_running(&session.initial_pane_id).await {
+                let title = format!("{}: {}", task.identifier, task.title);
+                set_pane_title(&session.initial_pane_id, &title).await;
+                TmuxPane {
+                    id: session.initial_pane_id.clone(),
+                    session_id: session.id.clone(),
+                    task_id: Some(task.identifier.clone()),
+                    pane_type: crate::tmux::PaneType::Agent,
+                }
+            } else {
+                // If the original pane was destroyed (e.g. prior timeout cleanup),
+                // create a replacement pane from the session itself.
+                create_agent_pane(
+                    session,
+                    &task.identifier,
+                    &format!("{}: {}", task.identifier, task.title),
+                    Some(&session.name),
+                )
+                .await?
             }
         } else {
             create_agent_pane(
@@ -328,6 +360,7 @@ async fn spawn_agents(
             config,
             context_file_path,
             model_override,
+            thinking_level_override,
         );
 
         run_in_pane(&pane.id, &command, true).await;
@@ -336,6 +369,7 @@ async fn spawn_agents(
             task: task.clone(),
             pane,
             start_time: Instant::now(),
+            is_primary: i == 0,
             command,
         });
     }
@@ -355,7 +389,14 @@ async fn wait_for_agent(handle: AgentHandle, timeout_ms: u64) -> ExecutionResult
             // Timeout
             let title = format!("\u{2717} {}: TIMEOUT", handle.task.identifier);
             set_pane_title(&handle.pane.id, &title).await;
-            kill_pane(&handle.pane.id).await;
+            // Keep the primary pane alive for future retries. Killing it can leave
+            // session.initial_pane_id dangling and break tmux split targets.
+            interrupt_pane(&handle.pane.id).await;
+            sleep(Duration::from_millis(150)).await;
+            if !handle.is_primary {
+                kill_pane(&handle.pane.id).await;
+            }
+            let timeout_output = capture_pane_content(&handle.pane.id, 200).await;
 
             return ExecutionResult {
                 task_id: handle.task.id.clone(),
@@ -368,7 +409,11 @@ async fn wait_for_agent(handle: AgentHandle, timeout_ms: u64) -> ExecutionResult
                     elapsed.as_secs()
                 )),
                 pane_id: Some(handle.pane.id.clone()),
-                raw_output: None,
+                raw_output: if timeout_output.is_empty() {
+                    None
+                } else {
+                    Some(timeout_output)
+                },
             };
         }
 
@@ -558,11 +603,15 @@ mod tests {
             "/path/to/worktree",
             &config,
             None,
-            Some("gpt-5-mini"),
+            Some("gpt-5.3-codex"),
+            Some("xhigh"),
         );
 
-        assert!(cmd.contains("opencode -p"));
-        assert!(cmd.contains("--model gpt-5-mini"));
+        assert!(cmd.contains("Use the execute skill for sub-task MOB-101"));
+        assert!(cmd.contains("--model openai/gpt-5.3-codex"));
+        assert!(cmd.contains("--variant max"));
+        assert!(!cmd.contains("| cclean"));
+        assert!(!cmd.contains("echo '/execute MOB-101'"));
     }
 
     #[test]
@@ -576,6 +625,7 @@ mod tests {
             &config,
             None,
             Some("custom-model"),
+            Some("xhigh"),
         );
 
         assert!(cmd.contains("claude -p"));
@@ -615,6 +665,12 @@ mod tests {
         assert!(patterns
             .subtask_complete
             .is_match("some text before\nSTATUS: SUBTASK_COMPLETE\nsome text after"));
+        assert!(patterns
+            .subtask_complete
+            .is_match("- Status: `SUBTASK_COMPLETE`"));
+        assert!(patterns
+            .subtask_complete
+            .is_match("**Status**: SUBTASK_COMPLETE"));
         assert!(!patterns.subtask_complete.is_match("SUBTASK_COMPLETE"));
     }
 
@@ -624,6 +680,9 @@ mod tests {
         assert!(patterns
             .verification_failed
             .is_match("STATUS: VERIFICATION_FAILED"));
+        assert!(patterns
+            .verification_failed
+            .is_match("- Status: `VERIFICATION_FAILED`"));
         assert!(!patterns.verification_failed.is_match("VERIFICATION_FAILED"));
     }
 
@@ -674,6 +733,22 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.status, ExecutionStatus::SubtaskComplete);
         assert_eq!(result.identifier, "MOB-101");
+    }
+
+    #[test]
+    fn test_parse_agent_output_subtask_complete_markdown_status_line() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        let content = "Done\n- Status: `SUBTASK_COMPLETE`\ncommit: abc123\n";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re);
+
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(result.success);
+        assert_eq!(result.status, ExecutionStatus::SubtaskComplete);
     }
 
     #[test]

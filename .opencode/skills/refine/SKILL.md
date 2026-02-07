@@ -6,7 +6,24 @@ invocation: /refine
 
 <objective>
 Transform an issue into a set of focused, executable sub-tasks through deep codebase exploration. Each sub-task targets a single file or tightly-coupled file pair, sized to fit within one Claude context window. Sub-tasks are created with blocking relationships to enable parallel work where dependencies allow.
+
+Refinement is only complete after documentation artifacts are finalized: task JSON files, `context.json`, and the handoff summary used by `/execute` and `/verify`.
 </objective>
+
+<execution_boundaries>
+**Refine is planning/decomposition only. Do not implement product code in this skill.**
+
+Hard rules:
+- Do **not** edit application/source code while running `/refine`
+- Do **not** run build/test/lint except lightweight checks needed to validate refinement artifacts
+- Do **not** create commits/branches/PRs from `/refine`
+- Only allowed writes are refinement artifacts under `.mobius/issues/{id}/` (`tasks/*.json`, `context.json`, optional parent cache)
+
+If the user asks to refine and implement in one request:
+1. Complete refinement and write sub-task artifacts after approval
+2. Stop
+3. Recommend `/execute {id}` or `mobius loop {id}` for implementation
+</execution_boundaries>
 
 <context>
 This skill bridges high-level issues and actionable implementation work. It:
@@ -263,6 +280,8 @@ Args: MOB-123
 6. **Phase 4: Aggregate & present** - Collect subagent write-ups, establish dependency ordering, add verification gate, present full breakdown
 7. **Gather feedback** - Use AskUserQuestion for refinement
 8. **Phase 5: Write sub-tasks locally** - Write sub-task JSON files to `.mobius/issues/{id}/tasks/` directory
+9. **Finalize refinement documentation** - Validate task files + `context.json` consistency and produce a complete handoff summary
+10. **Stop after refinement** - Offer `/execute` or `mobius loop`; do not begin coding
 </workflow>
 </quick_start>
 
@@ -784,7 +803,8 @@ After user approval, write sub-task JSON files to `.mobius/issues/{parent-id}/ta
 3. **Write dependent tasks** with `blockedBy` referencing earlier `task-{NNN}` identifiers
 4. **Write Verification Gate last** as `task-VG.json` with all implementation task IDs as blockers
 5. **Write context.json** with full parent + subTasks array for execute/verify skills
-6. **Report progress** as each file is written
+6. **Validate documentation consistency** (task files and `context.json` contain matching IDs/status/dependencies)
+7. **Report progress** as each file is written
 
 **Example creation flow**:
 ```
@@ -807,8 +827,22 @@ All sub-tasks written successfully!
 ```
 </local_creation_process>
 
+<documentation_finalization>
+**CRITICAL: Do not treat refinement as done until documentation is finalized.**
+
+Before ending `/refine`, confirm all refinement artifacts are complete and consistent:
+
+1. Every planned task has a corresponding `task-{NNN}.json` (plus `task-VG.json`)
+2. `context.json` contains the same task set, dependency relationships, and metadata timestamp updates
+3. The handoff summary clearly identifies ready-first tasks and dependency order
+
+If any artifact is missing or inconsistent, fix the files first and only then report "Breakdown Complete".
+</documentation_finalization>
+
 <completion_summary>
 After writing all sub-task files locally, provide a summary:
+
+This summary is the final documentation handoff. It should be complete enough for `/execute` to start without additional clarification.
 
 ```markdown
 ## Breakdown Complete: {parent issue ID}
@@ -1177,6 +1211,15 @@ Run `mobius loop MOB-100` to begin execution."
 **Don't create circular dependencies**:
 - BAD: Task A blocks B, B blocks C, C blocks A
 - GOOD: Clear hierarchical dependency flow
+
+**Don't start coding from refine**:
+- BAD: Editing `src/*` immediately after writing task JSON files
+- GOOD: End after refinement artifacts and hand off to `/execute` or `mobius loop`
+
+**Don't skip refinement documentation finalization**:
+- BAD: Write a few task files and stop without validating `context.json`
+- BAD: Mark refinement complete when dependency links are inconsistent across files
+- GOOD: Treat task files + `context.json` + handoff summary as required completion artifacts
 </anti_patterns>
 
 <success_criteria>
@@ -1197,8 +1240,10 @@ A successful refinement produces:
 - [ ] User approved breakdown before creation
 - [ ] Sub-task files written to `.mobius/issues/{id}/tasks/` as `task-{NNN}.json`
 - [ ] `context.json` written with full parent + subTasks array
+- [ ] **Refinement documentation finalized** (task files + `context.json` + handoff summary are consistent)
 - [ ] Blocking relationships captured in JSON `blockedBy`/`blocks` arrays
 - [ ] Summary with dependency graph provided
+- [ ] No source code files modified by `/refine` (only `.mobius/issues/{id}/` artifacts)
 </success_criteria>
 
 <testing>

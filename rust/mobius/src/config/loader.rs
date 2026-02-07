@@ -29,7 +29,7 @@ pub fn read_config(config_path: &str) -> Result<LoopConfig, ConfigError> {
 /// - MOBIUS_BACKEND: Override backend (linear, jira, local)
 /// - MOBIUS_DELAY_SECONDS: Override delay between iterations
 /// - MOBIUS_MAX_ITERATIONS: Override max iterations
-/// - MOBIUS_MODEL: Override AI model (opus, sonnet, haiku)
+/// - MOBIUS_MODEL: Override model profile or runtime model ID
 /// - MOBIUS_SANDBOX_ENABLED: Override sandbox setting (true/false)
 /// - MOBIUS_CONTAINER: Override container name
 pub fn read_config_with_env(config_path: &str) -> Result<LoopConfig, ConfigError> {
@@ -60,8 +60,12 @@ pub fn read_config_with_env(config_path: &str) -> Result<LoopConfig, ConfigError
     }
 
     if let Ok(model) = env::var("MOBIUS_MODEL") {
-        if let Ok(m) = model.parse::<Model>() {
-            config.execution.model = m;
+        let trimmed = model.trim();
+        if !trimmed.is_empty() {
+            config.execution.model = trimmed
+                .parse::<Model>()
+                .map(|profile| profile.to_string())
+                .unwrap_or_else(|_| trimmed.to_string());
         }
     }
 
@@ -232,7 +236,7 @@ mod tests {
         assert_eq!(config.backend, Backend::Linear);
         assert_eq!(config.execution.delay_seconds, 3);
         assert_eq!(config.execution.max_iterations, 50);
-        assert_eq!(config.execution.model, Model::Opus);
+        assert_eq!(config.execution.model, "opus");
     }
 
     #[test]
@@ -256,7 +260,7 @@ jira:
         assert_eq!(config.backend, Backend::Jira);
         assert_eq!(config.execution.delay_seconds, 5);
         assert_eq!(config.execution.max_iterations, 100);
-        assert_eq!(config.execution.model, Model::Sonnet);
+        assert_eq!(config.execution.model, "sonnet");
         assert!(!config.execution.sandbox);
         assert!(config.jira.is_some());
         let jira = config.jira.unwrap();
@@ -265,6 +269,23 @@ jira:
             Some("https://example.atlassian.net".to_string())
         );
         assert_eq!(jira.project_key, Some("PROJ".to_string()));
+    }
+
+    #[test]
+    fn test_read_config_parses_runtime_model_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("config.yaml");
+        let yaml = r#"
+runtime: opencode
+backend: linear
+execution:
+  model: openai/gpt-5.3-codex
+"#;
+        std::fs::write(&config_path, yaml).unwrap();
+
+        let config = read_config(config_path.to_str().unwrap()).unwrap();
+        assert_eq!(config.runtime, AgentRuntime::Opencode);
+        assert_eq!(config.execution.model, "openai/gpt-5.3-codex");
     }
 
     #[test]
@@ -281,7 +302,7 @@ jira:
         // These should be defaults via serde(default)
         assert_eq!(config.execution.delay_seconds, 3);
         assert_eq!(config.execution.max_iterations, 50);
-        assert_eq!(config.execution.model, Model::Opus);
+        assert_eq!(config.execution.model, "opus");
     }
 
     #[test]
@@ -295,12 +316,24 @@ jira:
         env::set_var("MOBIUS_DELAY_SECONDS", "10");
 
         let config = read_config_with_env(config_path.to_str().unwrap()).unwrap();
-        assert_eq!(config.execution.model, Model::Sonnet);
+        assert_eq!(config.execution.model, "sonnet");
         assert_eq!(config.execution.delay_seconds, 10);
 
         // Clean up
         env::remove_var("MOBIUS_MODEL");
         env::remove_var("MOBIUS_DELAY_SECONDS");
+    }
+
+    #[test]
+    fn test_read_config_with_env_runtime_model_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_path = tmp.path().join("config.yaml");
+        std::fs::write(&config_path, "runtime: opencode\nbackend: linear\n").unwrap();
+
+        env::set_var("MOBIUS_MODEL", "openai/gpt-5.3-codex");
+        let config = read_config_with_env(config_path.to_str().unwrap()).unwrap();
+        assert_eq!(config.execution.model, "openai/gpt-5.3-codex");
+        env::remove_var("MOBIUS_MODEL");
     }
 
     #[test]

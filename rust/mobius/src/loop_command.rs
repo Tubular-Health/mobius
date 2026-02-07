@@ -3,13 +3,15 @@
 //! Coordinates worktree isolation, tmux-based agent spawning, task graph
 //! management, and runtime state updates. Ported from `src/commands/loop.ts`.
 
+use std::fs;
+use std::path::Path;
 use std::process;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context as AnyhowContext, Result};
 use chrono::Utc;
 use colored::Colorize;
 
@@ -17,11 +19,12 @@ use crate::config;
 use crate::context;
 use crate::executor;
 use crate::local_state;
+use crate::runtime_adapter;
 use crate::tmux;
 use crate::tracker;
 use crate::tree_renderer;
 use crate::types::context::RuntimeActiveTask;
-use crate::types::enums::{Backend, Model, SessionStatus, TaskStatus};
+use crate::types::enums::{AgentRuntime, Backend, Model, SessionStatus, TaskStatus};
 use crate::types::task_graph::{
     build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks, get_verification_task,
     update_task_status, TaskGraph,
@@ -84,14 +87,31 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
         exec_config.max_parallel_agents = Some(p);
     }
     if let Some(ref m) = options.model {
-        exec_config.model = Model::from_str(m).unwrap_or_else(|e| {
-            eprintln!("{}", format!("Error: {e}").red());
-            process::exit(1);
-        });
+        if loop_config.runtime == AgentRuntime::Opencode {
+            exec_config.model = m.trim().to_string();
+        } else {
+            exec_config.model = Model::from_str(m)
+                .unwrap_or_else(|e| {
+                    eprintln!("{}", format!("Error: {e}").red());
+                    process::exit(1);
+                })
+                .to_string();
+        }
     }
     if options.no_sandbox {
         exec_config.sandbox = false;
     }
+
+    let execution_model_override = if loop_config.runtime == AgentRuntime::Opencode {
+        options.model.as_deref()
+    } else {
+        None
+    };
+    let runtime_model_label = runtime_adapter::effective_model_for_runtime(
+        loop_config.runtime,
+        &exec_config,
+        execution_model_override,
+    );
 
     let max_iterations = options.max_iterations.unwrap_or(exec_config.max_iterations);
 
@@ -246,17 +266,27 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // -----------------------------------------------------------------------
     println!("{}", "Generating local context for skills...".dimmed());
     let issue_context = context::generate_context(&task_id, Some(&worktree_path), false)?;
-    let context_file_path = match issue_context {
+    match issue_context {
         Some(ref ctx) => {
             let path = context::write_full_context_file(&task_id, ctx)?;
             println!("{}", format!("Context file: {path}").dimmed());
-            Some(path)
         }
         None => {
             eprintln!("{}", "Warning: Failed to generate issue context".yellow());
-            None
         }
-    };
+    }
+
+    let mut worktree_context_file = mirror_issue_context_to_worktree(&task_id, &worktree_info.path)
+        .with_context(|| {
+            format!(
+                "Failed to stage .mobius issue context in worktree {}",
+                worktree_info.path.display()
+            )
+        })?;
+    println!(
+        "{}",
+        format!("Worktree context file: {}", worktree_context_file).dimmed()
+    );
 
     // -----------------------------------------------------------------------
     // 12. Display initial tree
@@ -412,7 +442,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         pane: String::new(),
                         started_at: now.clone(),
                         worktree: Some(worktree_path.clone()),
-                        model: Some(exec_config.model.to_string()),
+                        model: Some(runtime_model_label.clone()),
                         input_tokens: None,
                         output_tokens: None,
                     },
@@ -441,7 +471,14 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
             tmux::update_status_pane(&loop_status, &session_name).await?;
 
             // Execute tasks in parallel
-            let ctx_path_ref = context_file_path.as_deref();
+            worktree_context_file = mirror_issue_context_to_worktree(&task_id, &worktree_info.path)
+                .with_context(|| {
+                    format!(
+                        "Failed to refresh .mobius issue context in worktree {}",
+                        worktree_info.path.display()
+                    )
+                })?;
+            let ctx_path_ref = Some(worktree_context_file.as_str());
             let results = executor::execute_parallel(
                 &tasks_to_execute,
                 loop_config.runtime,
@@ -449,6 +486,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                 &worktree_path,
                 &session,
                 ctx_path_ref,
+                execution_model_override,
                 None,
                 None,
             )
@@ -759,6 +797,58 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
             "{}",
             format!("tmux session:\n  tmux attach -t {session_name}").yellow()
         );
+    }
+
+    Ok(())
+}
+
+fn mirror_issue_context_to_worktree(task_id: &str, worktree_path: &Path) -> Result<String> {
+    let source_issue_path = context::get_context_path(task_id);
+    if !source_issue_path.exists() {
+        anyhow::bail!("Issue context not found at {}", source_issue_path.display());
+    }
+
+    let target_mobius_path = worktree_path.join(".mobius");
+    let target_issue_path = target_mobius_path.join("issues").join(task_id);
+
+    if source_issue_path != target_issue_path {
+        copy_dir_recursive(&source_issue_path, &target_issue_path)?;
+    }
+
+    let gitignore_path = target_mobius_path.join(".gitignore");
+    if !gitignore_path.exists() {
+        fs::create_dir_all(&target_mobius_path)?;
+        fs::write(&gitignore_path, "state/\n")?;
+    }
+
+    let context_file = target_issue_path.join("context.json");
+    if !context_file.exists() {
+        anyhow::bail!(
+            "Mirrored context file not found at {}",
+            context_file.display()
+        );
+    }
+
+    Ok(context_file.to_string_lossy().to_string())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    if !src.exists() {
+        anyhow::bail!("Source directory does not exist: {}", src.display());
+    }
+
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
     }
 
     Ok(())
