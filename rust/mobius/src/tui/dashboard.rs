@@ -16,7 +16,7 @@ use ratatui::Terminal;
 
 use crate::types::task_graph::TaskGraph;
 
-use super::agent_progress::{AgentProgress, calculate_height};
+use super::agent_progress::{calculate_height, AgentProgress};
 use super::agent_slots::{AgentSlots, AGENT_SLOTS_HEIGHT};
 use super::app::App;
 use super::debug_panel::{DebugPanel, DEBUG_PANEL_HEIGHT};
@@ -25,7 +25,13 @@ use super::exit_modal::ExitModal;
 use super::header::{Header, HEADER_HEIGHT};
 use super::legend::{Legend, LEGEND_HEIGHT};
 use super::task_tree::{CompletedInfo, TaskTreeWidget};
-use super::theme::{NORD0, NORD14, NORD11, TEXT_COLOR, MUTED_COLOR};
+use super::theme::{MUTED_COLOR, NORD0, NORD11, NORD14, TEXT_COLOR};
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct TokenAggregation {
+    total: u64,
+    per_model: Vec<(String, u64)>,
+}
 
 /// Run the TUI dashboard.
 pub fn run_dashboard(
@@ -133,16 +139,16 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
     let size = frame.area();
 
     // Clear background
-    let bg_block = ratatui::widgets::Block::default()
-        .style(Style::default().bg(NORD0));
+    let bg_block = ratatui::widgets::Block::default().style(Style::default().bg(NORD0));
     frame.render_widget(bg_block, size);
 
     // Calculate layout constraints
     let has_agent_progress = !app.agent_todos.is_empty();
     let mut constraints = vec![
-        Constraint::Length(HEADER_HEIGHT),     // Header
-        Constraint::Min(5),                    // Main content (task tree + backend status)
+        Constraint::Length(HEADER_HEIGHT),      // Header
+        Constraint::Min(5),                     // Main content (task tree + backend status)
         Constraint::Length(AGENT_SLOTS_HEIGHT), // Agent slots
+        Constraint::Length(1),                  // Token summary
     ];
 
     if has_agent_progress {
@@ -206,10 +212,7 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string();
-                let duration = obj
-                    .get("duration")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                let duration = obj.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
                 if !id.is_empty() {
                     completed_info.insert(id, CompletedInfo { duration });
                 }
@@ -240,6 +243,10 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
         max_slots: app.max_parallel_agents,
     };
     frame.render_widget(agent_slots, agent_area);
+
+    let token_area = chunks[chunk_idx];
+    chunk_idx += 1;
+    render_token_summary(frame, token_area, aggregate_tokens(app));
 
     // Render agent progress (if any todos exist)
     if has_agent_progress {
@@ -272,7 +279,15 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
     // Render completion bar
     if app.is_complete {
         let (completed, total, failed) = app.execution_summary();
-        render_completion_bar(frame, chunks[chunk_idx], completed, total, failed, app.elapsed_ms(), app.auto_exit_tick);
+        render_completion_bar(
+            frame,
+            chunks[chunk_idx],
+            completed,
+            total,
+            failed,
+            app.elapsed_ms(),
+            app.auto_exit_tick,
+        );
     }
 
     // Render exit modal on top (last, so it overlays everything)
@@ -343,5 +358,227 @@ fn render_completion_bar(
     frame.render_widget(line1, Rect::new(area.x, area.y, area.width, 1));
     if area.height > 1 {
         frame.render_widget(line2, Rect::new(area.x, area.y + 1, area.width, 1));
+    }
+}
+
+fn aggregate_tokens(app: &App) -> TokenAggregation {
+    let Some(raw_state) = app.runtime_state_raw.as_ref() else {
+        return TokenAggregation::default();
+    };
+
+    let active_tasks = raw_state
+        .get("activeTasks")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut per_model_map: HashMap<String, u64> = HashMap::new();
+    let mut summed_active_total = 0u64;
+
+    for task in active_tasks {
+        let model = task
+            .get("model")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("unknown")
+            .to_string();
+
+        let task_total =
+            read_token_count(&task, &["tokens", "token", "totalTokens", "total_tokens"])
+                .or_else(|| {
+                    let input =
+                        read_token_count(&task, &["inputTokens", "input_tokens", "inputToken"])
+                            .unwrap_or(0);
+                    let output =
+                        read_token_count(&task, &["outputTokens", "output_tokens", "outputToken"])
+                            .unwrap_or(0);
+                    if input > 0 || output > 0 {
+                        Some(input.saturating_add(output))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+
+        summed_active_total = summed_active_total.saturating_add(task_total);
+        if task_total > 0 {
+            let entry = per_model_map.entry(model).or_insert(0);
+            *entry = entry.saturating_add(task_total);
+        }
+    }
+
+    let mut per_model: Vec<(String, u64)> = per_model_map.into_iter().collect();
+    per_model.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let total = if let Some(total_tokens) = read_token_count(
+        raw_state,
+        &["tokens", "token", "totalTokens", "total_tokens"],
+    ) {
+        total_tokens
+    } else {
+        let total_input = read_token_count(
+            raw_state,
+            &["totalInputTokens", "total_input_tokens", "totalInputToken"],
+        )
+        .unwrap_or(0);
+        let total_output = read_token_count(
+            raw_state,
+            &[
+                "totalOutputTokens",
+                "total_output_tokens",
+                "totalOutputToken",
+            ],
+        )
+        .unwrap_or(0);
+
+        if total_input > 0 || total_output > 0 {
+            total_input.saturating_add(total_output)
+        } else {
+            summed_active_total
+        }
+    };
+
+    TokenAggregation { total, per_model }
+}
+
+fn read_token_count(node: &serde_json::Value, keys: &[&str]) -> Option<u64> {
+    for key in keys {
+        let Some(value) = node.get(key) else {
+            continue;
+        };
+        match value {
+            serde_json::Value::Number(n) => {
+                if let Some(v) = n.as_u64() {
+                    return Some(v);
+                }
+            }
+            serde_json::Value::String(s) => {
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(v) = trimmed.parse::<u64>() {
+                    return Some(v);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn render_token_summary(frame: &mut ratatui::Frame, area: Rect, tokens: TokenAggregation) {
+    let details = if tokens.per_model.is_empty() {
+        String::new()
+    } else {
+        let mut parts = Vec::with_capacity(tokens.per_model.len());
+        for (model, count) in tokens.per_model {
+            parts.push(format!("{}: {}", model, count));
+        }
+        format!(" | {}", parts.join(", "))
+    };
+
+    let line = if tokens.total == 0 && details.is_empty() {
+        Line::from(Span::styled("Tokens: -", Style::default().fg(MUTED_COLOR)))
+    } else {
+        Line::from(Span::styled(
+            format!("Tokens: {}{}", tokens.total, details),
+            Style::default().fg(TEXT_COLOR),
+        ))
+    };
+
+    frame.render_widget(line, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap as StdHashMap;
+
+    fn empty_graph() -> TaskGraph {
+        TaskGraph {
+            parent_id: "MOB-1".into(),
+            parent_identifier: "MOB-1".into(),
+            tasks: StdHashMap::new(),
+            edges: StdHashMap::new(),
+        }
+    }
+
+    #[test]
+    fn aggregate_tokens_handles_missing_and_null_fields() {
+        let raw = serde_json::json!({
+            "activeTasks": [
+                { "id": "task-1", "model": "gpt-5", "inputTokens": "10", "outputTokens": 5 },
+                { "id": "task-2", "model": null, "tokens": "7" },
+                { "id": "task-3", "model": "", "tokens": null },
+                { "id": "task-4" }
+            ]
+        });
+
+        let app = App {
+            parent_id: "MOB-1".into(),
+            parent_title: "Parent".into(),
+            graph: empty_graph(),
+            runtime_state: None,
+            runtime_state_raw: Some(raw),
+            start_time: std::time::Instant::now(),
+            show_legend: true,
+            show_debug: false,
+            show_exit_modal: false,
+            is_complete: false,
+            debug_events: Vec::new(),
+            pending_count: 0,
+            runtime_state_path: PathBuf::from("runtime.json"),
+            should_quit: false,
+            auto_exit_tick: None,
+            agent_todos: HashMap::new(),
+            max_parallel_agents: 3,
+        };
+
+        let aggregation = aggregate_tokens(&app);
+        assert_eq!(aggregation.total, 22);
+        assert_eq!(
+            aggregation.per_model,
+            vec![("gpt-5".to_string(), 15), ("unknown".to_string(), 7)]
+        );
+    }
+
+    #[test]
+    fn aggregate_tokens_prefers_runtime_total_when_available() {
+        let raw = serde_json::json!({
+            "activeTasks": [
+                { "id": "task-1", "model": "a", "tokens": 2 },
+                { "id": "task-2", "model": "b", "tokens": 3 }
+            ],
+            "totalTokens": "99"
+        });
+
+        let app = App {
+            parent_id: "MOB-1".into(),
+            parent_title: "Parent".into(),
+            graph: empty_graph(),
+            runtime_state: None,
+            runtime_state_raw: Some(raw),
+            start_time: std::time::Instant::now(),
+            show_legend: true,
+            show_debug: false,
+            show_exit_modal: false,
+            is_complete: false,
+            debug_events: Vec::new(),
+            pending_count: 0,
+            runtime_state_path: PathBuf::from("runtime.json"),
+            should_quit: false,
+            auto_exit_tick: None,
+            agent_todos: HashMap::new(),
+            max_parallel_agents: 3,
+        };
+
+        let aggregation = aggregate_tokens(&app);
+        assert_eq!(aggregation.total, 99);
+        assert_eq!(
+            aggregation.per_model,
+            vec![("a".to_string(), 2), ("b".to_string(), 3)]
+        );
     }
 }

@@ -5,7 +5,7 @@ use std::time::Instant;
 use crate::types::context::{AgentTodoFile, RuntimeActiveTask, RuntimeCompletedTask, RuntimeState};
 use crate::types::debug::DebugEvent;
 use crate::types::enums::TaskStatus;
-use crate::types::task_graph::{TaskGraph, SubTask};
+use crate::types::task_graph::{SubTask, TaskGraph};
 
 /// Application state for the TUI dashboard.
 pub struct App {
@@ -13,6 +13,7 @@ pub struct App {
     pub parent_title: String,
     pub graph: TaskGraph,
     pub runtime_state: Option<RuntimeState>,
+    pub runtime_state_raw: Option<serde_json::Value>,
     pub start_time: Instant,
     pub show_legend: bool,
     pub show_debug: bool,
@@ -40,6 +41,7 @@ impl App {
             parent_title,
             graph,
             runtime_state: None,
+            runtime_state_raw: None,
             start_time: Instant::now(),
             show_legend: true,
             show_debug: false,
@@ -58,7 +60,13 @@ impl App {
     /// Reload runtime state from the state file on disk.
     pub fn reload_runtime_state(&mut self) {
         if let Ok(content) = std::fs::read_to_string(&self.runtime_state_path) {
-            if let Ok(state) = serde_json::from_str::<RuntimeState>(&content) {
+            if let Ok(raw) = serde_json::from_str::<serde_json::Value>(&content) {
+                self.runtime_state_raw = Some(raw.clone());
+                if let Ok(state) = serde_json::from_value::<RuntimeState>(raw) {
+                    self.runtime_state = Some(state);
+                    self.check_completion();
+                }
+            } else if let Ok(state) = serde_json::from_str::<RuntimeState>(&content) {
                 self.runtime_state = Some(state);
                 self.check_completion();
             }
@@ -67,10 +75,7 @@ impl App {
 
     /// Get the path to the todos directory (sibling to runtime.json).
     pub fn todos_dir(&self) -> PathBuf {
-        self.runtime_state_path
-            .parent()
-            .unwrap()
-            .join("todos")
+        self.runtime_state_path.parent().unwrap().join("todos")
     }
 
     /// Reload agent todo files from the todos directory.
@@ -177,7 +182,9 @@ impl App {
 
         // Active tasks -> in_progress (unless already done)
         for task in &state.active_tasks {
-            overrides.entry(task.id.clone()).or_insert(TaskStatus::InProgress);
+            overrides
+                .entry(task.id.clone())
+                .or_insert(TaskStatus::InProgress);
         }
 
         // Failed tasks -> failed (unless already done)
@@ -193,10 +200,7 @@ impl App {
     /// Get the effective status for a task, considering overrides.
     pub fn effective_status(&self, task: &SubTask) -> TaskStatus {
         let overrides = self.status_overrides();
-        overrides
-            .get(&task.id)
-            .copied()
-            .unwrap_or(task.status)
+        overrides.get(&task.id).copied().unwrap_or(task.status)
     }
 
     /// Get active task info by task ID.
@@ -223,6 +227,7 @@ impl App {
                     id: task_id.to_string(),
                     completed_at: String::new(),
                     duration: 0,
+                    tokens: None,
                 });
             }
         }
@@ -256,9 +261,5 @@ fn extract_task_id(value: &serde_json::Value) -> Option<String> {
     if let Some(s) = value.as_str() {
         return Some(s.to_string());
     }
-    value
-        .as_object()?
-        .get("id")?
-        .as_str()
-        .map(String::from)
+    value.as_object()?.get("id")?.as_str().map(String::from)
 }
