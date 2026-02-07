@@ -410,6 +410,7 @@ pub fn read_local_subtasks_as_linear_issues(issue_id: &str) -> Vec<LinearIssue> 
                 status: task.status,
                 git_branch_name: task.git_branch_name,
                 relations: Some(Relations { blocked_by, blocks }),
+                scoring: task.scoring,
             }
         })
         .collect();
@@ -681,6 +682,7 @@ mod tests {
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         };
 
         let file_path = issues_path(tmp.path())
@@ -722,6 +724,7 @@ mod tests {
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         };
 
         let task_done = SubTaskContext {
@@ -733,6 +736,7 @@ mod tests {
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         };
 
         // Write both
@@ -777,6 +781,7 @@ mod tests {
                 status: task.status.clone(),
                 git_branch_name: task.git_branch_name,
                 relations: None,
+                scoring: None,
             };
 
             let dominated = by_id
@@ -1088,6 +1093,7 @@ mod tests {
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         };
         atomic_write_json(&file_path, &task).unwrap();
 
@@ -1170,6 +1176,7 @@ mod tests {
             status: "done".to_string(),
             git_branch_name: String::new(),
             relations: None,
+            scoring: None,
         };
 
         let issue_b = LinearIssue {
@@ -1179,6 +1186,7 @@ mod tests {
             status: "done".to_string(),
             git_branch_name: String::new(),
             relations: None,
+            scoring: None,
         };
 
         // Insert first
@@ -1211,6 +1219,7 @@ mod tests {
             status: "ready".to_string(),
             git_branch_name: String::new(),
             relations: None,
+            scoring: None,
         };
 
         let in_progress = LinearIssue {
@@ -1220,6 +1229,7 @@ mod tests {
             status: "in_progress".to_string(),
             git_branch_name: String::new(),
             relations: None,
+            scoring: None,
         };
 
         by_id.insert(ready.id.clone(), ready);
@@ -1252,6 +1262,7 @@ mod tests {
             status: "done".to_string(),
             git_branch_name: String::new(),
             relations: None,
+            scoring: None,
         };
 
         let pending = LinearIssue {
@@ -1261,6 +1272,7 @@ mod tests {
             status: "pending".to_string(),
             git_branch_name: String::new(),
             relations: None,
+            scoring: None,
         };
 
         by_id.insert(done.id.clone(), done);

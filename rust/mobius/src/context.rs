@@ -903,7 +903,7 @@ pub fn add_runtime_active_task(state: &RuntimeState, task: RuntimeActiveTask) ->
     new_state
 }
 
-/// Mark a task as completed in runtime state.
+/// Mark a task as completed in runtime state, preserving token data from the active task.
 pub fn complete_runtime_task(state: &RuntimeState, task_id: &str) -> RuntimeState {
     let mut new_state = state.clone();
     // Find and remove from active tasks
@@ -913,8 +913,8 @@ pub fn complete_runtime_task(state: &RuntimeState, task_id: &str) -> RuntimeStat
             id: active.id,
             completed_at: Utc::now().to_rfc3339(),
             duration: 0, // Approximate; can be calculated from started_at
-            input_tokens: None,
-            output_tokens: None,
+            input_tokens: active.input_tokens,
+            output_tokens: active.output_tokens,
         };
         new_state
             .completed_tasks
@@ -955,6 +955,82 @@ pub fn update_runtime_task_pane(
     if let Some(task) = new_state.active_tasks.iter_mut().find(|t| t.id == task_id) {
         task.pane = pane_id.to_string();
     }
+    new_state.updated_at = Utc::now().to_rfc3339();
+    new_state
+}
+
+/// Update token usage for an active task.
+pub fn update_runtime_task_tokens(
+    state: &RuntimeState,
+    task_id: &str,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+) -> RuntimeState {
+    let mut new_state = state.clone();
+    if let Some(task) = new_state.active_tasks.iter_mut().find(|t| t.id == task_id) {
+        if input_tokens.is_some() {
+            task.input_tokens = input_tokens;
+        }
+        if output_tokens.is_some() {
+            task.output_tokens = output_tokens;
+        }
+    }
+    new_state.updated_at = Utc::now().to_rfc3339();
+    new_state
+}
+
+/// Recalculate total token usage from all active and completed tasks.
+pub fn recalculate_total_tokens(state: &RuntimeState) -> RuntimeState {
+    let mut new_state = state.clone();
+
+    let mut total_input: u64 = 0;
+    let mut total_output: u64 = 0;
+    let mut has_any = false;
+
+    // Sum from active tasks
+    for task in &new_state.active_tasks {
+        if let Some(t) = task.input_tokens {
+            total_input += t;
+            has_any = true;
+        }
+        if let Some(t) = task.output_tokens {
+            total_output += t;
+            has_any = true;
+        }
+    }
+
+    // Sum from completed tasks
+    for entry in &new_state.completed_tasks {
+        let completed = normalize_completed_task(entry);
+        if let Some(t) = completed.input_tokens {
+            total_input += t;
+            has_any = true;
+        }
+        if let Some(t) = completed.output_tokens {
+            total_output += t;
+            has_any = true;
+        }
+    }
+
+    // Sum from failed tasks (they may have partial token data)
+    for entry in &new_state.failed_tasks {
+        if let Some(obj) = entry.as_object() {
+            if let Some(t) = obj.get("input_tokens").or_else(|| obj.get("inputTokens")).and_then(|v| v.as_u64()) {
+                total_input += t;
+                has_any = true;
+            }
+            if let Some(t) = obj.get("output_tokens").or_else(|| obj.get("outputTokens")).and_then(|v| v.as_u64()) {
+                total_output += t;
+                has_any = true;
+            }
+        }
+    }
+
+    if has_any {
+        new_state.total_input_tokens = Some(total_input);
+        new_state.total_output_tokens = Some(total_output);
+    }
+
     new_state.updated_at = Utc::now().to_rfc3339();
     new_state
 }
@@ -1467,6 +1543,7 @@ cd /tmp && echo "hello"
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         }];
 
         let commands = extract_verify_commands(&tasks);
@@ -1486,6 +1563,7 @@ cd /tmp && echo "hello"
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         }];
 
         let commands = extract_verify_commands(&tasks);
@@ -1503,6 +1581,7 @@ cd /tmp && echo "hello"
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         }];
 
         let commands = extract_verify_commands(&tasks);
@@ -1530,6 +1609,7 @@ cargo test -- --nocapture
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         }];
 
         let commands = extract_verify_commands(&tasks);
@@ -1554,6 +1634,7 @@ echo "works"
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         }];
 
         let commands = extract_verify_commands(&tasks);
@@ -1577,6 +1658,7 @@ echo "test"
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         }];
 
         let commands = extract_verify_commands(&tasks);
@@ -1599,6 +1681,7 @@ echo "test"
             git_branch_name: String::new(),
             blocked_by: vec![],
             blocks: vec![],
+            scoring: None,
         }];
 
         let commands = extract_verify_commands(&tasks);

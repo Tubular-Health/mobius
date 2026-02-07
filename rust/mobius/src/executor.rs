@@ -1,14 +1,17 @@
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::Result;
 use regex::Regex;
 use tokio::time::{sleep, Duration};
 
+use crate::stream_json;
 use crate::tmux::{
     capture_pane_content, create_agent_pane, kill_pane, layout_panes, run_in_pane, set_pane_title,
     TmuxPane, TmuxSession,
 };
 use crate::types::{ExecutionConfig, SubTask};
+use crate::types::enums::Model;
 
 /// Verification skill identifier
 const VERIFICATION_SKILL: &str = "/verify";
@@ -56,6 +59,8 @@ pub struct ExecutionResult {
     pub error: Option<String>,
     pub pane_id: Option<String>,
     pub raw_output: Option<String>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
 }
 
 /// Status of an execution result
@@ -73,6 +78,7 @@ struct AgentHandle {
     start_time: Instant,
     #[allow(dead_code)]
     command: String,
+    output_file: Option<PathBuf>,
 }
 
 /// Aggregated results from a batch of executions
@@ -97,15 +103,31 @@ pub fn select_skill_for_task(task: &SubTask) -> &str {
     }
 }
 
+/// Select the model for a task based on its scoring data.
+///
+/// If the task has scoring with a recommended model, use that.
+/// Otherwise fall back to the global config model.
+pub fn select_model_for_task(task: &SubTask, config_model: Model) -> Model {
+    task.scoring
+        .as_ref()
+        .map(|s| s.recommended_model)
+        .unwrap_or(config_model)
+}
+
 /// Build the claude CLI command string for executing a task in a pane.
+///
+/// When `output_file_path` is provided, the raw stream-json output is saved
+/// via `tee` before piping to `cclean`, enabling token usage extraction.
 pub fn build_claude_command(
     subtask_identifier: &str,
     skill: &str,
     worktree_path: &str,
     config: &ExecutionConfig,
     context_file_path: Option<&str>,
+    model: Model,
+    output_file_path: Option<&str>,
 ) -> String {
-    let model_flag = format!("--model {}", config.model);
+    let model_flag = format!("--model {}", model);
 
     let disallowed_tools_flag = config
         .disallowed_tools
@@ -129,9 +151,13 @@ pub fn build_claude_command(
 
     let flags = parts.join(" ");
 
+    let tee_segment = output_file_path
+        .map(|path| format!("tee \"{}\" | ", path))
+        .unwrap_or_default();
+
     format!(
-        "cd \"{}\" && echo '{} {}' | {}claude -p --dangerously-skip-permissions --verbose --output-format stream-json {} | cclean",
-        worktree_path, skill, subtask_identifier, env_prefix, flags
+        "cd \"{}\" && echo '{} {}' | {}claude -p --dangerously-skip-permissions --verbose --output-format stream-json {} | {}cclean",
+        worktree_path, skill, subtask_identifier, env_prefix, flags, tee_segment
     )
 }
 
@@ -144,7 +170,8 @@ pub fn calculate_parallelism(ready_task_count: usize, config: &ExecutionConfig) 
 /// Execute tasks in parallel using tmux panes.
 ///
 /// Spawns up to `max_parallel_agents` agents, monitors them for completion,
-/// and returns results for each task.
+/// and returns results for each task. When `output_dir` is provided, raw
+/// stream-json output is saved per-task for token usage extraction.
 pub async fn execute_parallel(
     tasks: &[SubTask],
     config: &ExecutionConfig,
@@ -152,6 +179,7 @@ pub async fn execute_parallel(
     session: &TmuxSession,
     context_file_path: Option<&str>,
     timeout_ms: Option<u64>,
+    output_dir: Option<&Path>,
 ) -> Vec<ExecutionResult> {
     let timeout = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let actual_parallelism = calculate_parallelism(tasks.len(), config);
@@ -162,7 +190,7 @@ pub async fn execute_parallel(
 
     let batch = &tasks[..actual_parallelism];
 
-    let handles = match spawn_agents(batch, session, worktree_path, config, context_file_path).await
+    let handles = match spawn_agents(batch, session, worktree_path, config, context_file_path, output_dir).await
     {
         Ok(h) => h,
         Err(e) => {
@@ -177,6 +205,8 @@ pub async fn execute_parallel(
                     error: Some(format!("Failed to spawn agent: {e}")),
                     pane_id: None,
                     raw_output: None,
+                    input_tokens: None,
+                    output_tokens: None,
                 })
                 .collect();
         }
@@ -201,15 +231,22 @@ pub async fn spawn_agent_in_pane(
     worktree_path: &str,
     config: &ExecutionConfig,
     context_file_path: Option<&str>,
+    output_dir: Option<&Path>,
 ) -> ExecutionResult {
     let start_time = Instant::now();
     let skill = select_skill_for_task(task);
+    let model = select_model_for_task(task, config.model);
+
+    let output_file = output_dir.map(|dir| dir.join(format!("{}.jsonl", task.identifier)));
+    let output_file_str = output_file.as_ref().map(|p| p.to_string_lossy().to_string());
     let command = build_claude_command(
         &task.identifier,
         skill,
         worktree_path,
         config,
         context_file_path,
+        model,
+        output_file_str.as_deref(),
     );
 
     run_in_pane(&pane.id, &command, true).await;
@@ -219,6 +256,7 @@ pub async fn spawn_agent_in_pane(
         pane: pane.clone(),
         start_time,
         command,
+        output_file,
     };
 
     wait_for_agent(handle, DEFAULT_TIMEOUT_MS).await
@@ -274,6 +312,7 @@ async fn spawn_agents(
     worktree_path: &str,
     config: &ExecutionConfig,
     context_file_path: Option<&str>,
+    output_dir: Option<&Path>,
 ) -> Result<Vec<AgentHandle>> {
     let mut handles = Vec::with_capacity(tasks.len());
 
@@ -299,12 +338,17 @@ async fn spawn_agents(
         };
 
         let skill = select_skill_for_task(task);
+        let model = select_model_for_task(task, config.model);
+        let output_file = output_dir.map(|dir| dir.join(format!("{}.jsonl", task.identifier)));
+        let output_file_str = output_file.as_ref().map(|p| p.to_string_lossy().to_string());
         let command = build_claude_command(
             &task.identifier,
             skill,
             worktree_path,
             config,
             context_file_path,
+            model,
+            output_file_str.as_deref(),
         );
 
         run_in_pane(&pane.id, &command, true).await;
@@ -314,6 +358,7 @@ async fn spawn_agents(
             pane,
             start_time: Instant::now(),
             command,
+            output_file,
         });
     }
 
@@ -329,7 +374,11 @@ async fn wait_for_agent(handle: AgentHandle, timeout_ms: u64) -> ExecutionResult
     loop {
         let elapsed = handle.start_time.elapsed();
         if elapsed >= deadline {
-            // Timeout
+            // Timeout — still try to extract tokens from partial output
+            let tokens = handle
+                .output_file
+                .as_ref()
+                .and_then(|f| stream_json::parse_current_tokens(f));
             let title = format!("\u{2717} {}: TIMEOUT", handle.task.identifier);
             set_pane_title(&handle.pane.id, &title).await;
             kill_pane(&handle.pane.id).await;
@@ -346,14 +395,26 @@ async fn wait_for_agent(handle: AgentHandle, timeout_ms: u64) -> ExecutionResult
                 )),
                 pane_id: Some(handle.pane.id.clone()),
                 raw_output: None,
+                input_tokens: tokens.as_ref().map(|t| t.input_tokens),
+                output_tokens: tokens.as_ref().map(|t| t.output_tokens),
             };
         }
 
         let content = capture_pane_content(&handle.pane.id, 200).await;
 
-        if let Some(result) =
+        if let Some(mut result) =
             parse_agent_output(&content, &handle.task, handle.start_time, &handle.pane.id, &patterns, &error_summary_re)
         {
+            // Extract final token usage from output file
+            if let Some(ref output_file) = handle.output_file {
+                let tokens = stream_json::parse_final_tokens(output_file)
+                    .or_else(|| stream_json::parse_current_tokens(output_file));
+                if let Some(usage) = tokens {
+                    result.input_tokens = Some(usage.input_tokens);
+                    result.output_tokens = Some(usage.output_tokens);
+                }
+            }
+
             // Update pane title with completion status
             let emoji = if result.success { "\u{2713}" } else { "\u{2717}" };
             let title = format!(
@@ -393,6 +454,8 @@ fn parse_agent_output(
             error: None,
             pane_id: Some(pane_id.to_string()),
             raw_output: Some(content.to_string()),
+            input_tokens: None,
+            output_tokens: None,
         });
     }
 
@@ -413,6 +476,8 @@ fn parse_agent_output(
             error: Some(error),
             pane_id: Some(pane_id.to_string()),
             raw_output: Some(content.to_string()),
+            input_tokens: None,
+            output_tokens: None,
         });
     }
 
@@ -427,6 +492,8 @@ fn parse_agent_output(
             error: None,
             pane_id: Some(pane_id.to_string()),
             raw_output: Some(content.to_string()),
+            input_tokens: None,
+            output_tokens: None,
         });
     }
 
@@ -441,6 +508,8 @@ fn parse_agent_output(
             error: Some("No actionable sub-tasks available".to_string()),
             pane_id: Some(pane_id.to_string()),
             raw_output: Some(content.to_string()),
+            input_tokens: None,
+            output_tokens: None,
         });
     }
 
@@ -462,6 +531,7 @@ mod tests {
             blocked_by: vec![],
             blocks: vec![],
             git_branch_name: String::new(),
+            scoring: None,
         }
     }
 
@@ -493,13 +563,28 @@ mod tests {
     #[test]
     fn test_build_claude_command_basic() {
         let config = ExecutionConfig::default();
-        let cmd = build_claude_command("MOB-101", "/execute", "/path/to/worktree", &config, None);
+        let cmd = build_claude_command("MOB-101", "/execute", "/path/to/worktree", &config, None, Model::Opus, None);
 
         assert!(cmd.contains("cd \"/path/to/worktree\""));
         assert!(cmd.contains("echo '/execute MOB-101'"));
         assert!(cmd.contains("claude -p --dangerously-skip-permissions"));
         assert!(cmd.contains("--output-format stream-json"));
         assert!(cmd.contains("--model opus"));
+        assert!(cmd.contains("| cclean"));
+        // No tee when output_file_path is None
+        assert!(!cmd.contains("tee"));
+    }
+
+    #[test]
+    fn test_build_claude_command_with_output_file() {
+        let config = ExecutionConfig::default();
+        let cmd = build_claude_command(
+            "MOB-101", "/execute", "/path/to/worktree", &config, None, Model::Opus,
+            Some("/tmp/output/MOB-101.jsonl"),
+        );
+
+        assert!(cmd.contains("tee \"/tmp/output/MOB-101.jsonl\""));
+        assert!(cmd.contains("| tee"));
         assert!(cmd.contains("| cclean"));
     }
 
@@ -512,6 +597,8 @@ mod tests {
             "/path/to/worktree",
             &config,
             Some("/tmp/context.json"),
+            Model::Opus,
+            None,
         );
 
         assert!(cmd.contains("MOBIUS_CONTEXT_FILE=\"/tmp/context.json\""));
@@ -524,7 +611,7 @@ mod tests {
         config.disallowed_tools = Some(vec!["Bash".to_string(), "Write".to_string()]);
 
         let cmd =
-            build_claude_command("MOB-101", "/execute", "/path/to/worktree", &config, None);
+            build_claude_command("MOB-101", "/execute", "/path/to/worktree", &config, None, Model::Opus, None);
 
         assert!(cmd.contains("--disallowedTools 'Bash,Write'"));
     }
@@ -535,7 +622,7 @@ mod tests {
         config.disallowed_tools = None;
 
         let cmd =
-            build_claude_command("MOB-101", "/execute", "/path/to/worktree", &config, None);
+            build_claude_command("MOB-101", "/execute", "/path/to/worktree", &config, None, Model::Opus, None);
 
         assert!(!cmd.contains("--disallowedTools"));
     }
@@ -745,6 +832,8 @@ mod tests {
                 error: None,
                 pane_id: Some("%0".to_string()),
                 raw_output: None,
+                input_tokens: None,
+                output_tokens: None,
             },
             ExecutionResult {
                 task_id: "2".to_string(),
@@ -755,6 +844,8 @@ mod tests {
                 error: Some("Tests failed".to_string()),
                 pane_id: Some("%1".to_string()),
                 raw_output: None,
+                input_tokens: None,
+                output_tokens: None,
             },
             ExecutionResult {
                 task_id: "3".to_string(),
@@ -765,6 +856,8 @@ mod tests {
                 error: None,
                 pane_id: Some("%2".to_string()),
                 raw_output: None,
+                input_tokens: None,
+                output_tokens: None,
             },
         ];
 
@@ -797,6 +890,8 @@ mod tests {
             "/path/to/my worktree/project",
             &config,
             None,
+            Model::Opus,
+            None,
         );
         // Path with spaces should be properly quoted in the cd command
         assert!(cmd.contains("cd \"/path/to/my worktree/project\""));
@@ -812,6 +907,8 @@ mod tests {
             "/path/to/project-v2.0_(beta)",
             &config,
             None,
+            Model::Opus,
+            None,
         );
         assert!(cmd.contains("cd \"/path/to/project-v2.0_(beta)\""));
         assert!(cmd.contains("echo '/execute MOB-101'"));
@@ -822,7 +919,7 @@ mod tests {
         let mut config = ExecutionConfig::default();
         config.disallowed_tools = Some(vec![]);
 
-        let cmd = build_claude_command("MOB-101", "/execute", "/path", &config, None);
+        let cmd = build_claude_command("MOB-101", "/execute", "/path", &config, None, Model::Opus, None);
         // Empty vec should be filtered out, no --disallowedTools flag
         assert!(!cmd.contains("--disallowedTools"));
     }
@@ -836,6 +933,8 @@ mod tests {
             "/path",
             &config,
             Some("/tmp/my context/file.json"),
+            Model::Opus,
+            None,
         );
         // Context file path should be in quotes
         assert!(cmd.contains("MOBIUS_CONTEXT_FILE=\"/tmp/my context/file.json\""));
@@ -1005,6 +1104,8 @@ mod tests {
                 error: None,
                 pane_id: Some(format!("%{}", i)),
                 raw_output: None,
+                input_tokens: None,
+                output_tokens: None,
             })
             .collect();
 
@@ -1035,6 +1136,8 @@ mod tests {
                 error: Some(err.to_string()),
                 pane_id: Some(format!("%{}", i)),
                 raw_output: None,
+                input_tokens: None,
+                output_tokens: None,
             })
             .collect();
 
@@ -1063,6 +1166,8 @@ mod tests {
                 error: None,
                 pane_id: Some("%0".to_string()),
                 raw_output: None,
+                input_tokens: None,
+                output_tokens: None,
             },
             ExecutionResult {
                 task_id: "2".to_string(),
@@ -1073,6 +1178,8 @@ mod tests {
                 error: Some("Tests failed".to_string()),
                 pane_id: Some("%1".to_string()),
                 raw_output: None,
+                input_tokens: None,
+                output_tokens: None,
             },
             ExecutionResult {
                 task_id: "3".to_string(),
@@ -1083,6 +1190,8 @@ mod tests {
                 error: Some("Agent timed out".to_string()),
                 pane_id: Some("%2".to_string()),
                 raw_output: None,
+                input_tokens: None,
+                output_tokens: None,
             },
             ExecutionResult {
                 task_id: "4".to_string(),
@@ -1093,6 +1202,8 @@ mod tests {
                 error: None,
                 pane_id: Some("%3".to_string()),
                 raw_output: None,
+                input_tokens: None,
+                output_tokens: None,
             },
         ];
 
@@ -1106,5 +1217,49 @@ mod tests {
         assert!(agg.failed_tasks[0].contains("Tests failed"));
         assert!(agg.failed_tasks[1].contains("MOB-303"));
         assert!(agg.failed_tasks[1].contains("Agent timed out"));
+    }
+
+    // --- select_model_for_task Tests ---
+
+    #[test]
+    fn test_select_model_uses_scoring_when_present() {
+        use crate::types::task_graph::TaskScoring;
+
+        let mut task = make_task("1", "MOB-101", "Task with scoring");
+        task.scoring = Some(TaskScoring {
+            complexity: 3,
+            risk: 1,
+            recommended_model: Model::Haiku,
+            rationale: "Simple task".to_string(),
+        });
+
+        let model = select_model_for_task(&task, Model::Opus);
+        assert_eq!(model, Model::Haiku);
+    }
+
+    #[test]
+    fn test_select_model_falls_back_to_config_when_no_scoring() {
+        let task = make_task("1", "MOB-101", "Task without scoring");
+        assert!(task.scoring.is_none());
+
+        let model = select_model_for_task(&task, Model::Sonnet);
+        assert_eq!(model, Model::Sonnet);
+    }
+
+    #[test]
+    fn test_select_model_different_scoring_models() {
+        use crate::types::task_graph::TaskScoring;
+
+        let models = [Model::Haiku, Model::Sonnet, Model::Opus];
+        for expected_model in models {
+            let mut task = make_task("1", "MOB-101", "Task");
+            task.scoring = Some(TaskScoring {
+                complexity: 5,
+                risk: 3,
+                recommended_model: expected_model,
+                rationale: "Test".to_string(),
+            });
+            assert_eq!(select_model_for_task(&task, Model::Opus), expected_model);
+        }
     }
 }

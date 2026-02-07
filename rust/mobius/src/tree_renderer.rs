@@ -278,6 +278,7 @@ mod tests {
                         Relation { id: "c".to_string(), identifier: "MOB-103".to_string() },
                     ],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -289,6 +290,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-101".to_string() }],
                     blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-104".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "c".to_string(),
@@ -300,6 +302,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-101".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "d".to_string(),
@@ -311,6 +314,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "b".to_string(), identifier: "MOB-102".to_string() }],
                     blocks: vec![Relation { id: "e".to_string(), identifier: "MOB-105".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "e".to_string(),
@@ -322,6 +326,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "d".to_string(), identifier: "MOB-104".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ]
     }
@@ -400,6 +405,7 @@ mod tests {
                     blocked_by: vec![],
                     blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-202".to_string() }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -411,6 +417,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-201".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ];
         let graph = build_task_graph("parent-1", "MOB-200", &issues);
@@ -451,6 +458,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "b".to_string(), identifier: "MOB-302".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -462,6 +470,7 @@ mod tests {
                     blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-301".to_string() }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ];
         let graph = build_task_graph("parent-1", "MOB-300", &issues);
