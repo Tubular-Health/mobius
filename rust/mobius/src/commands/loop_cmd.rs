@@ -9,9 +9,9 @@ use crate::config::loader::read_config;
 use crate::config::paths::resolve_paths;
 use crate::context::{
     add_runtime_active_task, clear_all_runtime_active_tasks, complete_runtime_task,
-    create_session as create_mobius_session, delete_runtime_state, end_session, fail_runtime_task,
-    generate_context, initialize_runtime_state, remove_runtime_active_task,
-    update_runtime_task_pane, write_full_context_file, write_runtime_state,
+    create_session as create_mobius_session, delete_runtime_state, end_session, generate_context,
+    initialize_runtime_state, update_runtime_task_pane, update_runtime_task_tokens,
+    write_full_context_file, write_runtime_state,
 };
 use crate::executor::{calculate_parallelism, execute_parallel};
 use crate::jira::JiraClient;
@@ -26,7 +26,7 @@ use crate::tmux::{
 };
 use crate::tracker::{assign_task, create_tracker, get_retry_tasks, has_permanent_failures, process_results};
 use crate::tree_renderer::render_full_tree_output;
-use crate::types::context::RuntimeActiveTask;
+use crate::types::context::{RuntimeActiveTask, RuntimeState};
 use crate::types::enums::{Backend, SessionStatus, TaskStatus};
 use crate::types::task_graph::{
     build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks,
@@ -382,6 +382,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     pane: String::new(),
                     started_at: chrono::Utc::now().to_rfc3339(),
                     worktree: Some(worktree_info.path.display().to_string()),
+                    tokens: None,
                 },
             );
         }
@@ -473,16 +474,28 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
 
         // Update graph and runtime state
         for result in &verified_results {
+            let result_tokens = extract_result_total_tokens(&results, &result.identifier);
+
             if result.success && result.backend_verified {
                 graph = update_task_status(&graph, &result.task_id, TaskStatus::Done);
-                runtime_state = complete_runtime_task(&runtime_state, &result.identifier);
+                runtime_state = apply_runtime_transition(
+                    &runtime_state,
+                    &result.identifier,
+                    result_tokens,
+                    RuntimeTaskTransition::Complete,
+                );
                 update_subtask_status(task_id, &result.identifier, "done");
                 println!(
                     "{}",
                     format!("  ✓ {}", result.identifier).green()
                 );
             } else if result.should_retry {
-                runtime_state = remove_runtime_active_task(&runtime_state, &result.identifier);
+                runtime_state = apply_runtime_transition(
+                    &runtime_state,
+                    &result.identifier,
+                    result_tokens,
+                    RuntimeTaskTransition::Retry,
+                );
                 println!(
                     "{}",
                     format!(
@@ -493,7 +506,12 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     .yellow()
                 );
             } else {
-                runtime_state = fail_runtime_task(&runtime_state, &result.identifier);
+                runtime_state = apply_runtime_transition(
+                    &runtime_state,
+                    &result.identifier,
+                    result_tokens,
+                    RuntimeTaskTransition::Failed,
+                );
                 println!(
                     "{}",
                     format!(
@@ -793,6 +811,41 @@ fn format_elapsed(duration: std::time::Duration) -> String {
         format!("{}m {}s", minutes, seconds % 60)
     } else {
         format!("{}s", seconds)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeTaskTransition {
+    Complete,
+    Retry,
+    Failed,
+}
+
+fn extract_result_total_tokens(
+    results: &[crate::executor::ExecutionResult],
+    task_identifier: &str,
+) -> Option<u64> {
+    results
+        .iter()
+        .find(|result| result.identifier == task_identifier)
+        .and_then(|result| result.token_usage.as_ref())
+        .and_then(|usage| usage.total_tokens)
+}
+
+fn apply_runtime_transition(
+    state: &RuntimeState,
+    task_id: &str,
+    tokens: Option<u64>,
+    transition: RuntimeTaskTransition,
+) -> RuntimeState {
+    let merged_state = update_runtime_task_tokens(state, task_id, tokens);
+
+    match transition {
+        RuntimeTaskTransition::Complete => complete_runtime_task(&merged_state, task_id),
+        RuntimeTaskTransition::Retry => {
+            crate::context::remove_runtime_active_task(&merged_state, task_id)
+        }
+        RuntimeTaskTransition::Failed => crate::context::fail_runtime_task(&merged_state, task_id),
     }
 }
 
