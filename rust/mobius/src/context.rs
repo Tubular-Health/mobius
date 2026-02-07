@@ -887,6 +887,7 @@ pub fn initialize_runtime_state(
         updated_at: Utc::now().to_rfc3339(),
         loop_pid,
         total_tasks,
+        tokens: None,
         backend_statuses: None,
     })
 }
@@ -897,6 +898,72 @@ pub fn add_runtime_active_task(state: &RuntimeState, task: RuntimeActiveTask) ->
     // Remove existing entry for same ID if present
     new_state.active_tasks.retain(|t| t.id != task.id);
     new_state.active_tasks.push(task);
+    recalculate_runtime_total_tokens(&mut new_state);
+    new_state.updated_at = Utc::now().to_rfc3339();
+    new_state
+}
+
+fn parse_runtime_tokens_value(value: &serde_json::Value) -> Option<u64> {
+    if let Some(n) = value.as_u64() {
+        return Some(n);
+    }
+
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse::<u64>().ok())
+}
+
+fn extract_runtime_tokens_from_value(entry: &serde_json::Value) -> Option<u64> {
+    let obj = entry.as_object()?;
+    ["tokens", "token", "totalTokens", "total_tokens"]
+        .iter()
+        .find_map(|key| obj.get(*key).and_then(parse_runtime_tokens_value))
+}
+
+fn recalculate_runtime_total_tokens(state: &mut RuntimeState) {
+    let mut total_tokens: Option<u64> = None;
+
+    let mut add_known_tokens = |value: Option<u64>| {
+        if let Some(tokens) = value {
+            total_tokens = Some(total_tokens.unwrap_or(0).saturating_add(tokens));
+        }
+    };
+
+    for task in &state.active_tasks {
+        add_known_tokens(task.tokens);
+    }
+
+    for entry in &state.completed_tasks {
+        let normalized = normalize_completed_task(entry);
+        add_known_tokens(normalized.tokens.or_else(|| extract_runtime_tokens_from_value(entry)));
+    }
+
+    for entry in &state.failed_tasks {
+        add_known_tokens(extract_runtime_tokens_from_value(entry));
+    }
+
+    state.tokens = total_tokens;
+}
+
+/// Update token usage for an active task by ID.
+///
+/// Passing `None` is a no-op so existing non-null token values are preserved.
+pub fn update_runtime_task_tokens(
+    state: &RuntimeState,
+    task_id: &str,
+    tokens: Option<u64>,
+) -> RuntimeState {
+    let mut new_state = state.clone();
+
+    if let Some(token_count) = tokens {
+        if let Some(task) = new_state.active_tasks.iter_mut().find(|t| t.id == task_id) {
+            task.tokens = Some(token_count);
+        }
+    }
+
+    recalculate_runtime_total_tokens(&mut new_state);
     new_state.updated_at = Utc::now().to_rfc3339();
     new_state
 }
@@ -911,11 +978,13 @@ pub fn complete_runtime_task(state: &RuntimeState, task_id: &str) -> RuntimeStat
             id: active.id,
             completed_at: Utc::now().to_rfc3339(),
             duration: 0, // Approximate; can be calculated from started_at
+            tokens: active.tokens,
         };
         new_state
             .completed_tasks
             .push(serde_json::to_value(completed).unwrap_or_default());
     }
+    recalculate_runtime_total_tokens(&mut new_state);
     new_state.updated_at = Utc::now().to_rfc3339();
     new_state
 }
@@ -929,6 +998,7 @@ pub fn fail_runtime_task(state: &RuntimeState, task_id: &str) -> RuntimeState {
             .failed_tasks
             .push(serde_json::to_value(&active).unwrap_or_default());
     }
+    recalculate_runtime_total_tokens(&mut new_state);
     new_state.updated_at = Utc::now().to_rfc3339();
     new_state
 }
@@ -937,6 +1007,7 @@ pub fn fail_runtime_task(state: &RuntimeState, task_id: &str) -> RuntimeState {
 pub fn remove_runtime_active_task(state: &RuntimeState, task_id: &str) -> RuntimeState {
     let mut new_state = state.clone();
     new_state.active_tasks.retain(|t| t.id != task_id);
+    recalculate_runtime_total_tokens(&mut new_state);
     new_state.updated_at = Utc::now().to_rfc3339();
     new_state
 }
@@ -968,9 +1039,11 @@ pub fn clear_all_runtime_active_tasks(parent_id: &str) -> Option<RuntimeState> {
             updated_at: Utc::now().to_rfc3339(),
             loop_pid: None,
             total_tasks: None,
+            tokens: None,
             backend_statuses: None,
         });
         s.active_tasks.clear();
+        recalculate_runtime_total_tokens(&mut s);
         s.updated_at = Utc::now().to_rfc3339();
         s
     })
@@ -996,6 +1069,7 @@ pub fn update_backend_status(parent_id: &str, task_identifier: &str, status: &st
             updated_at: Utc::now().to_rfc3339(),
             loop_pid: None,
             total_tasks: None,
+            tokens: None,
             backend_statuses: None,
         });
         let statuses = s.backend_statuses.get_or_insert_with(HashMap::new);
@@ -1019,12 +1093,14 @@ pub fn normalize_completed_task(entry: &serde_json::Value) -> RuntimeCompletedTa
             id: s.to_string(),
             completed_at: String::new(),
             duration: 0,
+            tokens: None,
         }
     } else {
         serde_json::from_value(entry.clone()).unwrap_or(RuntimeCompletedTask {
             id: String::new(),
             completed_at: String::new(),
             duration: 0,
+            tokens: None,
         })
     }
 }
@@ -1748,6 +1824,7 @@ echo "test"
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             loop_pid: None,
             total_tasks: Some(5),
+            tokens: None,
             backend_statuses: None,
         };
 
@@ -1758,6 +1835,7 @@ echo "test"
             pane: "%1".to_string(),
             started_at: "2026-01-01T00:00:00Z".to_string(),
             worktree: None,
+            tokens: None,
         };
         let state = add_runtime_active_task(&state, task);
         assert_eq!(state.active_tasks.len(), 1);
@@ -1778,11 +1856,124 @@ echo "test"
             pane: "%3".to_string(),
             started_at: "2026-01-01T00:01:00Z".to_string(),
             worktree: None,
+            tokens: None,
         };
         let state = add_runtime_active_task(&state, task2);
         let state = fail_runtime_task(&state, "task-002");
         assert!(state.active_tasks.is_empty());
         assert_eq!(state.failed_tasks.len(), 1);
+    }
+
+    #[test]
+    fn test_update_runtime_task_tokens_by_identifier() {
+        let state = RuntimeState {
+            parent_id: "MOB-100".to_string(),
+            parent_title: "Test".to_string(),
+            active_tasks: vec![RuntimeActiveTask {
+                id: "task-001".to_string(),
+                pid: 1234,
+                pane: "%1".to_string(),
+                started_at: "2026-01-01T00:00:00Z".to_string(),
+                worktree: None,
+                tokens: Some(11),
+            }],
+            completed_tasks: vec![],
+            failed_tasks: vec![],
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            loop_pid: None,
+            total_tasks: Some(2),
+            tokens: None,
+            backend_statuses: None,
+        };
+
+        let unchanged = update_runtime_task_tokens(&state, "task-001", None);
+        assert_eq!(unchanged.active_tasks[0].tokens, Some(11));
+        assert_eq!(unchanged.tokens, Some(11));
+
+        let updated = update_runtime_task_tokens(&unchanged, "task-001", Some(42));
+        assert_eq!(updated.active_tasks[0].tokens, Some(42));
+        assert_eq!(updated.tokens, Some(42));
+    }
+
+    #[test]
+    fn test_complete_runtime_task_preserves_active_tokens() {
+        let state = RuntimeState {
+            parent_id: "MOB-100".to_string(),
+            parent_title: "Test".to_string(),
+            active_tasks: vec![RuntimeActiveTask {
+                id: "task-001".to_string(),
+                pid: 1234,
+                pane: "%1".to_string(),
+                started_at: "2026-01-01T00:00:00Z".to_string(),
+                worktree: None,
+                tokens: Some(77),
+            }],
+            completed_tasks: vec![],
+            failed_tasks: vec![],
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            loop_pid: None,
+            total_tasks: Some(1),
+            tokens: None,
+            backend_statuses: None,
+        };
+
+        let completed_state = complete_runtime_task(&state, "task-001");
+        let completed = normalize_completed_task(&completed_state.completed_tasks[0]);
+        assert_eq!(completed.tokens, Some(77));
+        assert_eq!(completed_state.tokens, Some(77));
+    }
+
+    #[test]
+    fn test_runtime_token_aggregation_with_partial_data() {
+        let state = RuntimeState {
+            parent_id: "MOB-100".to_string(),
+            parent_title: "Test".to_string(),
+            active_tasks: vec![
+                RuntimeActiveTask {
+                    id: "task-001".to_string(),
+                    pid: 1234,
+                    pane: "%1".to_string(),
+                    started_at: "2026-01-01T00:00:00Z".to_string(),
+                    worktree: None,
+                    tokens: Some(10),
+                },
+                RuntimeActiveTask {
+                    id: "task-002".to_string(),
+                    pid: 5678,
+                    pane: "%2".to_string(),
+                    started_at: "2026-01-01T00:00:00Z".to_string(),
+                    worktree: None,
+                    tokens: None,
+                },
+            ],
+            completed_tasks: vec![
+                serde_json::json!({
+                    "id": "task-003",
+                    "completedAt": "2026-01-01T00:00:00Z",
+                    "duration": 0,
+                    "tokens": 20
+                }),
+                serde_json::json!("task-004"),
+            ],
+            failed_tasks: vec![
+                serde_json::json!({
+                    "id": "task-005",
+                    "token": "7"
+                }),
+                serde_json::json!({"id": "task-006"}),
+            ],
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            loop_pid: None,
+            total_tasks: Some(6),
+            tokens: None,
+            backend_statuses: None,
+        };
+
+        let recalculated = update_runtime_task_tokens(&state, "task-001", None);
+        assert_eq!(recalculated.tokens, Some(37));
     }
 
     #[test]
@@ -1796,6 +1987,7 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "2026-01-01T00:00:00Z".to_string(),
                 worktree: None,
+                tokens: None,
             }],
             completed_tasks: vec![],
             failed_tasks: vec![],
@@ -1803,6 +1995,7 @@ echo "test"
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             loop_pid: None,
             total_tasks: None,
+            tokens: None,
             backend_statuses: None,
         };
 
@@ -1813,6 +2006,7 @@ echo "test"
             pane: "%5".to_string(),
             started_at: "2026-01-01T00:01:00Z".to_string(),
             worktree: None,
+            tokens: None,
         };
         let state = add_runtime_active_task(&state, task);
         assert_eq!(state.active_tasks.len(), 1);
@@ -1865,6 +2059,7 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                tokens: None,
             }],
             completed_tasks: vec![],
             failed_tasks: vec![],
@@ -1872,6 +2067,7 @@ echo "test"
             updated_at: "t".to_string(),
             loop_pid: None,
             total_tasks: None,
+            tokens: None,
             backend_statuses: None,
         });
 
@@ -1886,6 +2082,7 @@ echo "test"
                     pane: "%1".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    tokens: None,
                 },
                 RuntimeActiveTask {
                     id: "task-002".to_string(),
@@ -1893,6 +2090,7 @@ echo "test"
                     pane: "%2".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    tokens: None,
                 },
             ],
             ..old.as_ref().unwrap().clone()
@@ -1912,6 +2110,7 @@ echo "test"
             updated_at: "t1".to_string(),
             loop_pid: Some(1234),
             total_tasks: None,
+            tokens: None,
             backend_statuses: None,
         };
 
@@ -2047,6 +2246,7 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                tokens: None,
             }],
             completed_tasks: vec![serde_json::json!("t2"), serde_json::json!("t3")],
             failed_tasks: vec![serde_json::json!("t4")],
@@ -2054,6 +2254,7 @@ echo "test"
             updated_at: "t".to_string(),
             loop_pid: None,
             total_tasks: Some(10),
+            tokens: None,
             backend_statuses: None,
         };
 
@@ -2097,6 +2298,7 @@ echo "test"
                     pane: "%1".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    tokens: None,
                 },
                 RuntimeActiveTask {
                     id: "task-002".to_string(),
@@ -2104,6 +2306,7 @@ echo "test"
                     pane: "%2".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    tokens: None,
                 },
             ],
             completed_tasks: vec![],
@@ -2112,6 +2315,7 @@ echo "test"
             updated_at: "t".to_string(),
             loop_pid: None,
             total_tasks: None,
+            tokens: None,
             backend_statuses: None,
         };
 
@@ -2407,6 +2611,7 @@ echo "test"
             updated_at: "t".to_string(),
             loop_pid: None,
             total_tasks: None,
+            tokens: None,
             backend_statuses: None,
         });
 
@@ -2436,6 +2641,7 @@ echo "test"
             updated_at: "t".to_string(),
             loop_pid: None,
             total_tasks: Some(2),
+            tokens: None,
             backend_statuses: None,
         };
 
@@ -2467,6 +2673,7 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                tokens: None,
             }],
             completed_tasks: vec![serde_json::json!("t1")],
             failed_tasks: vec![],
@@ -2474,6 +2681,7 @@ echo "test"
             updated_at: "t".to_string(),
             loop_pid: None,
             total_tasks: Some(3),
+            tokens: None,
             backend_statuses: None,
         };
 
@@ -2506,6 +2714,7 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                tokens: None,
             }],
             completed_tasks: vec![],
             failed_tasks: vec![],
@@ -2513,6 +2722,7 @@ echo "test"
             updated_at: "t".to_string(),
             loop_pid: None,
             total_tasks: None,
+            tokens: None,
             backend_statuses: None,
         });
         assert!(
@@ -2545,6 +2755,7 @@ echo "test"
                     pane: "%1".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    tokens: None,
                 },
                 RuntimeActiveTask {
                     id: "task-002".to_string(),
@@ -2552,6 +2763,7 @@ echo "test"
                     pane: "%2".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    tokens: None,
                 },
             ],
             ..new.as_ref().unwrap().clone()
@@ -2579,6 +2791,7 @@ echo "test"
                 pane: "%1".to_string(),
                 started_at: "t".to_string(),
                 worktree: None,
+                tokens: None,
             }],
             completed_tasks: vec![serde_json::json!("done-1")],
             failed_tasks: vec![serde_json::json!("fail-1")],
@@ -2586,6 +2799,7 @@ echo "test"
             updated_at: "2026-01-01T00:00:00Z".to_string(),
             loop_pid: Some(42),
             total_tasks: Some(5),
+            tokens: None,
             backend_statuses: None,
         };
 
@@ -2618,6 +2832,7 @@ echo "test"
                     pane: "%1".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    tokens: None,
                 },
                 RuntimeActiveTask {
                     id: "task-002".to_string(),
@@ -2625,6 +2840,7 @@ echo "test"
                     pane: "%2".to_string(),
                     started_at: "t".to_string(),
                     worktree: None,
+                    tokens: None,
                 },
             ],
             ..base.clone()
