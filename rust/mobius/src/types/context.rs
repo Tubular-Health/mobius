@@ -189,6 +189,8 @@ pub struct RuntimeActiveTask {
     pub pane: String,
     pub started_at: String,
     pub worktree: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
     #[serde(
         default,
         alias = "token",

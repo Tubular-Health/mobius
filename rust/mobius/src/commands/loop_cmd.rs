@@ -15,23 +15,25 @@ use crate::context::{
 };
 use crate::executor::{calculate_parallelism, execute_parallel};
 use crate::jira::JiraClient;
-use crate::types::task_graph::ParentIssue;
-use crate::runtime_adapter::{effective_model_for_runtime, RuntimeKind};
 use crate::local_state::{
     read_local_subtasks_as_linear_issues, read_parent_spec, read_subtasks, update_subtask_status,
     write_iteration_log, IterationLogEntry, IterationStatus,
 };
+use crate::runtime_adapter::{effective_model_for_runtime, RuntimeKind};
 use crate::tmux::{
     create_session, create_status_pane, destroy_session, get_session_name, update_status_pane,
     LoopStatus, TmuxSession,
 };
-use crate::tracker::{assign_task, create_tracker, get_retry_tasks, has_permanent_failures, process_results};
+use crate::tracker::{
+    assign_task, create_tracker, get_retry_tasks, has_permanent_failures, process_results,
+};
 use crate::tree_renderer::render_full_tree_output;
 use crate::types::context::{RuntimeActiveTask, RuntimeState};
 use crate::types::enums::{Backend, SessionStatus, TaskStatus};
+use crate::types::task_graph::ParentIssue;
 use crate::types::task_graph::{
-    build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks,
-    get_verification_task, update_task_status, SubTask,
+    build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks, get_verification_task,
+    update_task_status, SubTask,
 };
 use crate::worktree::{create_worktree, remove_worktree, WorktreeConfig};
 
@@ -80,11 +82,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     if !validate_task_id(task_id, &backend) {
         eprintln!(
             "{}",
-            format!(
-                "Error: Invalid task ID format for {}: {}",
-                backend, task_id
-            )
-            .red()
+            format!("Error: Invalid task ID format for {}: {}", backend, task_id).red()
         );
         eprintln!(
             "{}",
@@ -115,7 +113,9 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     if let Some(p) = parallel_override {
         execution_config.max_parallel_agents = Some(p);
     }
-    apply_effective_model_override(&mut execution_config, model_override, detect_runtime_kind());
+    let runtime_kind = detect_runtime_kind();
+    let runtime_model = effective_model_for_runtime(runtime_kind, &execution_config, model_override);
+    apply_effective_model_override(&mut execution_config, model_override, runtime_kind);
 
     let max_iterations = max_iterations_override.unwrap_or(config.execution.max_iterations);
 
@@ -149,10 +149,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                 "{}",
                 format!("Error: Could not fetch issue {}", task_id).red()
             );
-            eprintln!(
-                "{}",
-                format!("  Cause: {}", cause).red()
-            );
+            eprintln!("{}", format!("  Cause: {}", cause).red());
             std::process::exit(1);
         }
     };
@@ -172,11 +169,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         worktree_path: execution_config.worktree_path.clone(),
         base_branch: execution_config.base_branch.clone(),
     };
-    let worktree_info = rt.block_on(create_worktree(
-        task_id,
-        &branch_name,
-        &worktree_config,
-    ))?;
+    let worktree_info = rt.block_on(create_worktree(task_id, &branch_name, &worktree_config))?;
 
     if worktree_info.created {
         println!(
@@ -206,10 +199,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     // Build initial task graph from local state
     let issues = read_local_subtasks_as_linear_issues(task_id);
     if issues.is_empty() {
-        eprintln!(
-            "{}",
-            format!("No sub-tasks found for {}", task_id).yellow()
-        );
+        eprintln!("{}", format!("No sub-tasks found for {}", task_id).yellow());
         rt.block_on(destroy_session(&session))?;
         std::process::exit(1);
     }
@@ -223,17 +213,15 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
 
     if parent_spec.is_some() {
         match generate_context(task_id, None, false) {
-            Ok(Some(context)) => {
-                match write_full_context_file(task_id, &context) {
-                    Ok(path) => println!("{}", format!("Context file: {}", path).dimmed()),
-                    Err(e) => eprintln!("{}", format!("Warning: Failed to write context file: {}", e).yellow()),
-                }
-            }
-            Ok(None) => {
-                eprintln!(
+            Ok(Some(context)) => match write_full_context_file(task_id, &context) {
+                Ok(path) => println!("{}", format!("Context file: {}", path).dimmed()),
+                Err(e) => eprintln!(
                     "{}",
-                    "Warning: generate_context returned None".yellow()
-                );
+                    format!("Warning: Failed to write context file: {}", e).yellow()
+                ),
+            },
+            Ok(None) => {
+                eprintln!("{}", "Warning: generate_context returned None".yellow());
             }
             Err(e) => {
                 eprintln!(
@@ -300,19 +288,13 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     "{}",
                     "\n✓ Verification task completed successfully!".green()
                 );
-                println!(
-                    "{}",
-                    format!("  {}: {}", vt.identifier, vt.title).green()
-                );
+                println!("{}", format!("  {}: {}", vt.identifier, vt.title).green());
                 break;
             }
         }
 
         // Get ready tasks (collect into owned Vec for uniform handling with retries)
-        let mut ready_tasks: Vec<SubTask> = get_ready_tasks(&graph)
-            .into_iter()
-            .cloned()
-            .collect();
+        let mut ready_tasks: Vec<SubTask> = get_ready_tasks(&graph).into_iter().cloned().collect();
 
         // Add retry tasks
         for retry_task in &retry_queue {
@@ -361,7 +343,10 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
             )
             .blue()
         );
-        let task_ids: Vec<_> = tasks_to_execute.iter().map(|t| t.identifier.as_str()).collect();
+        let task_ids: Vec<_> = tasks_to_execute
+            .iter()
+            .map(|t| t.identifier.as_str())
+            .collect();
         println!("{}", format!("  Tasks: {}", task_ids.join(", ")).dimmed());
 
         // Assign tasks to tracker
@@ -379,6 +364,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     pane: String::new(),
                     started_at: chrono::Utc::now().to_rfc3339(),
                     worktree: Some(worktree_info.path.display().to_string()),
+                    model: Some(runtime_model.clone()),
                     tokens: None,
                 },
             );
@@ -482,10 +468,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     RuntimeTaskTransition::Complete,
                 );
                 update_subtask_status(task_id, &result.identifier, "done");
-                println!(
-                    "{}",
-                    format!("  ✓ {}", result.identifier).green()
-                );
+                println!("{}", format!("  ✓ {}", result.identifier).green());
             } else if result.should_retry {
                 runtime_state = apply_runtime_transition(
                     &runtime_state,
@@ -594,19 +577,10 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         let original_cwd = std::env::current_dir().ok();
         let _ = std::env::set_current_dir(&worktree_info.path);
 
-        match submit::run(
-            Some(task_id),
-            backend_override,
-            model_override,
-            false,
-            true,
-        ) {
+        match submit::run(Some(task_id), backend_override, model_override, false, true) {
             Ok(()) => println!("{}", "Pull request created successfully.".green()),
             Err(e) => {
-                println!(
-                    "{}",
-                    format!("⚠ PR submission failed: {}", e).yellow()
-                );
+                println!("{}", format!("⚠ PR submission failed: {}", e).yellow());
                 all_complete = false;
             }
         }
@@ -625,33 +599,15 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         let _ = rt.block_on(destroy_session(&session));
         println!("{}", "tmux session destroyed.".green());
     } else if any_failed {
-        println!(
-            "{}",
-            "\nWorktree preserved for debugging at:".yellow()
-        );
-        println!(
-            "  {}",
-            worktree_info.path.display().to_string().dimmed()
-        );
-        println!(
-            "{}",
-            "tmux session preserved. Attach with:".yellow()
-        );
-        println!(
-            "  {}",
-            format!("tmux attach -t {}", session_name).dimmed()
-        );
+        println!("{}", "\nWorktree preserved for debugging at:".yellow());
+        println!("  {}", worktree_info.path.display().to_string().dimmed());
+        println!("{}", "tmux session preserved. Attach with:".yellow());
+        println!("  {}", format!("tmux attach -t {}", session_name).dimmed());
     } else {
         println!("{}", "\nWorktree preserved at:".yellow());
-        println!(
-            "  {}",
-            worktree_info.path.display().to_string().dimmed()
-        );
+        println!("  {}", worktree_info.path.display().to_string().dimmed());
         println!("{}", "tmux session:".yellow());
-        println!(
-            "  {}",
-            format!("tmux attach -t {}", session_name).dimmed()
-        );
+        println!("  {}", format!("tmux attach -t {}", session_name).dimmed());
     }
 
     Ok(())
@@ -709,7 +665,9 @@ fn run_with_tui(
     }
 
     // 4. Spawn subprocess with stderr redirected to a log file for diagnostics
-    let log_dir = runtime_state_path.parent().unwrap_or(std::path::Path::new("."));
+    let log_dir = runtime_state_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     std::fs::create_dir_all(log_dir)?;
     let log_path = log_dir.join("loop-subprocess.log");
     let log_file = std::fs::File::create(&log_path)?;
@@ -763,7 +721,10 @@ async fn fetch_parent_issue(task_id: &str, backend: &Backend) -> Result<ParentIs
                 Err(e) => e.to_string(),
             };
             // API failed, try local state fallback
-            tracing::warn!("Jira API fetch failed, falling back to local state: {}", api_err);
+            tracing::warn!(
+                "Jira API fetch failed, falling back to local state: {}",
+                api_err
+            );
             match read_parent_spec(task_id) {
                 Some(s) => Ok(ParentIssue {
                     id: s.id,
@@ -783,7 +744,10 @@ async fn fetch_parent_issue(task_id: &str, backend: &Backend) -> Result<ParentIs
                 Err(e) => e.to_string(),
             };
             // API failed, try local state fallback
-            tracing::warn!("Linear API fetch failed, falling back to local state: {}", api_err);
+            tracing::warn!(
+                "Linear API fetch failed, falling back to local state: {}",
+                api_err
+            );
             match read_parent_spec(task_id) {
                 Some(s) => Ok(ParentIssue {
                     id: s.id,
@@ -894,19 +858,15 @@ fn validate_task_id(task_id: &str, backend: &Backend) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{apply_effective_model_override, RuntimeKind};
-    use crate::types::ExecutionConfig;
     use crate::types::enums::Model;
+    use crate::types::ExecutionConfig;
 
     #[test]
     fn test_apply_effective_model_override_claude_ignores_raw_override() {
         let mut config = ExecutionConfig::default();
         config.model = Model::Opus;
 
-        apply_effective_model_override(
-            &mut config,
-            Some("gpt-5-mini"),
-            RuntimeKind::Claude,
-        );
+        apply_effective_model_override(&mut config, Some("gpt-5-mini"), RuntimeKind::Claude);
 
         assert_eq!(config.model, Model::Opus);
     }
@@ -926,11 +886,7 @@ mod tests {
         let mut config = ExecutionConfig::default();
         config.model = Model::Sonnet;
 
-        apply_effective_model_override(
-            &mut config,
-            Some("gpt-5-mini"),
-            RuntimeKind::Opencode,
-        );
+        apply_effective_model_override(&mut config, Some("gpt-5-mini"), RuntimeKind::Opencode);
 
         assert_eq!(config.model, Model::Sonnet);
     }

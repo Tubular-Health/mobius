@@ -407,6 +407,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         pane: String::new(),
                         started_at: now.clone(),
                         worktree: Some(worktree_path.clone()),
+                        model: None,
                         tokens: None,
                     },
                 );
@@ -900,6 +901,7 @@ mod tests {
             pane: "%1".to_string(),
             started_at: "2026-02-06T00:00:01Z".to_string(),
             worktree: Some("/tmp/worktree".to_string()),
+            model: None,
             tokens: None,
         }
     }
