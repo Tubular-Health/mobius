@@ -66,11 +66,7 @@ pub fn run(task_id: Option<&str>, backend_override: Option<&str>) -> anyhow::Res
             // Write full context file
             write_full_context_file(&resolved_id, &context)?;
 
-            println!(
-                "{} Context fetched for {}",
-                "✓".green(),
-                resolved_id.cyan()
-            );
+            println!("{} Context fetched for {}", "✓".green(), resolved_id.cyan());
 
             // Display summary
             println!();
@@ -116,10 +112,7 @@ pub fn run(task_id: Option<&str>, backend_override: Option<&str>) -> anyhow::Res
             );
         }
         Ok(None) => {
-            eprintln!(
-                "{}",
-                format!("No context found for {}", resolved_id).red()
-            );
+            eprintln!("{}", format!("No context found for {}", resolved_id).red());
             std::process::exit(1);
         }
         Err(e) => {

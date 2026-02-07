@@ -87,15 +87,29 @@ detect_arch() {
 }
 
 check_dependencies() {
+    local runtime="$1"
+
     info "Checking dependencies..."
 
-    # Check for Claude CLI
-    if ! command -v claude &> /dev/null; then
-        warn "Claude CLI not found. Install it from: https://claude.ai/code"
-        warn "Mobius requires Claude CLI to function."
-    else
-        success "Claude CLI found: $(which claude)"
-    fi
+    # Check runtime-specific CLI
+    case "$runtime" in
+        claude)
+            if ! command -v claude &> /dev/null; then
+                warn "Claude CLI not found. Install it from: https://claude.ai/code"
+                warn "Current runtime is set to 'claude' (default)."
+            else
+                success "Claude CLI found: $(which claude)"
+            fi
+            ;;
+        opencode)
+            if ! command -v opencode &> /dev/null; then
+                warn "OpenCode CLI not found."
+                warn "Current runtime is set to 'opencode'. Install OpenCode CLI and ensure it is in PATH."
+            else
+                success "OpenCode CLI found: $(which opencode)"
+            fi
+            ;;
+    esac
 
     # Check for cclean (optional but recommended)
     if ! command -v cclean &> /dev/null; then
@@ -107,6 +121,34 @@ check_dependencies() {
     if ! command -v docker &> /dev/null; then
         info "Docker not found. Sandbox mode will be unavailable."
     fi
+}
+
+resolve_selected_runtime() {
+    local runtime="claude"
+
+    if [ -n "${MOBIUS_RUNTIME:-}" ]; then
+        case "${MOBIUS_RUNTIME,,}" in
+            claude|opencode)
+                runtime="${MOBIUS_RUNTIME,,}"
+                ;;
+            *)
+                warn "Ignoring invalid MOBIUS_RUNTIME='${MOBIUS_RUNTIME}'. Using 'claude'."
+                ;;
+        esac
+        echo "$runtime"
+        return
+    fi
+
+    if [ -f "$CONFIG_DIR/config.yaml" ]; then
+        local configured_runtime
+        configured_runtime="$(grep -E '^[[:space:]]*runtime:[[:space:]]*(claude|opencode)[[:space:]]*$' "$CONFIG_DIR/config.yaml" | sed -E 's/^[[:space:]]*runtime:[[:space:]]*([a-zA-Z0-9_-]+)[[:space:]]*$/\1/' | sed -n '1p')"
+
+        if [ -n "$configured_runtime" ]; then
+            runtime="$configured_runtime"
+        fi
+    fi
+
+    echo "$runtime"
 }
 
 check_npm_conflict() {
@@ -381,7 +423,11 @@ main() {
             ;;
     esac
 
-    check_dependencies
+    local selected_runtime
+    selected_runtime="$(resolve_selected_runtime)"
+    info "Selected runtime for dependency checks: $selected_runtime"
+
+    check_dependencies "$selected_runtime"
     echo ""
     check_npm_conflict
     install_command

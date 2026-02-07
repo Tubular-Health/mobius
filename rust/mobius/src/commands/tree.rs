@@ -5,11 +5,11 @@ use colored::Colorize;
 use crate::config::loader::read_config;
 use crate::config::paths::resolve_paths;
 use crate::jira::JiraClient;
-use crate::types::task_graph::ParentIssue;
 use crate::local_state::{read_local_subtasks_as_linear_issues, read_parent_spec};
 use crate::mermaid_renderer::render_mermaid_with_title;
 use crate::tree_renderer::render_full_tree_output;
 use crate::types::enums::Backend;
+use crate::types::task_graph::ParentIssue;
 use crate::types::task_graph::{build_task_graph, get_graph_stats};
 
 pub fn run(task_id: &str, backend_override: Option<&str>, mermaid: bool) -> anyhow::Result<()> {
@@ -25,11 +25,7 @@ pub fn run(task_id: &str, backend_override: Option<&str>, mermaid: bool) -> anyh
     if !validate_task_id(task_id, &backend) {
         eprintln!(
             "{}",
-            format!(
-                "Error: Invalid task ID format for {}: {}",
-                backend, task_id
-            )
-            .red()
+            format!("Error: Invalid task ID format for {}: {}", backend, task_id).red()
         );
         eprintln!(
             "{}",
@@ -96,17 +92,18 @@ pub fn run(task_id: &str, backend_override: Option<&str>, mermaid: bool) -> anyh
 
     let parent_issue = match parent_issue {
         Ok(issue) => {
+            println!("{} {}: {}", "✓".green(), issue.identifier, issue.title);
             println!(
-                "{} {}: {}",
-                "✓".green(),
-                issue.identifier,
-                issue.title
+                "  {}",
+                format!("Branch: {}", issue.git_branch_name).dimmed()
             );
-            println!("  {}", format!("Branch: {}", issue.git_branch_name).dimmed());
             issue
         }
         Err(cause) => {
-            eprintln!("{}", format!("Error: Could not fetch issue {}", task_id).red());
+            eprintln!(
+                "{}",
+                format!("Error: Could not fetch issue {}", task_id).red()
+            );
             eprintln!("{}", format!("  Cause: {}", cause).red());
             std::process::exit(1);
         }
@@ -115,10 +112,7 @@ pub fn run(task_id: &str, backend_override: Option<&str>, mermaid: bool) -> anyh
     // Read sub-tasks from local state
     let sub_tasks = read_local_subtasks_as_linear_issues(task_id);
     if sub_tasks.is_empty() {
-        println!(
-            "{}",
-            format!("No sub-tasks found for {}", task_id).yellow()
-        );
+        println!("{}", format!("No sub-tasks found for {}", task_id).yellow());
         return Ok(());
     }
 

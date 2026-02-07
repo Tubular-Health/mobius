@@ -1,8 +1,10 @@
 use std::env;
 use std::path::{Path, PathBuf};
 
-use crate::types::PathConfig;
+use super::loader::read_config_with_env;
 use crate::types::config::PathConfigType;
+use crate::types::enums::AgentRuntime;
+use crate::types::PathConfig;
 
 /// Get the global config directory (~/.config/mobius or $XDG_CONFIG_HOME/mobius)
 pub fn get_global_config_dir() -> PathBuf {
@@ -18,18 +20,51 @@ pub fn get_global_config_dir() -> PathBuf {
 
 /// Get the global skills directory (~/.claude/skills)
 pub fn get_global_skills_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".claude")
-        .join("skills")
+    get_global_skills_dir_for_runtime(AgentRuntime::Claude)
 }
 
 /// Get the global commands directory (~/.claude/commands)
 pub fn get_global_commands_dir() -> PathBuf {
+    get_global_commands_dir_for_runtime(AgentRuntime::Claude)
+}
+
+fn runtime_dir_name(runtime: AgentRuntime) -> &'static str {
+    match runtime {
+        AgentRuntime::Claude => ".claude",
+        AgentRuntime::Opencode => ".opencode",
+    }
+}
+
+fn resolve_runtime_from_config(config_path: &Path) -> AgentRuntime {
+    read_config_with_env(&config_path.to_string_lossy()).map_or(AgentRuntime::Claude, |c| c.runtime)
+}
+
+pub fn get_global_runtime_dir(runtime: AgentRuntime) -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".claude")
-        .join("commands")
+        .join(runtime_dir_name(runtime))
+}
+
+pub fn get_global_skills_dir_for_runtime(runtime: AgentRuntime) -> PathBuf {
+    get_global_runtime_dir(runtime).join("skills")
+}
+
+pub fn get_global_commands_dir_for_runtime(runtime: AgentRuntime) -> PathBuf {
+    get_global_runtime_dir(runtime).join("commands")
+}
+
+pub fn get_skills_dir_for_runtime(base_dir: &Path, runtime: AgentRuntime) -> PathBuf {
+    base_dir.join(runtime_dir_name(runtime)).join("skills")
+}
+
+pub fn get_commands_dir_for_runtime(base_dir: &Path, runtime: AgentRuntime) -> PathBuf {
+    base_dir.join(runtime_dir_name(runtime)).join("commands")
+}
+
+pub fn get_settings_path_for_runtime(base_dir: &Path, runtime: AgentRuntime) -> PathBuf {
+    base_dir
+        .join(runtime_dir_name(runtime))
+        .join("settings.json")
 }
 
 /// Walk up from start_dir looking for mobius.config.yaml
@@ -60,15 +95,12 @@ pub fn find_local_config(start_dir: Option<&Path>) -> Option<PathBuf> {
 /// Priority: local config (walk up tree) > global config
 pub fn resolve_paths() -> PathConfig {
     if let Some(local_config) = find_local_config(None) {
-        let project_root = local_config
-            .parent()
-            .unwrap_or_else(|| Path::new("."));
+        let runtime = resolve_runtime_from_config(&local_config);
+        let project_root = local_config.parent().unwrap_or_else(|| Path::new("."));
         return PathConfig {
             config_type: PathConfigType::Local,
             config_path: local_config.to_string_lossy().to_string(),
-            skills_path: project_root
-                .join(".claude")
-                .join("skills")
+            skills_path: get_skills_dir_for_runtime(project_root, runtime)
                 .to_string_lossy()
                 .to_string(),
             script_path: String::new(),
@@ -76,19 +108,29 @@ pub fn resolve_paths() -> PathConfig {
     }
 
     let global_config_dir = get_global_config_dir();
+    let global_config_path = global_config_dir.join("config.yaml");
+    let runtime = resolve_runtime_from_config(&global_config_path);
     PathConfig {
         config_type: PathConfigType::Global,
-        config_path: global_config_dir
-            .join("config.yaml")
+        config_path: global_config_path.to_string_lossy().to_string(),
+        skills_path: get_global_skills_dir_for_runtime(runtime)
             .to_string_lossy()
             .to_string(),
-        skills_path: get_global_skills_dir().to_string_lossy().to_string(),
         script_path: String::new(),
     }
 }
 
 /// Get paths for a specific installation type (used by setup)
 pub fn get_paths_for_type(config_type: PathConfigType, project_dir: Option<&Path>) -> PathConfig {
+    get_paths_for_type_with_runtime(config_type, project_dir, AgentRuntime::Claude)
+}
+
+/// Get paths for a specific installation type and runtime
+pub fn get_paths_for_type_with_runtime(
+    config_type: PathConfigType,
+    project_dir: Option<&Path>,
+    runtime: AgentRuntime,
+) -> PathConfig {
     match config_type {
         PathConfigType::Local => {
             let dir = project_dir
@@ -96,13 +138,8 @@ pub fn get_paths_for_type(config_type: PathConfigType, project_dir: Option<&Path
                 .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
             PathConfig {
                 config_type: PathConfigType::Local,
-                config_path: dir
-                    .join("mobius.config.yaml")
-                    .to_string_lossy()
-                    .to_string(),
-                skills_path: dir
-                    .join(".claude")
-                    .join("skills")
+                config_path: dir.join("mobius.config.yaml").to_string_lossy().to_string(),
+                skills_path: get_skills_dir_for_runtime(&dir, runtime)
                     .to_string_lossy()
                     .to_string(),
                 script_path: String::new(),
@@ -116,7 +153,9 @@ pub fn get_paths_for_type(config_type: PathConfigType, project_dir: Option<&Path
                     .join("config.yaml")
                     .to_string_lossy()
                     .to_string(),
-                skills_path: get_global_skills_dir().to_string_lossy().to_string(),
+                skills_path: get_global_skills_dir_for_runtime(runtime)
+                    .to_string_lossy()
+                    .to_string(),
                 script_path: String::new(),
             }
         }
@@ -186,10 +225,30 @@ mod tests {
     }
 
     #[test]
+    fn test_get_paths_for_type_with_runtime_opencode_local() {
+        let tmp = tempfile::tempdir().unwrap();
+        let paths = get_paths_for_type_with_runtime(
+            PathConfigType::Local,
+            Some(tmp.path()),
+            AgentRuntime::Opencode,
+        );
+        assert_eq!(paths.config_type, PathConfigType::Local);
+        assert!(paths.skills_path.contains(".opencode"));
+    }
+
+    #[test]
     fn test_get_paths_for_type_global() {
         let paths = get_paths_for_type(PathConfigType::Global, None);
         assert_eq!(paths.config_type, PathConfigType::Global);
         assert!(paths.config_path.contains("config.yaml"));
+    }
+
+    #[test]
+    fn test_get_global_dirs_for_runtime() {
+        let claude_skills = get_global_skills_dir_for_runtime(AgentRuntime::Claude);
+        let opencode_skills = get_global_skills_dir_for_runtime(AgentRuntime::Opencode);
+        assert!(claude_skills.to_string_lossy().contains(".claude"));
+        assert!(opencode_skills.to_string_lossy().contains(".opencode"));
     }
 
     #[test]

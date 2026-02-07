@@ -8,7 +8,7 @@ use ratatui::widgets::{Gauge, Widget};
 
 use crate::types::context::AgentTodoFile;
 
-use super::theme::{HEADER_COLOR, MUTED_COLOR, NORD1, NORD8, NORD13, NORD14};
+use super::theme::{HEADER_COLOR, MUTED_COLOR, NORD1, NORD13, NORD14, NORD8};
 
 pub struct AgentProgress<'a> {
     pub todos: &'a HashMap<String, AgentTodoFile>,
@@ -49,7 +49,10 @@ impl Widget for AgentProgress<'_> {
             // Line 1: agent name + count + status icons
             let mut spans: Vec<Span> = Vec::new();
             let prefix = format!("  {}: {}/{} done ", todo_file.subtask_id, completed, total);
-            spans.push(Span::styled(prefix.clone(), Style::default().fg(MUTED_COLOR)));
+            spans.push(Span::styled(
+                prefix.clone(),
+                Style::default().fg(MUTED_COLOR),
+            ));
 
             let mut used_width = prefix.len();
 

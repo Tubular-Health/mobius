@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use colored::{CustomColor, Colorize};
+use colored::{Colorize, CustomColor};
 
 use crate::types::enums::TaskStatus;
 use crate::types::task_graph::{get_blockers, get_ready_tasks, SubTask, TaskGraph};
@@ -9,24 +9,72 @@ use crate::types::task_graph::{get_blockers, get_ready_tasks, SubTask, TaskGraph
 // https://www.nordtheme.com/docs/colors-and-palettes
 
 // Polar Night (dark)
-const NORD3: CustomColor = CustomColor { r: 76, g: 86, b: 106 };
+const NORD3: CustomColor = CustomColor {
+    r: 76,
+    g: 86,
+    b: 106,
+};
 
 // Snow Storm (light)
-const NORD4: CustomColor = CustomColor { r: 216, g: 222, b: 233 };
-const NORD6: CustomColor = CustomColor { r: 236, g: 239, b: 244 };
+const NORD4: CustomColor = CustomColor {
+    r: 216,
+    g: 222,
+    b: 233,
+};
+const NORD6: CustomColor = CustomColor {
+    r: 236,
+    g: 239,
+    b: 244,
+};
 
 // Frost (blues/cyans) - used for depth coloring
-const NORD7: CustomColor = CustomColor { r: 143, g: 188, b: 187 }; // teal
-const NORD8: CustomColor = CustomColor { r: 136, g: 192, b: 208 }; // light blue
-const NORD9: CustomColor = CustomColor { r: 129, g: 161, b: 193 }; // blue
-const NORD10: CustomColor = CustomColor { r: 94, g: 129, b: 172 }; // dark blue
-const NORD15: CustomColor = CustomColor { r: 180, g: 142, b: 173 }; // purple
+const NORD7: CustomColor = CustomColor {
+    r: 143,
+    g: 188,
+    b: 187,
+}; // teal
+const NORD8: CustomColor = CustomColor {
+    r: 136,
+    g: 192,
+    b: 208,
+}; // light blue
+const NORD9: CustomColor = CustomColor {
+    r: 129,
+    g: 161,
+    b: 193,
+}; // blue
+const NORD10: CustomColor = CustomColor {
+    r: 94,
+    g: 129,
+    b: 172,
+}; // dark blue
+const NORD15: CustomColor = CustomColor {
+    r: 180,
+    g: 142,
+    b: 173,
+}; // purple
 
 // Aurora (accent colors) - used for status
-const NORD11: CustomColor = CustomColor { r: 191, g: 97, b: 106 }; // red
-const NORD12: CustomColor = CustomColor { r: 208, g: 135, b: 112 }; // orange
-const NORD13: CustomColor = CustomColor { r: 235, g: 203, b: 139 }; // yellow
-const NORD14: CustomColor = CustomColor { r: 163, g: 190, b: 140 }; // green
+const NORD11: CustomColor = CustomColor {
+    r: 191,
+    g: 97,
+    b: 106,
+}; // red
+const NORD12: CustomColor = CustomColor {
+    r: 208,
+    g: 135,
+    b: 112,
+}; // orange
+const NORD13: CustomColor = CustomColor {
+    r: 235,
+    g: 203,
+    b: 139,
+}; // yellow
+const NORD14: CustomColor = CustomColor {
+    r: 163,
+    g: 190,
+    b: 140,
+}; // green
 
 /// Depth colors cycle through Frost palette
 const DEPTH_COLORS: [CustomColor; 5] = [
@@ -160,7 +208,15 @@ fn render_task_node(
 
         for (i, child) in children.iter().enumerate() {
             let child_is_last = i == children.len() - 1;
-            render_task_node(child, graph, children_map, &new_prefix, child_is_last, depth + 1, lines);
+            render_task_node(
+                child,
+                graph,
+                children_map,
+                &new_prefix,
+                child_is_last,
+                depth + 1,
+                lines,
+            );
         }
     }
 }
@@ -261,7 +317,7 @@ pub fn render_full_tree_output(graph: &TaskGraph) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::task_graph::{build_task_graph, LinearIssue, Relations, Relation};
+    use crate::types::task_graph::{build_task_graph, LinearIssue, Relation, Relations};
 
     fn make_sample_issues() -> Vec<LinearIssue> {
         vec![
@@ -274,8 +330,14 @@ mod tests {
                 relations: Some(Relations {
                     blocked_by: vec![],
                     blocks: vec![
-                        Relation { id: "b".to_string(), identifier: "MOB-102".to_string() },
-                        Relation { id: "c".to_string(), identifier: "MOB-103".to_string() },
+                        Relation {
+                            id: "b".to_string(),
+                            identifier: "MOB-102".to_string(),
+                        },
+                        Relation {
+                            id: "c".to_string(),
+                            identifier: "MOB-103".to_string(),
+                        },
                     ],
                 }),
                 scoring: None,
@@ -287,8 +349,14 @@ mod tests {
                 status: "Done".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-101".to_string() }],
-                    blocks: vec![Relation { id: "d".to_string(), identifier: "MOB-104".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-101".to_string(),
+                    }],
+                    blocks: vec![Relation {
+                        id: "d".to_string(),
+                        identifier: "MOB-104".to_string(),
+                    }],
                 }),
                 scoring: None,
             },
@@ -299,7 +367,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-101".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-101".to_string(),
+                    }],
                     blocks: vec![],
                 }),
                 scoring: None,
@@ -311,19 +382,29 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "b".to_string(), identifier: "MOB-102".to_string() }],
-                    blocks: vec![Relation { id: "e".to_string(), identifier: "MOB-105".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "b".to_string(),
+                        identifier: "MOB-102".to_string(),
+                    }],
+                    blocks: vec![Relation {
+                        id: "e".to_string(),
+                        identifier: "MOB-105".to_string(),
+                    }],
                 }),
                 scoring: None,
             },
             LinearIssue {
                 id: "e".to_string(),
                 identifier: "MOB-105".to_string(),
-                title: "Tree renderer with a very long title that should still render properly".to_string(),
+                title: "Tree renderer with a very long title that should still render properly"
+                    .to_string(),
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "d".to_string(), identifier: "MOB-104".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "d".to_string(),
+                        identifier: "MOB-104".to_string(),
+                    }],
                     blocks: vec![],
                 }),
                 scoring: None,
@@ -403,7 +484,10 @@ mod tests {
                 git_branch_name: String::new(),
                 relations: Some(Relations {
                     blocked_by: vec![],
-                    blocks: vec![Relation { id: "b".to_string(), identifier: "MOB-202".to_string() }],
+                    blocks: vec![Relation {
+                        id: "b".to_string(),
+                        identifier: "MOB-202".to_string(),
+                    }],
                 }),
                 scoring: None,
             },
@@ -414,7 +498,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-201".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-201".to_string(),
+                    }],
                     blocks: vec![],
                 }),
                 scoring: None,
@@ -455,7 +542,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "b".to_string(), identifier: "MOB-302".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "b".to_string(),
+                        identifier: "MOB-302".to_string(),
+                    }],
                     blocks: vec![],
                 }),
                 scoring: None,
@@ -467,7 +557,10 @@ mod tests {
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
                 relations: Some(Relations {
-                    blocked_by: vec![Relation { id: "a".to_string(), identifier: "MOB-301".to_string() }],
+                    blocked_by: vec![Relation {
+                        id: "a".to_string(),
+                        identifier: "MOB-301".to_string(),
+                    }],
                     blocks: vec![],
                 }),
                 scoring: None,

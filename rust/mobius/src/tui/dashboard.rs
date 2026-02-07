@@ -12,12 +12,12 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, BorderType};
+use ratatui::widgets::{Block, BorderType, Borders};
 use ratatui::Terminal;
 
 use crate::types::task_graph::TaskGraph;
 
-use super::agent_progress::{AgentProgress, calculate_height};
+use super::agent_progress::{calculate_height, AgentProgress};
 use super::agent_slots::{ActiveTaskDisplay, AgentSlots, AGENT_SLOTS_HEIGHT};
 use super::app::App;
 use super::debug_panel::{DebugPanel, DEBUG_PANEL_HEIGHT};
@@ -26,7 +26,7 @@ use super::exit_modal::ExitModal;
 use super::header::{Header, HEADER_HEIGHT};
 use super::legend::{Legend, LEGEND_HEIGHT};
 use super::task_tree::{CompletedInfo, TaskTreeWidget};
-use super::theme::{BORDER_COLOR, HEADER_COLOR, NORD0, NORD14, NORD11, TEXT_COLOR, MUTED_COLOR};
+use super::theme::{BORDER_COLOR, HEADER_COLOR, MUTED_COLOR, NORD0, NORD11, NORD14, TEXT_COLOR};
 use super::token_metrics::{TokenMetrics, TOKEN_METRICS_HEIGHT};
 
 /// Run the TUI dashboard.
@@ -135,21 +135,22 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
     let size = frame.area();
 
     // Clear background
-    let bg_block = ratatui::widgets::Block::default()
-        .style(Style::default().bg(NORD0));
+    let bg_block = ratatui::widgets::Block::default().style(Style::default().bg(NORD0));
     frame.render_widget(bg_block, size);
 
     // Calculate layout constraints
     let has_agent_progress = !app.agent_todos.is_empty();
     let mut constraints = vec![
-        Constraint::Length(HEADER_HEIGHT),             // Header (borderless)
-        Constraint::Min(5 + 2),                        // Task tree + borders
-        Constraint::Length(AGENT_SLOTS_HEIGHT + 2),    // Agent slots + borders
-        Constraint::Length(TOKEN_METRICS_HEIGHT),       // Token metrics (already includes borders)
+        Constraint::Length(HEADER_HEIGHT),          // Header (borderless)
+        Constraint::Min(5 + 2),                     // Task tree + borders
+        Constraint::Length(AGENT_SLOTS_HEIGHT + 2), // Agent slots + borders
+        Constraint::Length(TOKEN_METRICS_HEIGHT),   // Token metrics (already includes borders)
     ];
 
     if has_agent_progress {
-        constraints.push(Constraint::Length(calculate_height(app.agent_todos.len()) + 2));
+        constraints.push(Constraint::Length(
+            calculate_height(app.agent_todos.len()) + 2,
+        ));
     }
 
     if app.show_legend {
@@ -209,10 +210,7 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string();
-                let duration = obj
-                    .get("duration")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0);
+                let duration = obj.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
                 if !id.is_empty() {
                     completed_info.insert(id, CompletedInfo { duration });
                 }
@@ -224,7 +222,10 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(BORDER_COLOR))
-        .title(Span::styled(" Task Tree ", Style::default().fg(HEADER_COLOR)));
+        .title(Span::styled(
+            " Task Tree ",
+            Style::default().fg(HEADER_COLOR),
+        ));
     let task_tree_inner = task_tree_block.inner(main_area);
     frame.render_widget(task_tree_block, main_area);
 
@@ -311,7 +312,10 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(BORDER_COLOR))
-            .title(Span::styled(" Agent Progress ", Style::default().fg(HEADER_COLOR)));
+            .title(Span::styled(
+                " Agent Progress ",
+                Style::default().fg(HEADER_COLOR),
+            ));
         let progress_inner = progress_block.inner(progress_area);
         frame.render_widget(progress_block, progress_area);
 
@@ -351,7 +355,15 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
     // Render completion bar
     if app.is_complete {
         let (completed, total, failed) = app.execution_summary();
-        render_completion_bar(frame, chunks[chunk_idx], completed, total, failed, app.elapsed_ms(), app.auto_exit_tick);
+        render_completion_bar(
+            frame,
+            chunks[chunk_idx],
+            completed,
+            total,
+            failed,
+            app.elapsed_ms(),
+            app.auto_exit_tick,
+        );
     }
 
     // Render exit modal on top (last, so it overlays everything)

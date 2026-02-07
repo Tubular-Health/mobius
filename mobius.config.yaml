@@ -7,6 +7,9 @@
 # Issue tracker backend: linear | jira | local
 backend: linear
 
+# Agent runtime: claude | opencode
+runtime: opencode
+
 # Backend-specific settings
 linear:
   # Workspace context - used by skills as defaults
@@ -29,8 +32,10 @@ execution:
   # Maximum iterations (0 = unlimited)
   max_iterations: 50
 
-  # Claude model to use: opus | sonnet | haiku
-  model: opus
+  # Model profile: opus | sonnet | haiku
+  # Claude runtime uses this directly.
+  # OpenCode runtime maps profiles to provider-qualified models (default: openai/gpt-5.3-codex).
+  model: openai/gpt-5.3-codex
 
   # Run in Docker sandbox by default (safer for autonomous execution)
   # Set to false or use --no-sandbox flag to run directly
@@ -41,7 +46,7 @@ execution:
 
   # Parallel execution settings (for `mobius loop` command)
 
-  # Maximum concurrent Claude agents for parallel sub-task execution (1-10)
+  # Maximum concurrent runtime agents for parallel sub-task execution (1-10)
   max_parallel_agents: 10
 
   # Base directory for git worktrees (<repo> replaced with repository name at runtime)

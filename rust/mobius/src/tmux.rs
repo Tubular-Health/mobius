@@ -105,10 +105,7 @@ pub async fn create_session(session_name: &str) -> Result<TmuxSession> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parts: Vec<&str> = stdout.trim().split(':').collect();
     if parts.len() < 2 {
-        anyhow::bail!(
-            "Unexpected tmux display-message output: {}",
-            stdout.trim()
-        );
+        anyhow::bail!("Unexpected tmux display-message output: {}", stdout.trim());
     }
 
     Ok(TmuxSession {
@@ -171,27 +168,50 @@ pub async fn create_agent_pane(
 ) -> Result<TmuxPane> {
     let target_pane = source_pane_id.unwrap_or(&session.initial_pane_id);
 
-    // Split horizontally from the target pane
-    let output = Command::new("tmux")
-        .args([
-            "split-window",
-            "-t",
-            target_pane,
-            "-h",
-            "-P",
-            "-F",
-            "#{pane_id}",
-        ])
-        .output()
-        .await
-        .context("Failed to create agent pane")?;
+    async fn split_window(target: &str) -> Result<String> {
+        let output = Command::new("tmux")
+            .args([
+                "split-window",
+                "-t",
+                target,
+                "-h",
+                "-P",
+                "-F",
+                "#{pane_id}",
+            ])
+            .output()
+            .await
+            .context("Failed to create agent pane")?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("tmux split-window failed: {}", stderr.trim());
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            anyhow::bail!("tmux split-window failed: {}", stderr);
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
-    let pane_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let pane_id = match split_window(target_pane).await {
+        Ok(id) => id,
+        Err(primary_err) => {
+            // Fallback to a session target when the pane target vanished.
+            if target_pane != session.name {
+                match split_window(&session.name).await {
+                    Ok(id) => id,
+                    Err(fallback_err) => {
+                        anyhow::bail!(
+                            "{} (target: {}) | fallback failed: {}",
+                            primary_err,
+                            target_pane,
+                            fallback_err
+                        )
+                    }
+                }
+            } else {
+                return Err(primary_err);
+            }
+        }
+    };
 
     // Set the pane title
     let pane_title = format!("{identifier}: {title}");

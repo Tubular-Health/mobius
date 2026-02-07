@@ -3,14 +3,15 @@
 //! Coordinates worktree isolation, tmux-based agent spawning, task graph
 //! management, and runtime state updates. Ported from `src/commands/loop.ts`.
 
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Context as AnyhowContext, Result};
 use chrono::Utc;
 use colored::Colorize;
 use tokio::time::Duration;
@@ -19,15 +20,16 @@ use crate::config;
 use crate::context;
 use crate::executor;
 use crate::local_state;
+use crate::runtime_adapter;
 use crate::stream_json;
 use crate::tmux;
 use crate::tracker;
 use crate::tree_renderer;
 use crate::types::context::{RuntimeActiveTask, RuntimeState};
-use crate::types::enums::{Backend, Model, SessionStatus, TaskStatus};
+use crate::types::enums::{AgentRuntime, Backend, Model, SessionStatus, TaskStatus};
 use crate::types::task_graph::{
-    build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks,
-    get_verification_task, update_task_status, TaskGraph,
+    build_task_graph, get_blocked_tasks, get_graph_stats, get_ready_tasks, get_verification_task,
+    update_task_status, TaskGraph,
 };
 use crate::worktree::{self, WorktreeConfig};
 
@@ -56,7 +58,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // 1. Resolve configuration
     // -----------------------------------------------------------------------
     let paths = config::resolve_paths();
-    let loop_config = match config::read_config(&paths.config_path) {
+    let loop_config = match config::read_config_with_env(&paths.config_path) {
         Ok(c) => c,
         Err(_) => {
             eprintln!(
@@ -87,18 +89,33 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
         exec_config.max_parallel_agents = Some(p);
     }
     if let Some(ref m) = options.model {
-        exec_config.model = Model::from_str(m).unwrap_or_else(|e| {
-            eprintln!("{}", format!("Error: {e}").red());
-            process::exit(1);
-        });
+        if loop_config.runtime == AgentRuntime::Opencode {
+            exec_config.model = m.trim().to_string();
+        } else {
+            exec_config.model = Model::from_str(m)
+                .unwrap_or_else(|e| {
+                    eprintln!("{}", format!("Error: {e}").red());
+                    process::exit(1);
+                })
+                .to_string();
+        }
     }
     if options.no_sandbox {
         exec_config.sandbox = false;
     }
 
-    let max_iterations = options
-        .max_iterations
-        .unwrap_or(exec_config.max_iterations);
+    let execution_model_override = if loop_config.runtime == AgentRuntime::Opencode {
+        options.model.as_deref()
+    } else {
+        None
+    };
+    let runtime_model_label = runtime_adapter::effective_model_for_runtime(
+        loop_config.runtime,
+        &exec_config,
+        execution_model_override,
+    );
+
+    let max_iterations = options.max_iterations.unwrap_or(exec_config.max_iterations);
 
     // -----------------------------------------------------------------------
     // 4. Check tmux availability
@@ -140,7 +157,10 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     if options.fresh {
         let deleted = context::delete_runtime_state(&task_id);
         if deleted {
-            println!("{}", "Cleared stale state from previous execution.".yellow());
+            println!(
+                "{}",
+                "Cleared stale state from previous execution.".yellow()
+            );
         }
     }
 
@@ -160,12 +180,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
             } else {
                 p.git_branch_name.clone()
             };
-            (
-                p.id.clone(),
-                p.identifier.clone(),
-                p.title.clone(),
-                branch,
-            )
+            (p.id.clone(), p.identifier.clone(), p.title.clone(), branch)
         }
         None => {
             eprintln!(
@@ -189,6 +204,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     let wt_config = WorktreeConfig {
         worktree_path: exec_config.worktree_path.clone(),
         base_branch: exec_config.base_branch.clone(),
+        runtime: loop_config.runtime,
     };
     let worktree_info = worktree::create_worktree(&task_id, &branch_name, &wt_config).await?;
 
@@ -242,10 +258,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // -----------------------------------------------------------------------
     let issues = local_state::read_local_subtasks_as_linear_issues(&task_id);
     if issues.is_empty() {
-        eprintln!(
-            "{}",
-            format!("No sub-tasks found for {task_id}").yellow()
-        );
+        eprintln!("{}", format!("No sub-tasks found for {task_id}").yellow());
         tmux::destroy_session(&session).await?;
         process::exit(1);
     }
@@ -264,17 +277,27 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // -----------------------------------------------------------------------
     println!("{}", "Generating local context for skills...".dimmed());
     let issue_context = context::generate_context(&task_id, Some(&worktree_path), false)?;
-    let context_file_path = match issue_context {
+    match issue_context {
         Some(ref ctx) => {
             let path = context::write_full_context_file(&task_id, ctx)?;
             println!("{}", format!("Context file: {path}").dimmed());
-            Some(path)
         }
         None => {
             eprintln!("{}", "Warning: Failed to generate issue context".yellow());
-            None
         }
-    };
+    }
+
+    let mut worktree_context_file = mirror_issue_context_to_worktree(&task_id, &worktree_info.path)
+        .with_context(|| {
+            format!(
+                "Failed to stage .mobius issue context in worktree {}",
+                worktree_info.path.display()
+            )
+        })?;
+    println!(
+        "{}",
+        format!("Worktree context file: {}", worktree_context_file).dimmed()
+    );
 
     // -----------------------------------------------------------------------
     // 12. Display initial tree
@@ -289,8 +312,12 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     context::create_session(&task_id, backend, Some(&worktree_path))?;
 
     let total_tasks = graph.tasks.len() as u32;
-    let mut runtime_state =
-        context::initialize_runtime_state(&task_id, &parent_title, Some(process::id()), Some(total_tasks))?;
+    let mut runtime_state = context::initialize_runtime_state(
+        &task_id,
+        &parent_title,
+        Some(process::id()),
+        Some(total_tasks),
+    )?;
 
     // Pre-populate completed tasks from graph
     for task in graph.tasks.values() {
@@ -306,9 +333,7 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     // -----------------------------------------------------------------------
     let mut tracker = tracker::create_tracker(
         exec_config.max_retries,
-        exec_config
-            .verification_timeout
-            .map(|v| v as u64),
+        exec_config.verification_timeout.map(|v| v as u64),
     );
 
     // -----------------------------------------------------------------------
@@ -428,7 +453,15 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         pane: String::new(),
                         started_at: now.clone(),
                         worktree: Some(worktree_path.clone()),
-                        model: Some(executor::select_model_for_task(task, exec_config.model).to_string()),
+                        model: Some(if loop_config.runtime == AgentRuntime::Claude {
+                            executor::select_model_for_task(
+                                task,
+                                exec_config.model.parse::<Model>().unwrap_or_default(),
+                            )
+                            .to_string()
+                        } else {
+                            runtime_model_label.clone()
+                        }),
                         input_tokens: None,
                         output_tokens: None,
                     },
@@ -456,8 +489,15 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
             };
             tmux::update_status_pane(&loop_status, &session_name).await?;
 
-            // Execute tasks in parallel with background token tracking
-            let ctx_path_ref = context_file_path.as_deref();
+            // Execute tasks in parallel with refreshed context and background token tracking
+            worktree_context_file = mirror_issue_context_to_worktree(&task_id, &worktree_info.path)
+                .with_context(|| {
+                    format!(
+                        "Failed to refresh .mobius issue context in worktree {}",
+                        worktree_info.path.display()
+                    )
+                })?;
+            let ctx_path_ref = Some(worktree_context_file.as_str());
 
             // Spawn background task to poll token usage from output files
             let live_token_task_id = task_id.clone();
@@ -474,13 +514,15 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                 )
                 .await;
             });
-
             let results = executor::execute_parallel(
                 &tasks_to_execute,
+                loop_config.runtime,
                 &exec_config,
                 &worktree_path,
                 &session,
                 ctx_path_ref,
+                execution_model_override,
+                None,
                 None,
                 Some(&output_dir),
             )
@@ -808,31 +850,89 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
     Ok(())
 }
 
+fn mirror_issue_context_to_worktree(task_id: &str, worktree_path: &Path) -> Result<String> {
+    let source_issue_path = context::get_context_path(task_id);
+    if !source_issue_path.exists() {
+        anyhow::bail!("Issue context not found at {}", source_issue_path.display());
+    }
+
+    let target_mobius_path = worktree_path.join(".mobius");
+    let target_issue_path = target_mobius_path.join("issues").join(task_id);
+
+    if source_issue_path != target_issue_path {
+        copy_dir_recursive(&source_issue_path, &target_issue_path)?;
+    }
+
+    let gitignore_path = target_mobius_path.join(".gitignore");
+    if !gitignore_path.exists() {
+        fs::create_dir_all(&target_mobius_path)?;
+        fs::write(&gitignore_path, "state/\n")?;
+    }
+
+    let context_file = target_issue_path.join("context.json");
+    if !context_file.exists() {
+        anyhow::bail!(
+            "Mirrored context file not found at {}",
+            context_file.display()
+        );
+    }
+
+    Ok(context_file.to_string_lossy().to_string())
+}
+
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    if !src.exists() {
+        anyhow::bail!("Source directory does not exist: {}", src.display());
+    }
+
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Periodically poll output files and update runtime state with live token data.
 ///
 /// Runs every 3 seconds, reading current token usage from each agent's output file
 /// and updating the runtime state on disk (with file locking for safe concurrent access).
-async fn update_live_tokens_loop(parent_id: &str, output_dir: &std::path::Path, identifiers: &[String]) {
+async fn update_live_tokens_loop(
+    parent_id: &str,
+    output_dir: &std::path::Path,
+    identifiers: &[String],
+) {
     loop {
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         let _ = context::with_runtime_state_sync(parent_id, |state| {
             let mut s = match state {
                 Some(s) => s,
-                None => return RuntimeState {
-                    parent_id: parent_id.to_string(),
-                    parent_title: String::new(),
-                    active_tasks: vec![],
-                    completed_tasks: vec![],
-                    failed_tasks: vec![],
-                    started_at: Utc::now().to_rfc3339(),
-                    updated_at: Utc::now().to_rfc3339(),
-                    loop_pid: None,
-                    total_tasks: None,
-                    backend_statuses: None,
-                    total_input_tokens: None,
-                    total_output_tokens: None,
-                },
+                None => {
+                    return RuntimeState {
+                        parent_id: parent_id.to_string(),
+                        parent_title: String::new(),
+                        active_tasks: vec![],
+                        completed_tasks: vec![],
+                        failed_tasks: vec![],
+                        started_at: Utc::now().to_rfc3339(),
+                        updated_at: Utc::now().to_rfc3339(),
+                        loop_pid: None,
+                        total_tasks: None,
+                        backend_statuses: None,
+                        total_input_tokens: None,
+                        total_output_tokens: None,
+                    }
+                }
             };
 
             let mut changed = false;
@@ -852,7 +952,6 @@ async fn update_live_tokens_loop(parent_id: &str, output_dir: &std::path::Path, 
             }
 
             if changed {
-                // Recalculate totals inline
                 s = context::recalculate_total_tokens(&s);
             }
 

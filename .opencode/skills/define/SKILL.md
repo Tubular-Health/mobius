@@ -8,21 +8,6 @@ invocation: /define
 Guide the creation of precise, unambiguous issues through the Socratic method. Ask targeted questions to uncover edge cases, acceptance criteria, relationships, and constraints before creating the issue. A well-defined issue prevents thrashing and enables clear work execution.
 </objective>
 
-<execution_boundaries>
-**Define is issue-definition only. Do not implement code in this skill.**
-
-Hard rules:
-- Do **not** edit application/source code while running `/define`
-- Do **not** run build/test/lint as part of `/define` unless the user explicitly asks for analysis-only validation
-- Do **not** create commits/branches/PRs from `/define`
-- Only write files in local backend mode (`.mobius/issues/...`) **after user approval**
-
-If the user asks for both definition and implementation in one request:
-1. Complete issue definition first
-2. Create the issue after approval
-3. Stop and recommend `/refine` or `/execute` as the next command
-</execution_boundaries>
-
 <backend_detection>
 Read backend from mobius config (`mobius.config.yaml` or `~/.config/mobius/config.yaml`).
 Default to 'linear' if not specified.
@@ -294,13 +279,6 @@ Options:
 4. **Improvement** - Enhancement to existing functionality
 </initial_gate>
 
-<mode_confirmation>
-Before asking detailed Socratic questions, confirm task mode in one sentence internally:
-- "I am in DEFINE mode: gather requirements and create an issue only."
-
-Then proceed directly with issue questioning. Do not perform implementation actions.
-</mode_confirmation>
-
 <workflow>
 1. **Determine issue type** - Bug, feature, task, or improvement
 2. **Identify team/project** - From context or ask user directly
@@ -311,7 +289,6 @@ Then proceed directly with issue questioning. Do not perform implementation acti
 7. **Set priority and metadata** - Priority, labels/issue type, project
 8. **Present for approval** - Show complete issue before creating
 9. **Create issue via CLI** - Create issue directly using CLI commands after approval
-10. **Stop after creation** - Offer `/refine` or `/execute`; do not begin implementation
 </workflow>
 </quick_start>
 
@@ -980,10 +957,6 @@ acli jira workitem create \
 - BAD: "UI should look better" (subjective)
 - GOOD: "Page load time < 2 seconds" with `Verification: Lighthouse performance score > 90`
 - GOOD: "Button uses primary color from design system" with `Verification: Visual regression test`
-
-**Don't start coding from define**:
-- BAD: Editing `src/*` right after issue creation
-- GOOD: End at issue creation and hand off to `/refine` or `/execute`
 </anti_patterns>
 
 <success_criteria>
@@ -1003,5 +976,4 @@ An issue is ready when:
 - [ ] User has approved before creating
 - [ ] Issue created successfully via CLI command
 - [ ] Created issue URL returned to user
-- [ ] No source code files modified by `/define` (except local backend issue artifacts)
 </success_criteria>

@@ -182,6 +182,7 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
     let worktree_config = WorktreeConfig {
         worktree_path: config.execution.worktree_path.clone(),
         base_branch: config.execution.base_branch.clone(),
+        runtime: config.runtime,
     };
 
     for candidate in &candidates {

@@ -11,7 +11,7 @@
 
 **Autonomous AI development that works with your existing workflow.**
 
-**Define issues in Linear or Jira. Let Claude implement them. Review and ship.**
+**Define issues in Linear or Jira. Let your configured runtime implement them. Review and ship.**
 
 [![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-stable-orange?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
@@ -54,7 +54,7 @@ Instead of feeding entire codebases into a single context window, Mobius breaks 
 | Benefit | How |
 |---------|-----|
 | **Lower API Costs** | Each sub-task uses only the context it needs—5-10x fewer tokens than monolithic prompts |
-| **Higher Accuracy** | Single-file scope keeps Claude focused, reducing unintended side effects |
+| **Higher Accuracy** | Single-file scope keeps each agent focused, reducing unintended side effects |
 | **Parallel Execution** | Sub-tasks without dependencies run simultaneously (up to 10 agents) |
 | **Team Visibility** | State lives in Linear/Jira, not hidden files—stop and resume anytime |
 | **Safe Autonomy** | Docker sandbox, scoped permissions, verification gates, easy rollback |
@@ -69,6 +69,8 @@ mobius setup         # Interactive setup wizard
 mobius ABC-123       # Start working on an issue
 ```
 
+`mobius setup` prompts for runtime (`claude` or `opencode`) and issue tracker backend.
+
 <p align="center">
   <img src="assets/terminal/setup.svg" alt="Mobius Setup" width="700" />
 </p>
@@ -79,12 +81,17 @@ mobius ABC-123       # Start working on an issue
 
 The complete workflow transforms an idea into a merged PR through 5 steps:
 
+Use your configured runtime CLI (`claude` or `opencode`) for skill commands.
+For OpenCode, use `opencode run ...` with a provider-qualified model (default: `openai/gpt-5.3-codex`).
+Use `--thinking-level` to tune OpenCode reasoning effort (`minimal`, `low`, `medium`, `high`, `max`, `xhigh`).
+
 ### 1. `/define` — Create the Issue
 
 Use Socratic questioning to create a well-defined issue with clear acceptance criteria.
 
 ```bash
-claude "/define"
+claude "/define"      # Claude runtime
+opencode run "/define" --model openai/gpt-5.3-codex    # OpenCode runtime
 ```
 
 ### 2. `/refine` — Break into Sub-tasks
@@ -92,7 +99,8 @@ claude "/define"
 Analyze your codebase and decompose the issue into focused sub-tasks, each targeting a single file with explicit blocking dependencies.
 
 ```bash
-claude "/refine ABC-123"
+claude "/refine ABC-123"      # Claude runtime
+opencode run "/refine ABC-123" --model openai/gpt-5.3-codex    # OpenCode runtime
 ```
 
 ### 3. `mobius loop` — Execute with Parallel Agents
@@ -102,6 +110,7 @@ Run the autonomous execution loop. Unblocked sub-tasks execute simultaneously in
 ```bash
 mobius loop ABC-123              # Parallel execution (default)
 mobius loop ABC-123 --parallel=5 # Up to 5 concurrent agents
+mobius loop ABC-123 --thinking-level=xhigh # OpenCode reasoning level
 mobius ABC-123 --sequential      # Sequential fallback
 ```
 
@@ -110,7 +119,8 @@ mobius ABC-123 --sequential      # Sequential fallback
 Review the implementation against acceptance criteria, run final validation, and add review notes.
 
 ```bash
-claude "/verify ABC-123"
+claude "/verify ABC-123"      # Claude runtime
+opencode run "/verify ABC-123" --model openai/gpt-5.3-codex    # OpenCode runtime
 ```
 
 ### 5. `mobius submit` — Create the PR
@@ -131,10 +141,10 @@ mobius submit ABC-123
 
 | Skill | Purpose | Command |
 |-------|---------|---------|
-| `/define` | Create well-defined issues with acceptance criteria | `claude "/define"` |
-| `/refine` | Break issues into single-file focused sub-tasks | `claude "/refine ABC-123"` |
-| `/execute` | Implement one sub-task (or use `mobius loop` for all) | `claude "/execute ABC-123"` |
-| `/verify` | Validate implementation against acceptance criteria | `claude "/verify ABC-123"` |
+| `/define` | Create well-defined issues with acceptance criteria | `claude "/define"` or `opencode run "/define" --model openai/gpt-5.3-codex` |
+| `/refine` | Break issues into single-file focused sub-tasks | `claude "/refine ABC-123"` or `opencode run "/refine ABC-123" --model openai/gpt-5.3-codex` |
+| `/execute` | Implement one sub-task (or use `mobius loop` for all) | `claude "/execute ABC-123"` or `opencode run "/execute ABC-123" --model openai/gpt-5.3-codex` |
+| `/verify` | Validate implementation against acceptance criteria | `claude "/verify ABC-123"` or `opencode run "/verify ABC-123" --model openai/gpt-5.3-codex` |
 
 Skills auto-detect your configured backend (Linear or Jira). For explicit selection, use prefixed aliases: `/linear:define`, `/jira:refine`, etc.
 
@@ -142,7 +152,7 @@ Skills auto-detect your configured backend (Linear or Jira). For explicit select
 
 ## Parallel Execution
 
-When sub-tasks have no blocking dependencies, multiple Claude agents work simultaneously in isolated git worktrees.
+When sub-tasks have no blocking dependencies, multiple runtime agents work simultaneously in isolated git worktrees.
 
 ```bash
 mobius loop MOB-123               # Parallel execution (default)
@@ -152,7 +162,7 @@ mobius MOB-123 --sequential       # Sequential execution (bash loop)
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `max_parallel_agents` | `3` | Maximum concurrent Claude agents (1-10) |
+| `max_parallel_agents` | `3` | Maximum concurrent runtime agents (1-10) |
 | `worktree_path` | `../<repo>-worktrees/` | Base directory for worktrees |
 | `cleanup_on_success` | `true` | Auto-remove worktree on success |
 | `base_branch` | `main` | Branch for feature branches |
@@ -228,7 +238,9 @@ export JIRA_API_TOKEN="your-api-token"  # From Atlassian Account Settings
 export JIRA_EMAIL="you@company.com"
 ```
 
-### 3. Configure Claude MCP Plugin
+### 3. Configure Runtime MCP Plugin
+
+Claude example (for OpenCode, configure the equivalent Jira MCP integration in your runtime tool):
 
 Add to your MCP configuration:
 
@@ -262,7 +274,7 @@ mobius doctor
 
 | Requirement | Notes |
 |-------------|-------|
-| **Claude Code CLI** | Install from [claude.ai/code](https://claude.ai/code) |
+| **Runtime CLI** | Install [Claude Code CLI](https://claude.ai/code) or OpenCode CLI |
 | **Git** | Required for worktree operations |
 | **Linear or Jira account** | Both backends fully supported |
 | **tmux** (optional) | Required for parallel execution |
@@ -284,12 +296,14 @@ mobius doctor
 # Parallel execution (default)
 mobius loop ABC-123              # Run parallel loop until complete
 mobius loop ABC-123 --parallel=5 # Override max parallel agents
+mobius loop ABC-123 --thinking-level=xhigh # OpenCode reasoning level (xhigh -> max)
 mobius ABC-123                   # Alias for parallel loop
 
 # Sequential execution
 mobius ABC-123 --sequential      # Use bash sequential loop
 mobius ABC-123 --local           # Bypass sandbox
 mobius ABC-123 --model=sonnet    # Use specific model
+mobius ABC-123 --model=openai/gpt-5.3-codex  # OpenCode model override
 
 # Management
 mobius setup                     # Interactive setup wizard
@@ -304,9 +318,19 @@ mobius doctor                    # Check system requirements
 <details>
 <summary>Common issues and solutions</summary>
 
-### "Claude CLI not found"
+### "Runtime CLI not found"
 
-Install Claude Code CLI from [claude.ai/code](https://claude.ai/code).
+- If `runtime: claude`, install Claude Code CLI from [claude.ai/code](https://claude.ai/code)
+- If `runtime: opencode`, install OpenCode CLI and confirm `opencode --version` works in your shell
+
+### Wrong runtime selected
+
+Run setup again to switch runtime, then re-run doctor:
+
+```bash
+mobius setup
+mobius doctor
+```
 
 ### "Git not configured"
 

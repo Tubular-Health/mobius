@@ -288,11 +288,7 @@ impl LinearClient {
         }
         if !status.is_success() {
             let body_text = resp.text().await.unwrap_or_default();
-            warn!(
-                "Linear API error: HTTP {} : {}",
-                status.as_u16(),
-                body_text
-            );
+            warn!("Linear API error: HTTP {} : {}", status.as_u16(), body_text);
             return Err(LinearError::HttpError {
                 status: status.as_u16(),
                 message: body_text,
@@ -325,10 +321,7 @@ impl LinearClient {
     // -----------------------------------------------------------------------
 
     /// Fetch a Linear issue by identifier (e.g., "TUB-293").
-    pub async fn fetch_linear_issue(
-        &self,
-        identifier: &str,
-    ) -> Result<ParentIssue, LinearError> {
+    pub async fn fetch_linear_issue(&self, identifier: &str) -> Result<ParentIssue, LinearError> {
         let query = r#"
             query GetIssue($id: String!) {
                 issue(id: $id) {
@@ -404,9 +397,7 @@ impl LinearClient {
                 let branch_name = node
                     .branch_name
                     .filter(|b| !b.is_empty())
-                    .unwrap_or_else(|| {
-                        format!("feat/{}", node.identifier.to_lowercase())
-                    });
+                    .unwrap_or_else(|| format!("feat/{}", node.identifier.to_lowercase()));
 
                 let blocked_by: Vec<Relation> = node
                     .inverse_relations
@@ -442,10 +433,7 @@ impl LinearClient {
     }
 
     /// Fetch the current status name for a Linear issue.
-    pub async fn fetch_linear_issue_status(
-        &self,
-        identifier: &str,
-    ) -> Result<String, LinearError> {
+    pub async fn fetch_linear_issue_status(&self, identifier: &str) -> Result<String, LinearError> {
         let query = r#"
             query GetIssueStatus($id: String!) {
                 issue(id: $id) {
@@ -526,10 +514,10 @@ impl LinearClient {
             .find(|s| s.name.to_lowercase() == target_lower);
 
         let state_id = match target_state {
-            Some(s) => s
-                .id
-                .as_ref()
-                .ok_or_else(|| LinearError::StatusNotFound(new_status.to_string()))?,
+            Some(s) => {
+                s.id.as_ref()
+                    .ok_or_else(|| LinearError::StatusNotFound(new_status.to_string()))?
+            }
             None => return Err(LinearError::StatusNotFound(new_status.to_string())),
         };
 

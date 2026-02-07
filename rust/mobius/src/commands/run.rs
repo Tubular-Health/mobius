@@ -43,11 +43,7 @@ pub fn run(
     if !validate_task_id(task_id, &backend) {
         eprintln!(
             "{}",
-            format!(
-                "Error: Invalid task ID format for {}: {}",
-                backend, task_id
-            )
-            .red()
+            format!("Error: Invalid task ID format for {}: {}", backend, task_id).red()
         );
         eprintln!(
             "{}",

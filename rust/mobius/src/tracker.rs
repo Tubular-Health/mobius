@@ -77,7 +77,10 @@ pub struct TrackerStats {
 }
 
 /// Create a new execution tracker.
-pub fn create_tracker(max_retries: Option<u32>, verification_timeout_ms: Option<u64>) -> ExecutionTracker {
+pub fn create_tracker(
+    max_retries: Option<u32>,
+    verification_timeout_ms: Option<u64>,
+) -> ExecutionTracker {
     ExecutionTracker {
         assignments: HashMap::new(),
         max_retries: max_retries.unwrap_or(2),
@@ -123,10 +126,7 @@ pub fn process_results(
 
     for result in results {
         let mut assignment = tracker.assignments.get_mut(&result.task_id);
-        let attempts = assignment
-            .as_ref()
-            .map(|a| a.attempts)
-            .unwrap_or(1);
+        let attempts = assignment.as_ref().map(|a| a.attempts).unwrap_or(1);
 
         if let Some(ref mut assign) = assignment {
             assign.last_result = Some(result.clone());
@@ -342,10 +342,7 @@ mod tests {
         assert_eq!(verified.len(), 1);
         assert!(verified[0].success);
         assert!(verified[0].backend_verified);
-        assert_eq!(
-            verified[0].backend_status.as_deref(),
-            Some("Done (local)")
-        );
+        assert_eq!(verified[0].backend_status.as_deref(), Some("Done (local)"));
         assert!(!verified[0].should_retry);
     }
 
@@ -507,25 +504,21 @@ mod tests {
 
     #[test]
     fn test_has_permanent_failures() {
-        let results = vec![
-            VerifiedResult {
-                success: false,
-                should_retry: false,
-                ..VerifiedResult::from(&make_result("1", "MOB-101", false))
-            },
-        ];
+        let results = vec![VerifiedResult {
+            success: false,
+            should_retry: false,
+            ..VerifiedResult::from(&make_result("1", "MOB-101", false))
+        }];
         assert!(has_permanent_failures(&results));
     }
 
     #[test]
     fn test_has_permanent_failures_false() {
-        let results = vec![
-            VerifiedResult {
-                success: false,
-                should_retry: true,
-                ..VerifiedResult::from(&make_result("1", "MOB-101", false))
-            },
-        ];
+        let results = vec![VerifiedResult {
+            success: false,
+            should_retry: true,
+            ..VerifiedResult::from(&make_result("1", "MOB-101", false))
+        }];
         assert!(!has_permanent_failures(&results));
     }
 

@@ -18,7 +18,7 @@ pub const NORD9: Color = Color::Rgb(129, 161, 193);
 pub const NORD10: Color = Color::Rgb(94, 129, 172);
 
 // Nord Aurora (status indicators)
-pub const NORD11: Color = Color::Rgb(191, 97, 106);  // red
+pub const NORD11: Color = Color::Rgb(191, 97, 106); // red
 pub const NORD12: Color = Color::Rgb(208, 135, 112); // orange
 pub const NORD13: Color = Color::Rgb(235, 203, 139); // yellow
 pub const NORD14: Color = Color::Rgb(163, 190, 140); // green
@@ -83,7 +83,11 @@ pub fn format_tokens(count: u64) -> String {
 
 /// Formats an input/output token pair as "{input} in / {output} out".
 pub fn format_token_pair(input: u64, output: u64) -> String {
-    format!("{} in / {} out", format_tokens(input), format_tokens(output))
+    format!(
+        "{} in / {} out",
+        format_tokens(input),
+        format_tokens(output)
+    )
 }
 
 #[cfg(test)]

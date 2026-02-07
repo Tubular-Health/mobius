@@ -13,6 +13,38 @@ pub enum Backend {
     Local,
 }
 
+/// Agent runtime used for skill execution
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentRuntime {
+    #[default]
+    Claude,
+    Opencode,
+}
+
+impl fmt::Display for AgentRuntime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AgentRuntime::Claude => write!(f, "claude"),
+            AgentRuntime::Opencode => write!(f, "opencode"),
+        }
+    }
+}
+
+impl FromStr for AgentRuntime {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "claude" => Ok(AgentRuntime::Claude),
+            "opencode" => Ok(AgentRuntime::Opencode),
+            _ => Err(format!(
+                "Unknown runtime: '{s}'. Expected: claude, opencode"
+            )),
+        }
+    }
+}
+
 impl fmt::Display for Backend {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -31,7 +63,9 @@ impl FromStr for Backend {
             "linear" => Ok(Backend::Linear),
             "jira" => Ok(Backend::Jira),
             "local" => Ok(Backend::Local),
-            _ => Err(format!("Unknown backend: '{s}'. Expected: linear, jira, local")),
+            _ => Err(format!(
+                "Unknown backend: '{s}'. Expected: linear, jira, local"
+            )),
         }
     }
 }
@@ -64,7 +98,9 @@ impl FromStr for Model {
             "opus" => Ok(Model::Opus),
             "sonnet" => Ok(Model::Sonnet),
             "haiku" => Ok(Model::Haiku),
-            _ => Err(format!("Unknown model: '{s}'. Expected: opus, sonnet, haiku")),
+            _ => Err(format!(
+                "Unknown model: '{s}'. Expected: opus, sonnet, haiku"
+            )),
         }
     }
 }
@@ -280,6 +316,25 @@ mod tests {
     }
 
     #[test]
+    fn test_runtime_from_str() {
+        assert_eq!(
+            AgentRuntime::from_str("claude").unwrap(),
+            AgentRuntime::Claude
+        );
+        assert_eq!(
+            AgentRuntime::from_str("Opencode").unwrap(),
+            AgentRuntime::Opencode
+        );
+        assert!(AgentRuntime::from_str("unknown").is_err());
+    }
+
+    #[test]
+    fn test_runtime_display() {
+        assert_eq!(AgentRuntime::Claude.to_string(), "claude");
+        assert_eq!(AgentRuntime::Opencode.to_string(), "opencode");
+    }
+
+    #[test]
     fn test_model_from_str() {
         assert_eq!(Model::from_str("opus").unwrap(), Model::Opus);
         assert_eq!(Model::from_str("Sonnet").unwrap(), Model::Sonnet);
@@ -303,6 +358,15 @@ mod tests {
         assert_eq!(json, "\"opus\"");
         let parsed: Model = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, model);
+    }
+
+    #[test]
+    fn test_runtime_serde_roundtrip() {
+        let runtime = AgentRuntime::Opencode;
+        let json = serde_json::to_string(&runtime).unwrap();
+        assert_eq!(json, "\"opencode\"");
+        let parsed: AgentRuntime = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, runtime);
     }
 
     #[test]

@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::types::context::{ParentIssueContext, SubTaskContext};
-use crate::types::task_graph::{LinearIssue, Relations, Relation};
+use crate::types::task_graph::{LinearIssue, Relation, Relations};
 
 /// Cached git repo root, resolved once per process.
 static GIT_REPO_ROOT: OnceLock<PathBuf> = OnceLock::new();
@@ -184,8 +184,13 @@ fn atomic_write_json<T: Serialize>(path: &Path, data: &T) -> Result<()> {
 
     fs::write(&tmp_path, &json)
         .with_context(|| format!("Failed to write temp file {}", tmp_path.display()))?;
-    fs::rename(&tmp_path, path)
-        .with_context(|| format!("Failed to rename {} -> {}", tmp_path.display(), path.display()))?;
+    fs::rename(&tmp_path, path).with_context(|| {
+        format!(
+            "Failed to rename {} -> {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -420,9 +425,7 @@ pub fn read_local_subtasks_as_linear_issues(issue_id: &str) -> Vec<LinearIssue> 
     for issue in issues {
         let dominated = by_id
             .get(&issue.id)
-            .map(|existing| {
-                status_priority(&issue.status) > status_priority(&existing.status)
-            })
+            .map(|existing| status_priority(&issue.status) > status_priority(&existing.status))
             .unwrap_or(true);
 
         if dominated {
@@ -609,7 +612,11 @@ mod tests {
 
         let counter_path = issues.join("counter.json");
         let counter = Counter { next: 7 };
-        fs::write(&counter_path, serde_json::to_string_pretty(&counter).unwrap()).unwrap();
+        fs::write(
+            &counter_path,
+            serde_json::to_string_pretty(&counter).unwrap(),
+        )
+        .unwrap();
 
         let content = fs::read_to_string(&counter_path).unwrap();
         let parsed: Counter = serde_json::from_str(&content).unwrap();
@@ -656,9 +663,7 @@ mod tests {
             url: "https://example.com".to_string(),
         };
 
-        let file_path = issues_path(tmp.path())
-            .join(issue_id)
-            .join("parent.json");
+        let file_path = issues_path(tmp.path()).join(issue_id).join("parent.json");
         atomic_write_json(&file_path, &spec).unwrap();
 
         let content = fs::read_to_string(&file_path).unwrap();
@@ -755,12 +760,7 @@ mod tests {
         let entries = fs::read_dir(&tasks_dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    == Some("json")
-            })
+            .filter(|e| e.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
             .filter_map(|e| {
                 let content = fs::read_to_string(e.path()).ok()?;
                 serde_json::from_str::<SubTaskContext>(&content).ok()
@@ -1055,9 +1055,7 @@ mod tests {
         let issue_id = "TEST-CORRUPT";
         ensure_task_dir(tmp.path(), issue_id);
 
-        let parent_path = issues_path(tmp.path())
-            .join(issue_id)
-            .join("parent.json");
+        let parent_path = issues_path(tmp.path()).join(issue_id).join("parent.json");
         fs::write(&parent_path, "{{not valid json at all}}").unwrap();
 
         // read_parent_spec reads from the global git root path, so we test the
@@ -1108,9 +1106,7 @@ mod tests {
         let tmp = setup_test_dir();
         let issue_id = "TEST-EXECDIR";
 
-        let exec_dir = issues_path(tmp.path())
-            .join(issue_id)
-            .join("execution");
+        let exec_dir = issues_path(tmp.path()).join(issue_id).join("execution");
         assert!(!exec_dir.exists());
 
         let file_path = exec_dir.join("iterations.json");
@@ -1198,10 +1194,7 @@ mod tests {
             .map(|existing| status_priority(&issue_b.status) > status_priority(&existing.status))
             .unwrap_or(true);
 
-        assert!(
-            !dominated,
-            "Same priority should NOT dominate (first wins)"
-        );
+        assert!(!dominated, "Same priority should NOT dominate (first wins)");
     }
 
     #[test]
@@ -1283,10 +1276,7 @@ mod tests {
             .map(|existing| status_priority(&pending.status) > status_priority(&existing.status))
             .unwrap_or(true);
 
-        assert!(
-            !dominated,
-            "pending should NOT dominate done"
-        );
+        assert!(!dominated, "pending should NOT dominate done");
         assert_eq!(by_id["t-1"].status, "done");
     }
 
@@ -1308,9 +1298,7 @@ mod tests {
         let tmp = setup_test_dir();
         let issue_id = "TEST-NEWLOG";
 
-        let exec_dir = issues_path(tmp.path())
-            .join(issue_id)
-            .join("execution");
+        let exec_dir = issues_path(tmp.path()).join(issue_id).join("execution");
         let file_path = exec_dir.join("iterations.json");
 
         assert!(!file_path.exists());
@@ -1517,10 +1505,7 @@ mod tests {
 
         // All should return 1 (no existing LOC dirs)
         for result in &results {
-            assert_eq!(
-                *result, 1,
-                "Empty dir scan should return 1 for all threads"
-            );
+            assert_eq!(*result, 1, "Empty dir scan should return 1 for all threads");
         }
     }
 }

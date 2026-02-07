@@ -27,7 +27,10 @@ impl Widget for TokenMetrics<'_> {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(BORDER_COLOR))
-            .title(Span::styled(" Token Usage ", Style::default().fg(HEADER_COLOR)));
+            .title(Span::styled(
+                " Token Usage ",
+                Style::default().fg(HEADER_COLOR),
+            ));
 
         let inner = block.inner(area);
         block.render(area, buf);
@@ -42,10 +45,18 @@ impl Widget for TokenMetrics<'_> {
         let totals_text = if self.total_input == 0 && self.total_output == 0 {
             "Tokens: —".to_string()
         } else {
-            format!("Tokens: {}", format_token_pair(self.total_input, self.total_output))
+            format!(
+                "Tokens: {}",
+                format_token_pair(self.total_input, self.total_output)
+            )
         };
         let totals_line = Line::from(Span::styled(totals_text, Style::default().fg(TEXT_COLOR)));
-        buf.set_line(inner.x + 1, row, &totals_line, inner.width.saturating_sub(1));
+        buf.set_line(
+            inner.x + 1,
+            row,
+            &totals_line,
+            inner.width.saturating_sub(1),
+        );
         row += 1;
 
         if row >= inner.y + inner.height {
@@ -75,10 +86,7 @@ impl Widget for TokenMetrics<'_> {
                         format!("  {} ", short_name),
                         Style::default().fg(model_color(name)),
                     ),
-                    Span::styled(
-                        format_token_pair(inp, out),
-                        Style::default().fg(TEXT_COLOR),
-                    ),
+                    Span::styled(format_token_pair(inp, out), Style::default().fg(TEXT_COLOR)),
                 ]);
                 buf.set_line(inner.x + 1, row, &line, inner.width.saturating_sub(1));
                 row += 1;
@@ -100,7 +108,12 @@ impl Widget for TokenMetrics<'_> {
                 "  ▁▁▁ awaiting data",
                 Style::default().fg(MUTED_COLOR),
             ));
-            buf.set_line(inner.x + 1, row, &placeholder, inner.width.saturating_sub(1));
+            buf.set_line(
+                inner.x + 1,
+                row,
+                &placeholder,
+                inner.width.saturating_sub(1),
+            );
         } else {
             let sparkline_area = Rect::new(
                 inner.x + 1,

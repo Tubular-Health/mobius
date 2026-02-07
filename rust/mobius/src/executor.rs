@@ -5,11 +5,13 @@ use anyhow::Result;
 use regex::Regex;
 use tokio::time::{sleep, Duration};
 
+use crate::runtime_adapter;
 use crate::stream_json;
 use crate::tmux::{
-    capture_pane_content, create_agent_pane, kill_pane, layout_panes, run_in_pane, set_pane_title,
-    TmuxPane, TmuxSession,
+    capture_pane_content, create_agent_pane, interrupt_pane, kill_pane, layout_panes,
+    run_in_pane, set_pane_title, TmuxPane, TmuxSession,
 };
+use crate::types::AgentRuntime;
 use crate::types::{ExecutionConfig, SubTask};
 use crate::types::enums::Model;
 
@@ -38,14 +40,24 @@ struct StatusPatterns {
 impl StatusPatterns {
     fn new() -> Self {
         Self {
-            subtask_complete: Regex::new(r"STATUS:\s*SUBTASK_COMPLETE").unwrap(),
-            verification_failed: Regex::new(r"STATUS:\s*VERIFICATION_FAILED").unwrap(),
-            all_complete: Regex::new(r"STATUS:\s*ALL_COMPLETE").unwrap(),
-            all_blocked: Regex::new(r"STATUS:\s*ALL_BLOCKED").unwrap(),
-            no_subtasks: Regex::new(r"STATUS:\s*NO_SUBTASKS").unwrap(),
+            subtask_complete: status_regex("SUBTASK_COMPLETE"),
+            verification_failed: status_regex("VERIFICATION_FAILED"),
+            all_complete: status_regex("ALL_COMPLETE"),
+            all_blocked: status_regex("ALL_BLOCKED"),
+            no_subtasks: status_regex("NO_SUBTASKS"),
             execution_complete: Regex::new(r"EXECUTION_COMPLETE:\s*[\w-]+").unwrap(),
         }
     }
+}
+
+fn status_regex(status: &str) -> Regex {
+    let escaped = regex::escape(status);
+    // Supports both canonical lines (`STATUS: X`) and markdown variants
+    // emitted by some runtimes (`- Status: `X``).
+    Regex::new(&format!(
+        r"(?m)^\s*(?:[-*]\s*)?(?:\*{{1,2}}\s*)?(?:STATUS|Status|status)(?:\s*\*{{1,2}})?\s*:\s*`?{escaped}`?\s*$"
+    ))
+    .unwrap()
 }
 
 /// Result of executing a single agent task
@@ -76,6 +88,7 @@ struct AgentHandle {
     task: SubTask,
     pane: TmuxPane,
     start_time: Instant,
+    is_primary: bool,
     #[allow(dead_code)]
     command: String,
     output_file: Option<PathBuf>,
@@ -114,7 +127,30 @@ pub fn select_model_for_task(task: &SubTask, config_model: Model) -> Model {
         .unwrap_or(config_model)
 }
 
-/// Build the claude CLI command string for executing a task in a pane.
+/// Build a runtime-specific command string for executing a task in a pane.
+pub fn build_runtime_command(
+    runtime: AgentRuntime,
+    subtask_identifier: &str,
+    skill: &str,
+    worktree_path: &str,
+    config: &ExecutionConfig,
+    context_file_path: Option<&str>,
+    model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
+) -> String {
+    runtime_adapter::build_execution_command(
+        runtime,
+        subtask_identifier,
+        skill,
+        worktree_path,
+        config,
+        context_file_path,
+        model_override,
+        thinking_level_override,
+    )
+}
+
+/// Build the Claude CLI command string for executing a task in a pane.
 ///
 /// When `output_file_path` is provided, the raw stream-json output is saved
 /// via `tee` before piping to `cclean`, enabling token usage extraction.
@@ -137,17 +173,19 @@ pub fn build_claude_command(
         .unwrap_or_default();
 
     let env_prefix = context_file_path
-        .map(|path| format!("MOBIUS_CONTEXT_FILE=\"{}\" MOBIUS_TASK_ID=\"{}\" ", path, subtask_identifier))
+        .map(|path| {
+            format!(
+                "MOBIUS_CONTEXT_FILE=\"{}\" MOBIUS_TASK_ID=\"{}\" ",
+                path, subtask_identifier
+            )
+        })
         .unwrap_or_default();
 
-    let parts: Vec<&str> = [
-        model_flag.as_str(),
-        disallowed_tools_flag.as_str(),
-    ]
-    .iter()
-    .filter(|s| !s.is_empty())
-    .copied()
-    .collect();
+    let parts: Vec<&str> = [model_flag.as_str(), disallowed_tools_flag.as_str()]
+        .iter()
+        .filter(|s| !s.is_empty())
+        .copied()
+        .collect();
 
     let flags = parts.join(" ");
 
@@ -174,10 +212,13 @@ pub fn calculate_parallelism(ready_task_count: usize, config: &ExecutionConfig) 
 /// stream-json output is saved per-task for token usage extraction.
 pub async fn execute_parallel(
     tasks: &[SubTask],
+    runtime: AgentRuntime,
     config: &ExecutionConfig,
     worktree_path: &str,
     session: &TmuxSession,
     context_file_path: Option<&str>,
+    model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
     timeout_ms: Option<u64>,
     output_dir: Option<&Path>,
 ) -> Vec<ExecutionResult> {
@@ -190,7 +231,18 @@ pub async fn execute_parallel(
 
     let batch = &tasks[..actual_parallelism];
 
-    let handles = match spawn_agents(batch, session, worktree_path, config, context_file_path, output_dir).await
+    let handles = match spawn_agents(
+        batch,
+        runtime,
+        session,
+        worktree_path,
+        config,
+        context_file_path,
+        model_override,
+        thinking_level_override,
+        output_dir,
+    )
+    .await
     {
         Ok(h) => h,
         Err(e) => {
@@ -227,27 +279,48 @@ pub async fn execute_parallel(
 /// Spawn a single agent in a specific pane and wait for completion.
 pub async fn spawn_agent_in_pane(
     task: &SubTask,
+    runtime: AgentRuntime,
     pane: &TmuxPane,
     worktree_path: &str,
     config: &ExecutionConfig,
     context_file_path: Option<&str>,
+    model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
     output_dir: Option<&Path>,
 ) -> ExecutionResult {
     let start_time = Instant::now();
     let skill = select_skill_for_task(task);
-    let model = select_model_for_task(task, config.model);
-
-    let output_file = output_dir.map(|dir| dir.join(format!("{}.jsonl", task.identifier)));
+    let output_file = if runtime == AgentRuntime::Claude {
+        output_dir.map(|dir| dir.join(format!("{}.jsonl", task.identifier)))
+    } else {
+        None
+    };
     let output_file_str = output_file.as_ref().map(|p| p.to_string_lossy().to_string());
-    let command = build_claude_command(
-        &task.identifier,
-        skill,
-        worktree_path,
-        config,
-        context_file_path,
-        model,
-        output_file_str.as_deref(),
-    );
+
+    let command = if runtime == AgentRuntime::Claude {
+        let default_model = config.model.parse::<Model>().unwrap_or_default();
+        let model = select_model_for_task(task, default_model);
+        build_claude_command(
+            &task.identifier,
+            skill,
+            worktree_path,
+            config,
+            context_file_path,
+            model,
+            output_file_str.as_deref(),
+        )
+    } else {
+        build_runtime_command(
+            runtime,
+            &task.identifier,
+            skill,
+            worktree_path,
+            config,
+            context_file_path,
+            model_override,
+            thinking_level_override,
+        )
+    };
 
     run_in_pane(&pane.id, &command, true).await;
 
@@ -255,6 +328,7 @@ pub async fn spawn_agent_in_pane(
         task: task.clone(),
         pane: pane.clone(),
         start_time,
+        is_primary: false,
         command,
         output_file,
     };
@@ -308,24 +382,39 @@ pub async fn is_pane_still_running(pane_id: &str) -> bool {
 /// Spawn agents in tmux panes for a batch of tasks.
 async fn spawn_agents(
     tasks: &[SubTask],
+    runtime: AgentRuntime,
     session: &TmuxSession,
     worktree_path: &str,
     config: &ExecutionConfig,
     context_file_path: Option<&str>,
+    model_override: Option<&str>,
+    thinking_level_override: Option<&str>,
     output_dir: Option<&Path>,
 ) -> Result<Vec<AgentHandle>> {
     let mut handles = Vec::with_capacity(tasks.len());
 
     for (i, task) in tasks.iter().enumerate() {
         let pane = if i == 0 {
-            // Reuse the session's initial pane for the first agent
-            let title = format!("{}: {}", task.identifier, task.title);
-            set_pane_title(&session.initial_pane_id, &title).await;
-            TmuxPane {
-                id: session.initial_pane_id.clone(),
-                session_id: session.id.clone(),
-                task_id: Some(task.identifier.clone()),
-                pane_type: crate::tmux::PaneType::Agent,
+            // Reuse the session's initial pane for the first agent when available.
+            if crate::tmux::is_pane_still_running(&session.initial_pane_id).await {
+                let title = format!("{}: {}", task.identifier, task.title);
+                set_pane_title(&session.initial_pane_id, &title).await;
+                TmuxPane {
+                    id: session.initial_pane_id.clone(),
+                    session_id: session.id.clone(),
+                    task_id: Some(task.identifier.clone()),
+                    pane_type: crate::tmux::PaneType::Agent,
+                }
+            } else {
+                // If the original pane was destroyed (e.g. prior timeout cleanup),
+                // create a replacement pane from the session itself.
+                create_agent_pane(
+                    session,
+                    &task.identifier,
+                    &format!("{}: {}", task.identifier, task.title),
+                    Some(&session.name),
+                )
+                .await?
             }
         } else {
             create_agent_pane(
@@ -338,18 +427,36 @@ async fn spawn_agents(
         };
 
         let skill = select_skill_for_task(task);
-        let model = select_model_for_task(task, config.model);
-        let output_file = output_dir.map(|dir| dir.join(format!("{}.jsonl", task.identifier)));
+        let output_file = if runtime == AgentRuntime::Claude {
+            output_dir.map(|dir| dir.join(format!("{}.jsonl", task.identifier)))
+        } else {
+            None
+        };
         let output_file_str = output_file.as_ref().map(|p| p.to_string_lossy().to_string());
-        let command = build_claude_command(
-            &task.identifier,
-            skill,
-            worktree_path,
-            config,
-            context_file_path,
-            model,
-            output_file_str.as_deref(),
-        );
+        let command = if runtime == AgentRuntime::Claude {
+            let default_model = config.model.parse::<Model>().unwrap_or_default();
+            let model = select_model_for_task(task, default_model);
+            build_claude_command(
+                &task.identifier,
+                skill,
+                worktree_path,
+                config,
+                context_file_path,
+                model,
+                output_file_str.as_deref(),
+            )
+        } else {
+            build_runtime_command(
+                runtime,
+                &task.identifier,
+                skill,
+                worktree_path,
+                config,
+                context_file_path,
+                model_override,
+                thinking_level_override,
+            )
+        };
 
         run_in_pane(&pane.id, &command, true).await;
 
@@ -357,6 +464,7 @@ async fn spawn_agents(
             task: task.clone(),
             pane,
             start_time: Instant::now(),
+            is_primary: i == 0,
             command,
             output_file,
         });
@@ -381,7 +489,14 @@ async fn wait_for_agent(handle: AgentHandle, timeout_ms: u64) -> ExecutionResult
                 .and_then(|f| stream_json::parse_current_tokens(f));
             let title = format!("\u{2717} {}: TIMEOUT", handle.task.identifier);
             set_pane_title(&handle.pane.id, &title).await;
-            kill_pane(&handle.pane.id).await;
+            // Keep the primary pane alive for future retries. Killing it can leave
+            // session.initial_pane_id dangling and break tmux split targets.
+            interrupt_pane(&handle.pane.id).await;
+            sleep(Duration::from_millis(150)).await;
+            if !handle.is_primary {
+                kill_pane(&handle.pane.id).await;
+            }
+            let timeout_output = capture_pane_content(&handle.pane.id, 200).await;
 
             return ExecutionResult {
                 task_id: handle.task.id.clone(),
@@ -394,7 +509,11 @@ async fn wait_for_agent(handle: AgentHandle, timeout_ms: u64) -> ExecutionResult
                     elapsed.as_secs()
                 )),
                 pane_id: Some(handle.pane.id.clone()),
-                raw_output: None,
+                raw_output: if timeout_output.is_empty() {
+                    None
+                } else {
+                    Some(timeout_output)
+                },
                 input_tokens: tokens.as_ref().map(|t| t.input_tokens),
                 output_tokens: tokens.as_ref().map(|t| t.output_tokens),
             };
@@ -414,13 +533,13 @@ async fn wait_for_agent(handle: AgentHandle, timeout_ms: u64) -> ExecutionResult
                     result.output_tokens = Some(usage.output_tokens);
                 }
             }
-
             // Update pane title with completion status
-            let emoji = if result.success { "\u{2713}" } else { "\u{2717}" };
-            let title = format!(
-                "{} {}: {:?}",
-                emoji, handle.task.identifier, result.status
-            );
+            let emoji = if result.success {
+                "\u{2713}"
+            } else {
+                "\u{2717}"
+            };
+            let title = format!("{} {}: {:?}", emoji, handle.task.identifier, result.status);
             set_pane_title(&handle.pane.id, &title).await;
 
             return result;
@@ -444,7 +563,8 @@ fn parse_agent_output(
     let duration_ms = start_time.elapsed().as_millis() as u64;
 
     // Check for successful completion
-    if patterns.subtask_complete.is_match(content) || patterns.execution_complete.is_match(content) {
+    if patterns.subtask_complete.is_match(content) || patterns.execution_complete.is_match(content)
+    {
         return Some(ExecutionResult {
             task_id: task.id.clone(),
             identifier: task.identifier.clone(),
@@ -606,6 +726,46 @@ mod tests {
     }
 
     #[test]
+    fn test_build_runtime_command_opencode_uses_raw_model_override() {
+        let config = ExecutionConfig::default();
+        let cmd = build_runtime_command(
+            AgentRuntime::Opencode,
+            "MOB-101",
+            "/execute",
+            "/path/to/worktree",
+            &config,
+            None,
+            Some("gpt-5.3-codex"),
+            Some("xhigh"),
+        );
+
+        assert!(cmd.contains("Use the execute skill for sub-task MOB-101"));
+        assert!(cmd.contains("--model openai/gpt-5.3-codex"));
+        assert!(cmd.contains("--variant max"));
+        assert!(!cmd.contains("| cclean"));
+        assert!(!cmd.contains("echo '/execute MOB-101'"));
+    }
+
+    #[test]
+    fn test_build_runtime_command_claude_ignores_raw_model_override() {
+        let config = ExecutionConfig::default();
+        let cmd = build_runtime_command(
+            AgentRuntime::Claude,
+            "MOB-101",
+            "/execute",
+            "/path/to/worktree",
+            &config,
+            None,
+            Some("custom-model"),
+            Some("xhigh"),
+        );
+
+        assert!(cmd.contains("claude -p"));
+        assert!(cmd.contains("--model opus"));
+        assert!(!cmd.contains("--model custom-model"));
+    }
+
+    #[test]
     fn test_build_claude_command_with_disallowed_tools() {
         let mut config = ExecutionConfig::default();
         config.disallowed_tools = Some(vec!["Bash".to_string(), "Write".to_string()]);
@@ -630,11 +790,21 @@ mod tests {
     #[test]
     fn test_status_patterns_subtask_complete() {
         let patterns = StatusPatterns::new();
-        assert!(patterns.subtask_complete.is_match("STATUS: SUBTASK_COMPLETE"));
-        assert!(patterns.subtask_complete.is_match("STATUS:  SUBTASK_COMPLETE"));
+        assert!(patterns
+            .subtask_complete
+            .is_match("STATUS: SUBTASK_COMPLETE"));
+        assert!(patterns
+            .subtask_complete
+            .is_match("STATUS:  SUBTASK_COMPLETE"));
         assert!(patterns
             .subtask_complete
             .is_match("some text before\nSTATUS: SUBTASK_COMPLETE\nsome text after"));
+        assert!(patterns
+            .subtask_complete
+            .is_match("- Status: `SUBTASK_COMPLETE`"));
+        assert!(patterns
+            .subtask_complete
+            .is_match("**Status**: SUBTASK_COMPLETE"));
         assert!(!patterns.subtask_complete.is_match("SUBTASK_COMPLETE"));
     }
 
@@ -644,6 +814,9 @@ mod tests {
         assert!(patterns
             .verification_failed
             .is_match("STATUS: VERIFICATION_FAILED"));
+        assert!(patterns
+            .verification_failed
+            .is_match("- Status: `VERIFICATION_FAILED`"));
         assert!(!patterns.verification_failed.is_match("VERIFICATION_FAILED"));
     }
 
@@ -694,6 +867,22 @@ mod tests {
         assert!(result.success);
         assert_eq!(result.status, ExecutionStatus::SubtaskComplete);
         assert_eq!(result.identifier, "MOB-101");
+    }
+
+    #[test]
+    fn test_parse_agent_output_subtask_complete_markdown_status_line() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        let content = "Done\n- Status: `SUBTASK_COMPLETE`\ncommit: abc123\n";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re);
+
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert!(result.success);
+        assert_eq!(result.status, ExecutionStatus::SubtaskComplete);
     }
 
     #[test]
@@ -950,11 +1139,17 @@ mod tests {
         // Generate 50 lines of noise before and after the status line
         let mut lines = Vec::new();
         for i in 0..50 {
-            lines.push(format!("Line {} of agent output: processing files, running tests, checking types...", i));
+            lines.push(format!(
+                "Line {} of agent output: processing files, running tests, checking types...",
+                i
+            ));
         }
         lines.push("STATUS: SUBTASK_COMPLETE".to_string());
         for i in 50..100 {
-            lines.push(format!("Line {} more output after completion marker with various data", i));
+            lines.push(format!(
+                "Line {} more output after completion marker with various data",
+                i
+            ));
         }
         let content = lines.join("\n");
 
@@ -987,17 +1182,25 @@ mod tests {
         let patterns = StatusPatterns::new();
 
         // Standard format
-        assert!(patterns.execution_complete.is_match("EXECUTION_COMPLETE: MOB-124"));
+        assert!(patterns
+            .execution_complete
+            .is_match("EXECUTION_COMPLETE: MOB-124"));
         // Hyphenated task IDs
-        assert!(patterns.execution_complete.is_match("EXECUTION_COMPLETE: task-001"));
+        assert!(patterns
+            .execution_complete
+            .is_match("EXECUTION_COMPLETE: task-001"));
         // No space after colon
-        assert!(patterns.execution_complete.is_match("EXECUTION_COMPLETE:task-VG"));
+        assert!(patterns
+            .execution_complete
+            .is_match("EXECUTION_COMPLETE:task-VG"));
         // Alphanumeric IDs
-        assert!(patterns.execution_complete.is_match("EXECUTION_COMPLETE: PROJ-999"));
+        assert!(patterns
+            .execution_complete
+            .is_match("EXECUTION_COMPLETE: PROJ-999"));
         // Embedded in larger output
-        assert!(patterns.execution_complete.is_match(
-            "lots of text\nEXECUTION_COMPLETE: MOB-255\nmore text"
-        ));
+        assert!(patterns
+            .execution_complete
+            .is_match("lots of text\nEXECUTION_COMPLETE: MOB-255\nmore text"));
     }
 
     #[test]
@@ -1005,8 +1208,12 @@ mod tests {
         let patterns = StatusPatterns::new();
 
         // Lowercase should NOT match
-        assert!(!patterns.subtask_complete.is_match("status: subtask_complete"));
-        assert!(!patterns.subtask_complete.is_match("Status: Subtask_Complete"));
+        assert!(!patterns
+            .subtask_complete
+            .is_match("status: subtask_complete"));
+        assert!(!patterns
+            .subtask_complete
+            .is_match("Status: Subtask_Complete"));
 
         // Missing STATUS: prefix should NOT match
         assert!(!patterns.subtask_complete.is_match("SUBTASK_COMPLETE"));
@@ -1035,7 +1242,8 @@ mod tests {
         let start = Instant::now();
 
         // Has error summary but no STATUS: pattern - should return None (still running)
-        let content = "Agent output\n### Error Summary\nSomething went wrong\nBut no status pattern";
+        let content =
+            "Agent output\n### Error Summary\nSomething went wrong\nBut no status pattern";
         let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re);
         assert!(result.is_none());
     }

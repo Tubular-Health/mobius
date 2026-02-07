@@ -180,7 +180,10 @@ impl DebugLogger {
         let data_str = if event.data.is_empty() {
             String::new()
         } else {
-            format!(" {}", serde_json::to_string(&event.data).unwrap_or_default())
+            format!(
+                " {}",
+                serde_json::to_string(&event.data).unwrap_or_default()
+            )
         };
 
         format!(

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Operational guide for autonomous Mobius execution. This file is loaded each iteration to provide project-specific context to Claude.
+Operational guide for autonomous Mobius execution. This file is loaded each iteration to provide project-specific context to your configured runtime agent.
 
 **Copy this template to your project root and customize for your codebase.**
 

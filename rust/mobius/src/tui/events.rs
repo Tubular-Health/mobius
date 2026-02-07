@@ -34,13 +34,11 @@ impl EventHandler {
 
         // Keyboard event thread
         let tx_key = tx.clone();
-        let keyboard_handle = std::thread::spawn(move || {
-            loop {
-                if event::poll(Duration::from_millis(100)).unwrap_or(false) {
-                    if let Ok(Event::Key(key)) = event::read() {
-                        if tx_key.send(TuiEvent::Key(key)).is_err() {
-                            break;
-                        }
+        let keyboard_handle = std::thread::spawn(move || loop {
+            if event::poll(Duration::from_millis(100)).unwrap_or(false) {
+                if let Ok(Event::Key(key)) = event::read() {
+                    if tx_key.send(TuiEvent::Key(key)).is_err() {
+                        break;
                     }
                 }
             }
@@ -48,18 +46,16 @@ impl EventHandler {
 
         // Tick timer thread (1 second interval)
         let tx_tick = tx.clone();
-        let tick_handle = std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(Duration::from_secs(1));
-                if tx_tick.send(TuiEvent::Tick).is_err() {
-                    break;
-                }
+        let tick_handle = std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(1));
+            if tx_tick.send(TuiEvent::Tick).is_err() {
+                break;
             }
         });
 
         // File watcher for runtime state
         let watcher = runtime_state_path.and_then(|path| {
-            use notify::{Watcher, RecursiveMode, Config};
+            use notify::{Config, RecursiveMode, Watcher};
             let tx_watch = tx.clone();
             let mut watcher = notify::RecommendedWatcher::new(
                 move |res: Result<notify::Event, notify::Error>| {
@@ -70,7 +66,8 @@ impl EventHandler {
                     }
                 },
                 Config::default(),
-            ).ok()?;
+            )
+            .ok()?;
 
             // Watch the parent directory to catch file creation
             if let Some(parent) = path.parent() {
@@ -81,7 +78,7 @@ impl EventHandler {
 
         // File watcher for todos directory
         let todos_watcher = todos_dir.and_then(|dir| {
-            use notify::{Watcher, RecursiveMode, Config};
+            use notify::{Config, RecursiveMode, Watcher};
             let tx_todos = tx.clone();
             let mut watcher = notify::RecommendedWatcher::new(
                 move |res: Result<notify::Event, notify::Error>| {
@@ -92,7 +89,8 @@ impl EventHandler {
                     }
                 },
                 Config::default(),
-            ).ok()?;
+            )
+            .ok()?;
 
             let _ = watcher.watch(&dir, RecursiveMode::NonRecursive);
             Some(watcher)

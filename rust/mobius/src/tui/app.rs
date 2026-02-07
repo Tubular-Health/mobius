@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::types::context::{AgentTodoFile, RuntimeActiveTask, RuntimeCompletedTask, RuntimeState};
+use crate::types::context::{
+    AgentTodoFile, RuntimeActiveTask, RuntimeCompletedTask, RuntimeState, SessionInfo,
+};
 use crate::types::debug::DebugEvent;
-use crate::types::enums::TaskStatus;
-use crate::types::task_graph::{TaskGraph, SubTask};
+use crate::types::enums::{SessionStatus, TaskStatus};
+use crate::types::task_graph::{SubTask, TaskGraph};
 
 /// Application state for the TUI dashboard.
 pub struct App {
@@ -71,10 +73,7 @@ impl App {
 
     /// Get the path to the todos directory (sibling to runtime.json).
     pub fn todos_dir(&self) -> PathBuf {
-        self.runtime_state_path
-            .parent()
-            .unwrap()
-            .join("todos")
+        self.runtime_state_path.parent().unwrap().join("todos")
     }
 
     /// Reload agent todo files from the todos directory.
@@ -100,15 +99,16 @@ impl App {
 
     /// Check if execution is complete (all tasks in terminal state).
     fn check_completion(&mut self) {
-        let Some(state) = &self.runtime_state else {
-            return;
-        };
-
         let total = self.graph.tasks.len();
-        let completed = state.completed_tasks.len();
-        let failed = state.failed_tasks.len();
+        let (completed, failed) = self
+            .runtime_state
+            .as_ref()
+            .map(|state| (state.completed_tasks.len(), state.failed_tasks.len()))
+            .unwrap_or((0, 0));
 
-        if completed + failed >= total && total > 0 && !self.is_complete {
+        let session_terminal = self.has_terminal_session_status();
+
+        if ((completed + failed >= total && total > 0) || session_terminal) && !self.is_complete {
             self.is_complete = true;
             self.auto_exit_tick = Some(2);
         }
@@ -116,6 +116,9 @@ impl App {
 
     /// Handle tick event (called every second).
     pub fn on_tick(&mut self) {
+        // Catch completion transitions even if file watchers miss an event.
+        self.check_completion();
+
         if let Some(ref mut ticks) = self.auto_exit_tick {
             if *ticks == 0 {
                 self.should_quit = true;
@@ -139,9 +142,7 @@ impl App {
     fn current_total_tokens(&self) -> u64 {
         self.runtime_state
             .as_ref()
-            .map(|s| {
-                s.total_input_tokens.unwrap_or(0) + s.total_output_tokens.unwrap_or(0)
-            })
+            .map(|s| s.total_input_tokens.unwrap_or(0) + s.total_output_tokens.unwrap_or(0))
             .unwrap_or(0)
     }
 
@@ -206,7 +207,9 @@ impl App {
 
         // Active tasks -> in_progress (unless already done)
         for task in &state.active_tasks {
-            overrides.entry(task.id.clone()).or_insert(TaskStatus::InProgress);
+            overrides
+                .entry(task.id.clone())
+                .or_insert(TaskStatus::InProgress);
         }
 
         // Failed tasks -> failed (unless already done)
@@ -222,10 +225,7 @@ impl App {
     /// Get the effective status for a task, considering overrides.
     pub fn effective_status(&self, task: &SubTask) -> TaskStatus {
         let overrides = self.status_overrides();
-        overrides
-            .get(&task.id)
-            .copied()
-            .unwrap_or(task.status)
+        overrides.get(&task.id).copied().unwrap_or(task.status)
     }
 
     /// Get active task info by task ID.
@@ -279,6 +279,26 @@ impl App {
             }
         }
     }
+
+    fn has_terminal_session_status(&self) -> bool {
+        let Some(execution_dir) = self.runtime_state_path.parent() else {
+            return false;
+        };
+
+        let session_path = execution_dir.join("session.json");
+        let Ok(content) = std::fs::read_to_string(session_path) else {
+            return false;
+        };
+
+        let Ok(session) = serde_json::from_str::<SessionInfo>(&content) else {
+            return false;
+        };
+
+        matches!(
+            session.status,
+            SessionStatus::Completed | SessionStatus::Failed
+        )
+    }
 }
 
 /// Extract a task ID from a completed/failed task entry.
@@ -287,9 +307,145 @@ fn extract_task_id(value: &serde_json::Value) -> Option<String> {
     if let Some(s) = value.as_str() {
         return Some(s.to_string());
     }
-    value
-        .as_object()?
-        .get("id")?
-        .as_str()
-        .map(String::from)
+    value.as_object()?.get("id")?.as_str().map(String::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::task_graph::TaskGraph;
+
+    fn make_graph(total: usize) -> TaskGraph {
+        let mut tasks = HashMap::new();
+        for i in 0..total {
+            let id = format!("task-{:03}", i + 1);
+            tasks.insert(
+                id.clone(),
+                SubTask {
+                    id: id.clone(),
+                    identifier: id.clone(),
+                    title: format!("Task {}", i + 1),
+                    status: TaskStatus::Pending,
+                    blocked_by: Vec::new(),
+                    blocks: Vec::new(),
+                    git_branch_name: String::new(),
+                    scoring: None,
+                },
+            );
+        }
+
+        TaskGraph {
+            parent_id: "MOB-1".to_string(),
+            parent_identifier: "MOB-1".to_string(),
+            tasks,
+            edges: HashMap::new(),
+        }
+    }
+
+    fn make_runtime_state(total: usize, completed: usize, failed: usize) -> serde_json::Value {
+        let completed_tasks: Vec<_> = (0..completed)
+            .map(|i| serde_json::json!({ "id": format!("task-{:03}", i + 1) }))
+            .collect();
+
+        let failed_tasks: Vec<_> = (0..failed)
+            .map(|i| serde_json::json!({ "id": format!("task-{:03}", completed + i + 1) }))
+            .collect();
+
+        serde_json::json!({
+            "parentId": "MOB-1",
+            "parentTitle": "Parent",
+            "activeTasks": [],
+            "completedTasks": completed_tasks,
+            "failedTasks": failed_tasks,
+            "startedAt": "2026-02-07T00:00:00Z",
+            "updatedAt": "2026-02-07T00:00:00Z",
+            "loopPid": 123,
+            "totalTasks": total
+        })
+    }
+
+    fn unique_execution_dir(test_name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "mobius-app-tests-{}-{}-{}",
+            test_name,
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn check_completion_marks_complete_when_all_tasks_terminal() {
+        let exec_dir = unique_execution_dir("all-terminal");
+        let runtime_path = exec_dir.join("runtime.json");
+
+        let runtime = make_runtime_state(2, 1, 1);
+        std::fs::write(
+            &runtime_path,
+            serde_json::to_string_pretty(&runtime).unwrap(),
+        )
+        .unwrap();
+
+        let mut app = App::new(
+            "MOB-1".to_string(),
+            "Parent".to_string(),
+            make_graph(2),
+            runtime_path,
+            3,
+        );
+
+        app.reload_runtime_state();
+
+        assert!(app.is_complete);
+        assert_eq!(app.auto_exit_tick, Some(2));
+
+        let _ = std::fs::remove_dir_all(exec_dir);
+    }
+
+    #[test]
+    fn check_completion_marks_complete_when_session_failed() {
+        let exec_dir = unique_execution_dir("session-failed");
+        let runtime_path = exec_dir.join("runtime.json");
+        let session_path = exec_dir.join("session.json");
+
+        let runtime = make_runtime_state(8, 5, 2);
+        std::fs::write(
+            &runtime_path,
+            serde_json::to_string_pretty(&runtime).unwrap(),
+        )
+        .unwrap();
+
+        let session = serde_json::json!({
+            "parentId": "MOB-1",
+            "backend": "linear",
+            "startedAt": "2026-02-07T00:00:00Z",
+            "worktreePath": null,
+            "status": "failed"
+        });
+        std::fs::write(
+            &session_path,
+            serde_json::to_string_pretty(&session).unwrap(),
+        )
+        .unwrap();
+
+        let mut app = App::new(
+            "MOB-1".to_string(),
+            "Parent".to_string(),
+            make_graph(8),
+            runtime_path,
+            3,
+        );
+
+        app.reload_runtime_state();
+
+        assert!(app.is_complete);
+        assert_eq!(app.auto_exit_tick, Some(2));
+
+        let _ = std::fs::remove_dir_all(exec_dir);
+    }
 }

@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::config::{ProjectDetectionResult, SubTaskVerifyCommand};
-use super::enums::{
-    Backend, PendingUpdateType, SessionStatus, TaskStatus, VerificationResult,
-};
+use super::enums::{Backend, PendingUpdateType, SessionStatus, TaskStatus, VerificationResult};
 use super::task_graph::TaskScoring;
 
 /// Parent issue details stored in local context

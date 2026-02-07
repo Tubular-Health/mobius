@@ -7,6 +7,8 @@ invocation: /verify
 <objective>
 Perform a thorough verification of a completed issue implementation. This skill compares what was actually built against the intended goal and acceptance criteria, identifies gaps, runs validation checks, and documents the review on the ticket.
 
+Verification is only complete after final documentation artifacts are finalized: local context updates, structured status output, and a clear verification report.
+
 This is the fourth and final step in the issue workflow:
 1. **define** - Creates well-defined issues with acceptance criteria
 2. **refine** - Breaks issues into single-file-focused sub-tasks with dependencies
@@ -427,8 +429,9 @@ Args: PROJ-123
 8. **Multi-agent critique** - Spawn 4 parallel review agents for comprehensive analysis
 9. **Generate review report** - Structured analysis with findings
 10. **Handle outcome** - On FAIL/NEEDS_WORK: reopen failing sub-tasks with feedback. On PASS: mark verification sub-task Done
-11. **Post to ticket** - Add review as comment on the parent issue
-12. **Report status** - Output STATUS marker for mobius loop
+11. **Finalize documentation artifacts** - Ensure local context files, review report, and structured output are complete and consistent
+12. **Post to ticket** - Add review as comment on the parent issue
+13. **Report status** - Output STATUS marker for mobius loop
 </workflow>
 </quick_start>
 
@@ -1281,11 +1284,26 @@ Edit .mobius/issues/MOB-161/context.json
 - The structured YAML output alone is not sufficient - local files MUST be updated
 - Reopening failing sub-tasks in local files ensures the loop correctly picks them up again
 </update_local_context>
+
+<finalize_documentation>
+**CRITICAL: Do not finalize verification until documentation is complete.**
+
+Before declaring PASS/PASS_WITH_NOTES (or final NEEDS_WORK/FAIL), ensure all documentation artifacts are present:
+
+1. Local context updates are written (`tasks/*.json` and `context.json`)
+2. Structured output contains required status fields and evidence payloads
+3. Review report is complete (criteria coverage, key findings, actions, next steps)
+4. Rework outcomes are documented (failing subtasks, feedback, iteration state) when applicable
+
+If documentation is incomplete, continue verification work and do not treat the task as complete.
+</finalize_documentation>
 </ticket_update_phase>
 
 <completion_report>
 <report_format>
 Output a summary for the user:
+
+This report is the final verification documentation handoff. The verification task should only be considered complete after this report and structured output are both finalized.
 
 ```markdown
 # Verification Complete
@@ -1308,6 +1326,11 @@ Output a summary for the user:
 - [x] Review comment posted to ticket
 - [x] Issue status updated (if PASS)
 - [ ] Follow-up issues created (if applicable)
+
+### Documentation Finalization
+- Local context updated: {YES/NO}
+- Structured status payload complete: {YES/NO}
+- Rework feedback documented (if applicable): {YES/NO/N/A}
 
 ### Next Steps
 {Clear recommendations}
@@ -1457,6 +1480,12 @@ All criteria met. Ready to close.
 - BAD: Reopen failing sub-tasks in output but not in local files
 - GOOD: Update both task-specific JSON and main context.json after verification
 - GOOD: Update `metadata.updatedAt` timestamp when modifying context
+
+**Don't skip final verification documentation**:
+- BAD: Mark PASS without a complete verification report
+- BAD: Omit required evidence fields from structured output
+- GOOD: Treat report + structured output + local context updates as definition-of-done artifacts
+- GOOD: Keep verification in progress until documentation is complete
 </anti_patterns>
 
 <success_criteria>
@@ -1523,5 +1552,6 @@ A successful verification achieves:
 **Reporting**:
 - [ ] Structured review report generated
 - [ ] Review comment posted to ticket
+- [ ] **Final documentation finalized** (report + structured output + local context updates are complete)
 - [ ] Clear next steps communicated to user
 </success_criteria>
