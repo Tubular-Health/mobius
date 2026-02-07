@@ -17,7 +17,7 @@ use crate::context::{
     generate_context, initialize_runtime_state, remove_runtime_active_task,
     update_runtime_task_pane, write_full_context_file, write_runtime_state,
 };
-use crate::executor::{calculate_parallelism, execute_parallel};
+use crate::executor::{calculate_parallelism, execute_parallel, select_model_for_task};
 use crate::jira::JiraClient;
 use crate::local_state::{
     read_local_subtasks_as_linear_issues, read_parent_spec, read_subtasks, update_subtask_status,
@@ -413,7 +413,15 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     pane: String::new(),
                     started_at: chrono::Utc::now().to_rfc3339(),
                     worktree: Some(worktree_info.path.display().to_string()),
-                    model: Some(runtime_model_label.clone()),
+                    model: Some(if config.runtime == AgentRuntime::Claude {
+                        select_model_for_task(
+                            task,
+                            execution_config.model.parse::<Model>().unwrap_or_default(),
+                        )
+                        .to_string()
+                    } else {
+                        runtime_model_label.clone()
+                    }),
                     input_tokens: None,
                     output_tokens: None,
                 },
@@ -457,6 +465,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
             Some(worktree_context_file.as_str()),
             execution_model_override,
             execution_thinking_override,
+            None,
             None,
         ));
 

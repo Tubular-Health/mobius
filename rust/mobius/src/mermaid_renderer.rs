@@ -157,6 +157,7 @@ mod tests {
                         identifier: "MOB-102".to_string(),
                     }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -174,6 +175,7 @@ mod tests {
                         identifier: "MOB-103".to_string(),
                     }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "c".to_string(),
@@ -188,6 +190,7 @@ mod tests {
                     }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ]
     }
@@ -337,6 +340,7 @@ mod tests {
             status: "Backlog".to_string(),
             git_branch_name: String::new(),
             relations: None,
+            scoring: None,
         }];
         let graph = build_task_graph("parent-1", "MOB-400", &issues);
         let diagram = render_mermaid_diagram(&graph);

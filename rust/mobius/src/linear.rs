@@ -424,6 +424,7 @@ impl LinearClient {
                         blocked_by,
                         blocks: Vec::new(),
                     }),
+                    scoring: None,
                 }
             })
             .collect();

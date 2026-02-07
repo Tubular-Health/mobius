@@ -388,6 +388,7 @@ impl JiraClient {
                         blocked_by,
                         blocks: Vec::new(),
                     }),
+                    scoring: None,
                 });
             }
         }

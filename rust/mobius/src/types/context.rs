@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::config::{ProjectDetectionResult, SubTaskVerifyCommand};
 use super::enums::{Backend, PendingUpdateType, SessionStatus, TaskStatus, VerificationResult};
+use super::task_graph::TaskScoring;
 
 /// Parent issue details stored in local context
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,6 +71,8 @@ pub struct SubTaskContext {
     pub blocked_by: Vec<IssueRef>,
     #[serde(default, deserialize_with = "deserialize_issue_refs")]
     pub blocks: Vec<IssueRef>,
+    #[serde(default)]
+    pub scoring: Option<TaskScoring>,
 }
 
 /// Deserialize blockedBy/blocks fields that can be either string arrays or IssueRef arrays.

@@ -329,6 +329,7 @@ mod tests {
                     blocked_by: Vec::new(),
                     blocks: Vec::new(),
                     git_branch_name: String::new(),
+                    scoring: None,
                 },
             );
         }

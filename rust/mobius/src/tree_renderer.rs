@@ -340,6 +340,7 @@ mod tests {
                         },
                     ],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -357,6 +358,7 @@ mod tests {
                         identifier: "MOB-104".to_string(),
                     }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "c".to_string(),
@@ -371,6 +373,7 @@ mod tests {
                     }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "d".to_string(),
@@ -388,6 +391,7 @@ mod tests {
                         identifier: "MOB-105".to_string(),
                     }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "e".to_string(),
@@ -403,6 +407,7 @@ mod tests {
                     }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ]
     }
@@ -484,6 +489,7 @@ mod tests {
                         identifier: "MOB-202".to_string(),
                     }],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -498,6 +504,7 @@ mod tests {
                     }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ];
         let graph = build_task_graph("parent-1", "MOB-200", &issues);
@@ -541,6 +548,7 @@ mod tests {
                     }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
             LinearIssue {
                 id: "b".to_string(),
@@ -555,6 +563,7 @@ mod tests {
                     }],
                     blocks: vec![],
                 }),
+                scoring: None,
             },
         ];
         let graph = build_task_graph("parent-1", "MOB-300", &issues);

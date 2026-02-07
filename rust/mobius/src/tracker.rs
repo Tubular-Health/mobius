@@ -262,6 +262,7 @@ mod tests {
             blocked_by: vec![],
             blocks: vec![],
             git_branch_name: String::new(),
+            scoring: None,
         }
     }
 
@@ -283,6 +284,8 @@ mod tests {
             },
             pane_id: Some("%0".to_string()),
             raw_output: None,
+            input_tokens: None,
+            output_tokens: None,
         }
     }
 

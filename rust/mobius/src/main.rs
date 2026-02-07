@@ -13,6 +13,7 @@ pub mod output_parser;
 pub mod project_detector;
 pub mod runtime_adapter;
 pub mod status_sync;
+pub mod stream_json;
 pub mod tmux;
 pub mod tracker;
 pub mod tree_renderer;

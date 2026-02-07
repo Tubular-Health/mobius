@@ -20,5 +20,5 @@ pub use enums::{
     Platform, ProjectType, SkillOutputStatus, TaskStatus,
 };
 pub use task_graph::{
-    GraphStats, LinearIssue, ParentIssue, Relation, Relations, SubTask, TaskGraph,
+    GraphStats, LinearIssue, ParentIssue, Relation, Relations, SubTask, TaskGraph, TaskScoring,
 };
