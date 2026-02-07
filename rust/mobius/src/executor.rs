@@ -52,10 +52,19 @@ pub struct ExecutionResult {
     pub identifier: String,
     pub success: bool,
     pub status: ExecutionStatus,
+    pub token_usage: Option<TokenUsage>,
     pub duration_ms: u64,
     pub error: Option<String>,
     pub pane_id: Option<String>,
     pub raw_output: Option<String>,
+}
+
+/// Parsed token usage metadata from agent output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenUsage {
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub total_tokens: Option<u64>,
 }
 
 /// Status of an execution result
@@ -173,6 +182,7 @@ pub async fn execute_parallel(
                     identifier: task.identifier.clone(),
                     success: false,
                     status: ExecutionStatus::Error,
+                    token_usage: None,
                     duration_ms: 0,
                     error: Some(format!("Failed to spawn agent: {e}")),
                     pane_id: None,
@@ -339,6 +349,7 @@ async fn wait_for_agent(handle: AgentHandle, timeout_ms: u64) -> ExecutionResult
                 identifier: handle.task.identifier.clone(),
                 success: false,
                 status: ExecutionStatus::Error,
+                token_usage: None,
                 duration_ms: elapsed.as_millis() as u64,
                 error: Some(format!(
                     "Agent timed out after {} seconds",
@@ -381,6 +392,7 @@ fn parse_agent_output(
     error_summary_re: &Regex,
 ) -> Option<ExecutionResult> {
     let duration_ms = start_time.elapsed().as_millis() as u64;
+    let token_usage = parse_token_usage(content);
 
     // Check for successful completion
     if patterns.subtask_complete.is_match(content) || patterns.execution_complete.is_match(content) {
@@ -389,6 +401,7 @@ fn parse_agent_output(
             identifier: task.identifier.clone(),
             success: true,
             status: ExecutionStatus::SubtaskComplete,
+            token_usage,
             duration_ms,
             error: None,
             pane_id: Some(pane_id.to_string()),
@@ -409,6 +422,7 @@ fn parse_agent_output(
             identifier: task.identifier.clone(),
             success: false,
             status: ExecutionStatus::VerificationFailed,
+            token_usage,
             duration_ms,
             error: Some(error),
             pane_id: Some(pane_id.to_string()),
@@ -423,6 +437,7 @@ fn parse_agent_output(
             identifier: task.identifier.clone(),
             success: true,
             status: ExecutionStatus::SubtaskComplete,
+            token_usage,
             duration_ms,
             error: None,
             pane_id: Some(pane_id.to_string()),
@@ -437,6 +452,7 @@ fn parse_agent_output(
             identifier: task.identifier.clone(),
             success: false,
             status: ExecutionStatus::Error,
+            token_usage,
             duration_ms,
             error: Some("No actionable sub-tasks available".to_string()),
             pane_id: Some(pane_id.to_string()),
@@ -446,6 +462,58 @@ fn parse_agent_output(
 
     // No completion pattern found - still running
     None
+}
+
+/// Parse token usage fields from pane content.
+///
+/// Supports both snake_case and camelCase key variants and tolerates partial payloads.
+fn parse_token_usage(content: &str) -> Option<TokenUsage> {
+    fn parse_last_u64(content: &str, patterns: &[&str]) -> Option<u64> {
+        for pattern in patterns {
+            if let Ok(re) = Regex::new(pattern) {
+                if let Some(caps) = re.captures_iter(content).last() {
+                    if let Some(m) = caps.get(1) {
+                        if let Ok(value) = m.as_str().parse::<u64>() {
+                            return Some(value);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    let input_tokens = parse_last_u64(
+        content,
+        &[
+            r#""input_tokens"\s*:\s*(\d+)"#,
+            r#""inputTokens"\s*:\s*(\d+)"#,
+        ],
+    );
+    let output_tokens = parse_last_u64(
+        content,
+        &[
+            r#""output_tokens"\s*:\s*(\d+)"#,
+            r#""outputTokens"\s*:\s*(\d+)"#,
+        ],
+    );
+    let total_tokens = parse_last_u64(
+        content,
+        &[
+            r#""total_tokens"\s*:\s*(\d+)"#,
+            r#""totalTokens"\s*:\s*(\d+)"#,
+        ],
+    );
+
+    if input_tokens.is_some() || output_tokens.is_some() || total_tokens.is_some() {
+        Some(TokenUsage {
+            input_tokens,
+            output_tokens,
+            total_tokens,
+        })
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -624,6 +692,62 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_agent_output_parses_token_usage() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        let content = "output\n{\"usage\":{\"input_tokens\":120,\"output_tokens\":45,\"total_tokens\":165}}\nSTATUS: SUBTASK_COMPLETE\n";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re)
+            .expect("result should parse");
+
+        assert_eq!(
+            result.token_usage,
+            Some(TokenUsage {
+                input_tokens: Some(120),
+                output_tokens: Some(45),
+                total_tokens: Some(165),
+            })
+        );
+    }
+
+    #[test]
+    fn test_parse_agent_output_handles_missing_token_usage() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        let content = "output\nSTATUS: SUBTASK_COMPLETE\n";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re)
+            .expect("result should parse");
+
+        assert_eq!(result.token_usage, None);
+    }
+
+    #[test]
+    fn test_parse_agent_output_handles_partial_token_usage() {
+        let task = make_task("1", "MOB-101", "Test task");
+        let patterns = StatusPatterns::new();
+        let error_re = Regex::new(r"### Error Summary\n([^\n]+)").unwrap();
+        let start = Instant::now();
+
+        let content = "output\n{\"usage\":{\"inputTokens\":33,\"totalTokens\":88}}\nSTATUS: SUBTASK_COMPLETE\n";
+        let result = parse_agent_output(content, &task, start, "%0", &patterns, &error_re)
+            .expect("result should parse");
+
+        assert_eq!(
+            result.token_usage,
+            Some(TokenUsage {
+                input_tokens: Some(33),
+                output_tokens: None,
+                total_tokens: Some(88),
+            })
+        );
+    }
+
+    #[test]
     fn test_parse_agent_output_verification_failed() {
         let task = make_task("1", "MOB-101", "Test task");
         let patterns = StatusPatterns::new();
@@ -741,6 +865,7 @@ mod tests {
                 identifier: "MOB-101".to_string(),
                 success: true,
                 status: ExecutionStatus::SubtaskComplete,
+                token_usage: None,
                 duration_ms: 5000,
                 error: None,
                 pane_id: Some("%0".to_string()),
@@ -751,6 +876,7 @@ mod tests {
                 identifier: "MOB-102".to_string(),
                 success: false,
                 status: ExecutionStatus::VerificationFailed,
+                token_usage: None,
                 duration_ms: 3000,
                 error: Some("Tests failed".to_string()),
                 pane_id: Some("%1".to_string()),
@@ -761,6 +887,7 @@ mod tests {
                 identifier: "MOB-103".to_string(),
                 success: true,
                 status: ExecutionStatus::SubtaskComplete,
+                token_usage: None,
                 duration_ms: 7000,
                 error: None,
                 pane_id: Some("%2".to_string()),
@@ -1001,6 +1128,7 @@ mod tests {
                 identifier: format!("MOB-{}", 100 + i),
                 success: true,
                 status: ExecutionStatus::SubtaskComplete,
+                token_usage: None,
                 duration_ms: 5000 + i * 1000,
                 error: None,
                 pane_id: Some(format!("%{}", i)),
@@ -1031,6 +1159,7 @@ mod tests {
                 identifier: format!("MOB-{}", 200 + i),
                 success: false,
                 status: ExecutionStatus::VerificationFailed,
+                token_usage: None,
                 duration_ms: 3000,
                 error: Some(err.to_string()),
                 pane_id: Some(format!("%{}", i)),
@@ -1059,6 +1188,7 @@ mod tests {
                 identifier: "MOB-301".to_string(),
                 success: true,
                 status: ExecutionStatus::SubtaskComplete,
+                token_usage: None,
                 duration_ms: 5000,
                 error: None,
                 pane_id: Some("%0".to_string()),
@@ -1069,6 +1199,7 @@ mod tests {
                 identifier: "MOB-302".to_string(),
                 success: false,
                 status: ExecutionStatus::VerificationFailed,
+                token_usage: None,
                 duration_ms: 8000,
                 error: Some("Tests failed".to_string()),
                 pane_id: Some("%1".to_string()),
@@ -1079,6 +1210,7 @@ mod tests {
                 identifier: "MOB-303".to_string(),
                 success: false,
                 status: ExecutionStatus::Error,
+                token_usage: None,
                 duration_ms: 1000,
                 error: Some("Agent timed out".to_string()),
                 pane_id: Some("%2".to_string()),
@@ -1089,6 +1221,7 @@ mod tests {
                 identifier: "MOB-304".to_string(),
                 success: true,
                 status: ExecutionStatus::SubtaskComplete,
+                token_usage: None,
                 duration_ms: 6000,
                 error: None,
                 pane_id: Some("%3".to_string()),
