@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::config::{ProjectDetectionResult, SubTaskVerifyCommand};
-use super::enums::{
-    Backend, PendingUpdateType, SessionStatus, TaskStatus, VerificationResult,
-};
+use super::enums::{Backend, PendingUpdateType, SessionStatus, TaskStatus, VerificationResult};
 
 /// Parent issue details stored in local context
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +100,35 @@ where
         .collect())
 }
 
+fn deserialize_optional_token_count<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum TokenValue {
+        Number(u64),
+        String(String),
+    }
+
+    let value = Option::<TokenValue>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(TokenValue::Number(n)) => Ok(Some(n)),
+        Some(TokenValue::String(s)) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                trimmed
+                    .parse::<u64>()
+                    .map(Some)
+                    .map_err(serde::de::Error::custom)
+            }
+        }
+    }
+}
+
 /// Local-only issue specification for issues not backed by Linear/Jira
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -162,6 +189,14 @@ pub struct RuntimeActiveTask {
     pub pane: String,
     pub started_at: String,
     pub worktree: Option<String>,
+    #[serde(
+        default,
+        alias = "token",
+        alias = "totalTokens",
+        alias = "total_tokens",
+        deserialize_with = "deserialize_optional_token_count"
+    )]
+    pub tokens: Option<u64>,
 }
 
 /// Completed or failed task with timing info (runtime monitoring)
@@ -171,6 +206,14 @@ pub struct RuntimeCompletedTask {
     pub id: String,
     pub completed_at: String,
     pub duration: u64,
+    #[serde(
+        default,
+        alias = "token",
+        alias = "totalTokens",
+        alias = "total_tokens",
+        deserialize_with = "deserialize_optional_token_count"
+    )]
+    pub tokens: Option<u64>,
 }
 
 /// A single todo task from a Claude Code agent
@@ -213,6 +256,14 @@ pub struct RuntimeState {
     pub updated_at: String,
     pub loop_pid: Option<u32>,
     pub total_tasks: Option<u32>,
+    #[serde(
+        default,
+        alias = "token",
+        alias = "totalTokens",
+        alias = "total_tokens",
+        deserialize_with = "deserialize_optional_token_count"
+    )]
+    pub tokens: Option<u64>,
     pub backend_statuses: Option<std::collections::HashMap<String, BackendStatusEntry>>,
 }
 
@@ -613,6 +664,153 @@ mod tests {
         let parsed: IssueContext = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.parent.identifier, "MOB-100");
         assert_eq!(parsed.metadata.backend, Backend::Linear);
+    }
+
+    #[test]
+    fn test_runtime_token_fields_treat_missing_null_and_empty_as_none() {
+        let active_missing = serde_json::json!({
+            "id": "task-1",
+            "pid": 10,
+            "pane": "%1",
+            "startedAt": "2024-01-01T00:00:00Z",
+            "worktree": null
+        });
+        let active_null = serde_json::json!({
+            "id": "task-1",
+            "pid": 10,
+            "pane": "%1",
+            "startedAt": "2024-01-01T00:00:00Z",
+            "worktree": null,
+            "tokens": null
+        });
+        let active_empty = serde_json::json!({
+            "id": "task-1",
+            "pid": 10,
+            "pane": "%1",
+            "startedAt": "2024-01-01T00:00:00Z",
+            "worktree": null,
+            "tokens": ""
+        });
+
+        let completed_missing = serde_json::json!({
+            "id": "task-1",
+            "completedAt": "2024-01-01T00:10:00Z",
+            "duration": 42
+        });
+        let completed_null = serde_json::json!({
+            "id": "task-1",
+            "completedAt": "2024-01-01T00:10:00Z",
+            "duration": 42,
+            "tokens": null
+        });
+        let completed_empty = serde_json::json!({
+            "id": "task-1",
+            "completedAt": "2024-01-01T00:10:00Z",
+            "duration": 42,
+            "tokens": ""
+        });
+
+        let state_missing = serde_json::json!({
+            "parentId": "MOB-1",
+            "parentTitle": "Parent",
+            "activeTasks": [],
+            "completedTasks": [],
+            "failedTasks": [],
+            "startedAt": "2024-01-01T00:00:00Z",
+            "updatedAt": "2024-01-01T00:00:00Z",
+            "loopPid": null,
+            "totalTasks": 1,
+            "backendStatuses": null
+        });
+        let state_null = serde_json::json!({
+            "parentId": "MOB-1",
+            "parentTitle": "Parent",
+            "activeTasks": [],
+            "completedTasks": [],
+            "failedTasks": [],
+            "startedAt": "2024-01-01T00:00:00Z",
+            "updatedAt": "2024-01-01T00:00:00Z",
+            "loopPid": null,
+            "totalTasks": 1,
+            "tokens": null,
+            "backendStatuses": null
+        });
+        let state_empty = serde_json::json!({
+            "parentId": "MOB-1",
+            "parentTitle": "Parent",
+            "activeTasks": [],
+            "completedTasks": [],
+            "failedTasks": [],
+            "startedAt": "2024-01-01T00:00:00Z",
+            "updatedAt": "2024-01-01T00:00:00Z",
+            "loopPid": null,
+            "totalTasks": 1,
+            "tokens": "",
+            "backendStatuses": null
+        });
+
+        for active_json in [active_missing, active_null, active_empty] {
+            let active: RuntimeActiveTask = serde_json::from_value(active_json).unwrap();
+            assert_eq!(active.tokens, None);
+        }
+
+        for completed_json in [completed_missing, completed_null, completed_empty] {
+            let completed: RuntimeCompletedTask = serde_json::from_value(completed_json).unwrap();
+            assert_eq!(completed.tokens, None);
+        }
+
+        for state_json in [state_missing, state_null, state_empty] {
+            let state: RuntimeState = serde_json::from_value(state_json).unwrap();
+            assert_eq!(state.tokens, None);
+        }
+    }
+
+    #[test]
+    fn test_runtime_token_fields_roundtrip_consistency() {
+        let active_json = serde_json::json!({
+            "id": "task-1",
+            "pid": 10,
+            "pane": "%1",
+            "startedAt": "2024-01-01T00:00:00Z",
+            "worktree": null,
+            "totalTokens": "123"
+        });
+        let active: RuntimeActiveTask = serde_json::from_value(active_json).unwrap();
+        assert_eq!(active.tokens, Some(123));
+        let active_roundtrip: RuntimeActiveTask =
+            serde_json::from_str(&serde_json::to_string(&active).unwrap()).unwrap();
+        assert_eq!(active_roundtrip.tokens, Some(123));
+
+        let completed_json = serde_json::json!({
+            "id": "task-1",
+            "completedAt": "2024-01-01T00:10:00Z",
+            "duration": 42,
+            "token": 123
+        });
+        let completed: RuntimeCompletedTask = serde_json::from_value(completed_json).unwrap();
+        assert_eq!(completed.tokens, Some(123));
+        let completed_roundtrip: RuntimeCompletedTask =
+            serde_json::from_str(&serde_json::to_string(&completed).unwrap()).unwrap();
+        assert_eq!(completed_roundtrip.tokens, Some(123));
+
+        let state_json = serde_json::json!({
+            "parentId": "MOB-1",
+            "parentTitle": "Parent",
+            "activeTasks": [],
+            "completedTasks": [],
+            "failedTasks": [],
+            "startedAt": "2024-01-01T00:00:00Z",
+            "updatedAt": "2024-01-01T00:00:00Z",
+            "loopPid": null,
+            "totalTasks": 1,
+            "total_tokens": "123",
+            "backendStatuses": null
+        });
+        let state: RuntimeState = serde_json::from_value(state_json).unwrap();
+        assert_eq!(state.tokens, Some(123));
+        let state_roundtrip: RuntimeState =
+            serde_json::from_str(&serde_json::to_string(&state).unwrap()).unwrap();
+        assert_eq!(state_roundtrip.tokens, Some(123));
     }
 
     #[test]
