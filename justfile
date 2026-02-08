@@ -7,35 +7,35 @@ default:
 
 # Build Rust binary (release mode)
 build:
-    cargo build -p mobius --release
+    cargo build -p mobius --manifest-path rust/Cargo.toml --release
 
 # Build Rust binary (debug mode)
 dev:
-    cargo build -p mobius
+    cargo build -p mobius --manifest-path rust/Cargo.toml
 
 # Type check (cargo check)
 typecheck:
-    cargo check -p mobius
+    cargo check -p mobius --manifest-path rust/Cargo.toml
 
 # Run clippy linter
 lint:
-    cargo clippy -p mobius -- -D warnings
+    cargo clippy -p mobius --manifest-path rust/Cargo.toml -- -D warnings
 
 # Run all unit tests
 test *args:
-    cargo test -p mobius {{args}}
+    cargo test -p mobius --manifest-path rust/Cargo.toml {{args}}
 
 # Run tests matching a pattern
 test-file pattern:
-    cargo test -p mobius --lib "{{pattern}}"
+    cargo test -p mobius --manifest-path rust/Cargo.toml --lib "{{pattern}}"
 
 # Run tests in watch mode (requires cargo-watch)
 test-watch:
-    cargo watch -x 'test -p mobius'
+    cargo watch -x 'test -p mobius --manifest-path rust/Cargo.toml'
 
 # Run mobius locally (development mode)
 run *args:
-    cargo run -p mobius -- {{args}}
+    cargo run -p mobius --manifest-path rust/Cargo.toml -- {{args}}
 
 # Run mobius loop on a Linear issue
 loop task-id *args:
@@ -51,11 +51,11 @@ config:
 
 # Full validation (typecheck + test + build)
 validate:
-    cargo check -p mobius && cargo test -p mobius && cargo build -p mobius --release
+    cargo check -p mobius --manifest-path rust/Cargo.toml && cargo test -p mobius --manifest-path rust/Cargo.toml && cargo build -p mobius --manifest-path rust/Cargo.toml --release
 
 # Clean build artifacts
 clean:
-    cargo clean
+    cargo clean --manifest-path rust/Cargo.toml
 
 # Generate workflow demo recording from VHS tape file
 tape:

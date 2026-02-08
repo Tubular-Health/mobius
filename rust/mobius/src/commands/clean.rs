@@ -8,7 +8,9 @@ use crate::config::paths::resolve_paths;
 use crate::context::cleanup_context;
 use crate::local_state::{get_project_mobius_path, read_parent_spec};
 use crate::types::enums::Backend;
-use crate::worktree::{is_issue_merged_into_base, MergeDetectionResult, remove_worktree, WorktreeConfig};
+use crate::worktree::{
+    is_issue_merged_into_base, remove_worktree, MergeDetectionResult, WorktreeConfig,
+};
 
 struct CleanupCandidate {
     identifier: String,
@@ -16,6 +18,25 @@ struct CleanupCandidate {
     local_status: String,
     git_branch_name: String,
     merge_info: Option<MergeDetectionResult>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum BranchDeleteFailure {
+    NotFound,
+    UsedByWorktree,
+    Other,
+}
+
+fn classify_branch_delete_failure(stderr: &str) -> BranchDeleteFailure {
+    let normalized = stderr.to_ascii_lowercase();
+
+    if normalized.contains("used by worktree") {
+        BranchDeleteFailure::UsedByWorktree
+    } else if normalized.contains("branch") && normalized.contains("not found") {
+        BranchDeleteFailure::NotFound
+    } else {
+        BranchDeleteFailure::Other
+    }
 }
 
 fn is_completed_status(status: &str, backend: &Backend) -> bool {
@@ -91,12 +112,8 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
         } else if !spec.git_branch_name.is_empty() {
             // Issue has a git branch — use git-based merge detection
             let merge_result = rt.block_on(async {
-                is_issue_merged_into_base(
-                    &spec.git_branch_name,
-                    &spec.identifier,
-                    &base_branch,
-                )
-                .await
+                is_issue_merged_into_base(&spec.git_branch_name, &spec.identifier, &base_branch)
+                    .await
             })?;
 
             if merge_result.is_merged() {
@@ -198,37 +215,7 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
                 .unwrap_or(false);
 
             if delete_branch {
-                // Delete local branch
-                if let Err(e) = rt.block_on(async {
-                    let output = tokio::process::Command::new("git")
-                        .args(["branch", "-D", &candidate.git_branch_name])
-                        .output()
-                        .await?;
-                    if !output.status.success() {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        eprintln!(
-                            "  {}",
-                            format!(
-                                "Warning: Failed to delete branch '{}': {}",
-                                candidate.git_branch_name,
-                                stderr.trim()
-                            )
-                            .yellow()
-                        );
-                    }
-                    Ok::<(), anyhow::Error>(())
-                }) {
-                    eprintln!(
-                        "  {}",
-                        format!(
-                            "Warning: Error deleting branch '{}': {}",
-                            candidate.git_branch_name, e
-                        )
-                        .yellow()
-                    );
-                }
-
-                // Remove worktree
+                // Remove worktree first, then delete branch.
                 if let Err(e) = rt.block_on(async {
                     remove_worktree(&candidate.identifier, &worktree_config).await
                 }) {
@@ -237,6 +224,50 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
                         format!(
                             "Warning: Failed to remove worktree for {}: {}",
                             candidate.identifier, e
+                        )
+                        .yellow()
+                    );
+                }
+
+                // Delete local branch
+                if let Err(e) = rt.block_on(async {
+                    let output = tokio::process::Command::new("git")
+                        .args(["branch", "-D", &candidate.git_branch_name])
+                        .output()
+                        .await?;
+                    if !output.status.success() {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        match classify_branch_delete_failure(stderr.trim()) {
+                            BranchDeleteFailure::NotFound => {
+                                println!(
+                                    "  {}",
+                                    format!(
+                                        "Local branch '{}' already removed.",
+                                        candidate.git_branch_name
+                                    )
+                                    .dimmed()
+                                );
+                            }
+                            BranchDeleteFailure::UsedByWorktree | BranchDeleteFailure::Other => {
+                                eprintln!(
+                                    "  {}",
+                                    format!(
+                                        "Warning: Failed to delete branch '{}': {}",
+                                        candidate.git_branch_name,
+                                        stderr.trim()
+                                    )
+                                    .yellow()
+                                );
+                            }
+                        }
+                    }
+                    Ok::<(), anyhow::Error>(())
+                }) {
+                    eprintln!(
+                        "  {}",
+                        format!(
+                            "Warning: Error deleting branch '{}': {}",
+                            candidate.git_branch_name, e
                         )
                         .yellow()
                     );
@@ -277,4 +308,37 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_branch_delete_failure, BranchDeleteFailure};
+
+    #[test]
+    fn classify_branch_delete_failure_detects_not_found() {
+        let stderr = "error: branch 'feature/mob-258' not found";
+        assert_eq!(
+            classify_branch_delete_failure(stderr),
+            BranchDeleteFailure::NotFound
+        );
+    }
+
+    #[test]
+    fn classify_branch_delete_failure_detects_used_by_worktree() {
+        let stderr =
+            "error: cannot delete branch 'feature/mob-256' used by worktree at '/tmp/MOB-256'";
+        assert_eq!(
+            classify_branch_delete_failure(stderr),
+            BranchDeleteFailure::UsedByWorktree
+        );
+    }
+
+    #[test]
+    fn classify_branch_delete_failure_detects_other() {
+        let stderr = "fatal: some unexpected git error";
+        assert_eq!(
+            classify_branch_delete_failure(stderr),
+            BranchDeleteFailure::Other
+        );
+    }
 }

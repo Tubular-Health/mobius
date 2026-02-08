@@ -63,7 +63,7 @@ pub fn run(edit: bool) -> anyhow::Result<()> {
             );
             println!(
                 "  model_profile:   {}",
-                format!("{}", config.execution.model).cyan()
+                config.execution.model.to_string().cyan()
             );
             println!("  runtime_model:   {}", effective_model.cyan());
             println!(

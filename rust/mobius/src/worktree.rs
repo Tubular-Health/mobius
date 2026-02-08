@@ -250,7 +250,12 @@ pub async fn is_issue_merged_into_base(
 
     // Check if identifier appears in base branch commit log
     let log_output = Command::new("git")
-        .args(["log", base_branch, "--oneline", &format!("--grep={}", identifier)])
+        .args([
+            "log",
+            base_branch,
+            "--oneline",
+            &format!("--grep={}", identifier),
+        ])
         .output()
         .await
         .context("failed to run git log")?;
