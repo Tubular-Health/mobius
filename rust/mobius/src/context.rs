@@ -1006,11 +1006,19 @@ pub fn recalculate_total_tokens(state: &RuntimeState) -> RuntimeState {
     // Sum from failed tasks (they may have partial token data)
     for entry in &new_state.failed_tasks {
         if let Some(obj) = entry.as_object() {
-            if let Some(t) = obj.get("input_tokens").or_else(|| obj.get("inputTokens")).and_then(|v| v.as_u64()) {
+            if let Some(t) = obj
+                .get("input_tokens")
+                .or_else(|| obj.get("inputTokens"))
+                .and_then(|v| v.as_u64())
+            {
                 total_input += t;
                 has_any = true;
             }
-            if let Some(t) = obj.get("output_tokens").or_else(|| obj.get("outputTokens")).and_then(|v| v.as_u64()) {
+            if let Some(t) = obj
+                .get("output_tokens")
+                .or_else(|| obj.get("outputTokens"))
+                .and_then(|v| v.as_u64())
+            {
                 total_output += t;
                 has_any = true;
             }

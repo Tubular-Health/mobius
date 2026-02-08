@@ -170,15 +170,7 @@ pub async fn create_agent_pane(
 
     async fn split_window(target: &str) -> Result<String> {
         let output = Command::new("tmux")
-            .args([
-                "split-window",
-                "-t",
-                target,
-                "-h",
-                "-P",
-                "-F",
-                "#{pane_id}",
-            ])
+            .args(["split-window", "-t", target, "-h", "-P", "-F", "#{pane_id}"])
             .output()
             .await
             .context("Failed to create agent pane")?;

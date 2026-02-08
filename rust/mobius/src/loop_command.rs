@@ -514,17 +514,20 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                 )
                 .await;
             });
+            let execution_context = executor::ExecutionContext {
+                runtime: loop_config.runtime,
+                worktree_path: &worktree_path,
+                config: &exec_config,
+                context_file_path: ctx_path_ref,
+                model_override: execution_model_override,
+                thinking_level_override: None,
+                output_dir: Some(&output_dir),
+            };
             let results = executor::execute_parallel(
                 &tasks_to_execute,
-                loop_config.runtime,
-                &exec_config,
-                &worktree_path,
                 &session,
-                ctx_path_ref,
-                execution_model_override,
+                execution_context,
                 None,
-                None,
-                Some(&output_dir),
             )
             .await;
 

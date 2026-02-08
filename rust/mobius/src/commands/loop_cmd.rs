@@ -17,7 +17,9 @@ use crate::context::{
     generate_context, initialize_runtime_state, remove_runtime_active_task,
     update_runtime_task_pane, write_full_context_file, write_runtime_state,
 };
-use crate::executor::{calculate_parallelism, execute_parallel, select_model_for_task};
+use crate::executor::{
+    calculate_parallelism, execute_parallel, select_model_for_task, ExecutionContext,
+};
 use crate::jira::JiraClient;
 use crate::local_state::{
     read_local_subtasks_as_linear_issues, read_parent_spec, read_subtasks, update_subtask_status,
@@ -65,16 +67,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     let no_submit = opts.no_submit;
 
     if !opts.no_tui {
-        return run_with_tui(
-            task_id,
-            backend_override,
-            model_override,
-            thinking_level_override,
-            parallel_override,
-            max_iterations_override,
-            fresh,
-            no_submit,
-        );
+        return run_with_tui(task_id, opts);
     }
 
     let paths = resolve_paths();
@@ -456,16 +449,20 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     worktree_info.path.display()
                 )
             })?;
+        let worktree_path = worktree_info.path.display().to_string();
+        let execution_context = ExecutionContext {
+            runtime: config.runtime,
+            worktree_path: &worktree_path,
+            config: &execution_config,
+            context_file_path: Some(worktree_context_file.as_str()),
+            model_override: execution_model_override,
+            thinking_level_override: execution_thinking_override,
+            output_dir: None,
+        };
         let results = rt.block_on(execute_parallel(
             &tasks_to_execute,
-            config.runtime,
-            &execution_config,
-            &worktree_info.path.display().to_string(),
             &session,
-            Some(worktree_context_file.as_str()),
-            execution_model_override,
-            execution_thinking_override,
-            None,
+            execution_context,
             None,
         ));
 
@@ -670,16 +667,15 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_with_tui(
-    task_id: &str,
-    backend_override: Option<&str>,
-    model_override: Option<&str>,
-    thinking_level_override: Option<&str>,
-    parallel_override: Option<u32>,
-    max_iterations_override: Option<u32>,
-    fresh: bool,
-    no_submit: bool,
-) -> anyhow::Result<()> {
+fn run_with_tui(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
+    let backend_override = opts.backend_override;
+    let model_override = opts.model_override;
+    let thinking_level_override = opts.thinking_level_override;
+    let parallel_override = opts.parallel_override;
+    let max_iterations_override = opts.max_iterations_override;
+    let fresh = opts.fresh;
+    let no_submit = opts.no_submit;
+
     // 1. Read local state for TUI display data (cheap, no network/worktree)
     let issues = read_local_subtasks_as_linear_issues(task_id);
     if issues.is_empty() {

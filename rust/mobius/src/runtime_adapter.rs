@@ -30,8 +30,7 @@ fn normalize_opencode_variant(raw_variant: &str) -> String {
     let alias = raw_variant
         .trim()
         .to_ascii_lowercase()
-        .replace('_', "-")
-        .replace(' ', "-");
+        .replace(['_', ' '], "-");
     match alias.as_str() {
         "xhigh" | "very-high" | "veryhigh" => "max".to_string(),
         "xlow" => "minimal".to_string(),
@@ -93,31 +92,34 @@ pub fn effective_model_for_runtime(
     }
 }
 
-pub fn build_execution_command(
-    runtime: AgentRuntime,
-    subtask_identifier: &str,
-    skill: &str,
-    worktree_path: &str,
-    config: &ExecutionConfig,
-    context_file_path: Option<&str>,
-    model_override: Option<&str>,
-    thinking_level_override: Option<&str>,
-) -> String {
-    let env_prefix = context_file_path
+pub struct ExecutionCommand<'a> {
+    pub subtask_identifier: &'a str,
+    pub skill: &'a str,
+    pub worktree_path: &'a str,
+    pub config: &'a ExecutionConfig,
+    pub context_file_path: Option<&'a str>,
+    pub model_override: Option<&'a str>,
+    pub thinking_level_override: Option<&'a str>,
+}
+
+pub fn build_execution_command(runtime: AgentRuntime, options: &ExecutionCommand<'_>) -> String {
+    let env_prefix = options
+        .context_file_path
         .map(|path| {
             format!(
                 "MOBIUS_CONTEXT_FILE=\"{}\" MOBIUS_TASK_ID=\"{}\" ",
-                path, subtask_identifier
+                path, options.subtask_identifier
             )
         })
         .unwrap_or_default();
 
-    let model = effective_model_for_runtime(runtime, config, model_override);
+    let model = effective_model_for_runtime(runtime, options.config, options.model_override);
 
     match runtime {
         AgentRuntime::Claude => {
             let model_flag = format!("--model {}", model);
-            let disallowed_tools_flag = config
+            let disallowed_tools_flag = options
+                .config
                 .disallowed_tools
                 .as_ref()
                 .filter(|tools| !tools.is_empty())
@@ -132,18 +134,22 @@ pub fn build_execution_command(
 
             format!(
                 "cd \"{}\" && echo '{} {}' | {}claude -p --dangerously-skip-permissions --verbose --output-format stream-json {} | cclean",
-                worktree_path, skill, subtask_identifier, env_prefix, flags
+                options.worktree_path,
+                options.skill,
+                options.subtask_identifier,
+                env_prefix,
+                flags
             )
         }
         AgentRuntime::Opencode => {
-            let prompt = build_opencode_skill_prompt(skill, subtask_identifier);
+            let prompt = build_opencode_skill_prompt(options.skill, options.subtask_identifier);
             format!(
                 "cd \"{}\" && {}opencode run '{}' --model {}{}",
-                worktree_path,
+                options.worktree_path,
                 env_prefix,
                 prompt,
                 model,
-                effective_thinking_level_for_runtime(runtime, thinking_level_override)
+                effective_thinking_level_for_runtime(runtime, options.thinking_level_override)
                     .map(|level| format!(" --variant {}", level))
                     .unwrap_or_default(),
             )
@@ -192,16 +198,16 @@ mod tests {
     #[test]
     fn test_build_execution_command_claude() {
         let config = ExecutionConfig::default();
-        let cmd = build_execution_command(
-            AgentRuntime::Claude,
-            "MOB-101",
-            "/execute",
-            "/tmp/worktree",
-            &config,
-            None,
-            None,
-            None,
-        );
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: None,
+            thinking_level_override: None,
+        };
+        let cmd = build_execution_command(AgentRuntime::Claude, &options);
 
         assert!(cmd.contains("claude -p"));
         assert!(cmd.contains("--dangerously-skip-permissions"));
@@ -211,16 +217,16 @@ mod tests {
     #[test]
     fn test_build_execution_command_opencode() {
         let config = ExecutionConfig::default();
-        let cmd = build_execution_command(
-            AgentRuntime::Opencode,
-            "MOB-101",
-            "/execute",
-            "/tmp/worktree",
-            &config,
-            None,
-            None,
-            None,
-        );
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: None,
+            thinking_level_override: None,
+        };
+        let cmd = build_execution_command(AgentRuntime::Opencode, &options);
 
         assert!(cmd.contains(
             "opencode run 'Use the execute skill for sub-task MOB-101. First call the skill tool with name execute.'"
@@ -234,16 +240,16 @@ mod tests {
     #[test]
     fn test_build_execution_command_opencode_with_context_file() {
         let config = ExecutionConfig::default();
-        let cmd = build_execution_command(
-            AgentRuntime::Opencode,
-            "MOB-101",
-            "/execute",
-            "/tmp/worktree",
-            &config,
-            Some("/tmp/context.json"),
-            None,
-            None,
-        );
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: Some("/tmp/context.json"),
+            model_override: None,
+            thinking_level_override: None,
+        };
+        let cmd = build_execution_command(AgentRuntime::Opencode, &options);
 
         assert!(cmd.contains("MOBIUS_CONTEXT_FILE=\"/tmp/context.json\""));
         assert!(cmd.contains("MOBIUS_TASK_ID=\"MOB-101\""));
@@ -253,16 +259,16 @@ mod tests {
     #[test]
     fn test_build_execution_command_opencode_normalizes_skill_name() {
         let config = ExecutionConfig::default();
-        let cmd = build_execution_command(
-            AgentRuntime::Opencode,
-            "MOB-101",
-            "/verify",
-            "/tmp/worktree",
-            &config,
-            None,
-            None,
-            None,
-        );
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/verify",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: None,
+            thinking_level_override: None,
+        };
+        let cmd = build_execution_command(AgentRuntime::Opencode, &options);
 
         assert!(cmd.contains("Use the verify skill for sub-task MOB-101"));
     }

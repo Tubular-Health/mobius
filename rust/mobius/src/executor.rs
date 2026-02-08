@@ -8,12 +8,12 @@ use tokio::time::{sleep, Duration};
 use crate::runtime_adapter;
 use crate::stream_json;
 use crate::tmux::{
-    capture_pane_content, create_agent_pane, interrupt_pane, kill_pane, layout_panes,
-    run_in_pane, set_pane_title, TmuxPane, TmuxSession,
+    capture_pane_content, create_agent_pane, interrupt_pane, kill_pane, layout_panes, run_in_pane,
+    set_pane_title, TmuxPane, TmuxSession,
 };
+use crate::types::enums::Model;
 use crate::types::AgentRuntime;
 use crate::types::{ExecutionConfig, SubTask};
-use crate::types::enums::Model;
 
 /// Verification skill identifier
 const VERIFICATION_SKILL: &str = "/verify";
@@ -139,24 +139,9 @@ pub fn select_model_for_task(task: &SubTask, config_model: Model) -> Model {
 /// Build a runtime-specific command string for executing a task in a pane.
 pub fn build_runtime_command(
     runtime: AgentRuntime,
-    subtask_identifier: &str,
-    skill: &str,
-    worktree_path: &str,
-    config: &ExecutionConfig,
-    context_file_path: Option<&str>,
-    model_override: Option<&str>,
-    thinking_level_override: Option<&str>,
+    options: &runtime_adapter::ExecutionCommand<'_>,
 ) -> String {
-    runtime_adapter::build_execution_command(
-        runtime,
-        subtask_identifier,
-        skill,
-        worktree_path,
-        config,
-        context_file_path,
-        model_override,
-        thinking_level_override,
-    )
+    runtime_adapter::build_execution_command(runtime, options)
 }
 
 /// Build the Claude CLI command string for executing a task in a pane.
@@ -214,6 +199,17 @@ pub fn calculate_parallelism(ready_task_count: usize, config: &ExecutionConfig) 
     max_parallel.min(ready_task_count)
 }
 
+#[derive(Clone, Copy)]
+pub struct ExecutionContext<'a> {
+    pub runtime: AgentRuntime,
+    pub worktree_path: &'a str,
+    pub config: &'a ExecutionConfig,
+    pub context_file_path: Option<&'a str>,
+    pub model_override: Option<&'a str>,
+    pub thinking_level_override: Option<&'a str>,
+    pub output_dir: Option<&'a Path>,
+}
+
 /// Execute tasks in parallel using tmux panes.
 ///
 /// Spawns up to `max_parallel_agents` agents, monitors them for completion,
@@ -221,18 +217,12 @@ pub fn calculate_parallelism(ready_task_count: usize, config: &ExecutionConfig) 
 /// stream-json output is saved per-task for token usage extraction.
 pub async fn execute_parallel(
     tasks: &[SubTask],
-    runtime: AgentRuntime,
-    config: &ExecutionConfig,
-    worktree_path: &str,
     session: &TmuxSession,
-    context_file_path: Option<&str>,
-    model_override: Option<&str>,
-    thinking_level_override: Option<&str>,
+    context: ExecutionContext<'_>,
     timeout_ms: Option<u64>,
-    output_dir: Option<&Path>,
 ) -> Vec<ExecutionResult> {
     let timeout = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
-    let actual_parallelism = calculate_parallelism(tasks.len(), config);
+    let actual_parallelism = calculate_parallelism(tasks.len(), context.config);
 
     if actual_parallelism == 0 {
         return vec![];
@@ -240,19 +230,7 @@ pub async fn execute_parallel(
 
     let batch = &tasks[..actual_parallelism];
 
-    let handles = match spawn_agents(
-        batch,
-        runtime,
-        session,
-        worktree_path,
-        config,
-        context_file_path,
-        model_override,
-        thinking_level_override,
-        output_dir,
-    )
-    .await
-    {
+    let handles = match spawn_agents(batch, session, context).await {
         Ok(h) => h,
         Err(e) => {
             return batch
@@ -289,47 +267,45 @@ pub async fn execute_parallel(
 /// Spawn a single agent in a specific pane and wait for completion.
 pub async fn spawn_agent_in_pane(
     task: &SubTask,
-    runtime: AgentRuntime,
     pane: &TmuxPane,
-    worktree_path: &str,
-    config: &ExecutionConfig,
-    context_file_path: Option<&str>,
-    model_override: Option<&str>,
-    thinking_level_override: Option<&str>,
-    output_dir: Option<&Path>,
+    context: ExecutionContext<'_>,
 ) -> ExecutionResult {
     let start_time = Instant::now();
     let skill = select_skill_for_task(task);
-    let output_file = if runtime == AgentRuntime::Claude {
-        output_dir.map(|dir| dir.join(format!("{}.jsonl", task.identifier)))
+    let output_file = if context.runtime == AgentRuntime::Claude {
+        context
+            .output_dir
+            .map(|dir| dir.join(format!("{}.jsonl", task.identifier)))
     } else {
         None
     };
-    let output_file_str = output_file.as_ref().map(|p| p.to_string_lossy().to_string());
+    let output_file_str = output_file
+        .as_ref()
+        .map(|p| p.to_string_lossy().to_string());
 
-    let command = if runtime == AgentRuntime::Claude {
-        let default_model = config.model.parse::<Model>().unwrap_or_default();
+    let command = if context.runtime == AgentRuntime::Claude {
+        let default_model = context.config.model.parse::<Model>().unwrap_or_default();
         let model = select_model_for_task(task, default_model);
         build_claude_command(
             &task.identifier,
             skill,
-            worktree_path,
-            config,
-            context_file_path,
+            context.worktree_path,
+            context.config,
+            context.context_file_path,
             model,
             output_file_str.as_deref(),
         )
     } else {
-        build_runtime_command(
-            runtime,
-            &task.identifier,
+        let options = runtime_adapter::ExecutionCommand {
+            subtask_identifier: &task.identifier,
             skill,
-            worktree_path,
-            config,
-            context_file_path,
-            model_override,
-            thinking_level_override,
-        )
+            worktree_path: context.worktree_path,
+            config: context.config,
+            context_file_path: context.context_file_path,
+            model_override: context.model_override,
+            thinking_level_override: context.thinking_level_override,
+        };
+        build_runtime_command(context.runtime, &options)
     };
 
     run_in_pane(&pane.id, &command, true).await;
@@ -392,14 +368,8 @@ pub async fn is_pane_still_running(pane_id: &str) -> bool {
 /// Spawn agents in tmux panes for a batch of tasks.
 async fn spawn_agents(
     tasks: &[SubTask],
-    runtime: AgentRuntime,
     session: &TmuxSession,
-    worktree_path: &str,
-    config: &ExecutionConfig,
-    context_file_path: Option<&str>,
-    model_override: Option<&str>,
-    thinking_level_override: Option<&str>,
-    output_dir: Option<&Path>,
+    context: ExecutionContext<'_>,
 ) -> Result<Vec<AgentHandle>> {
     let mut handles = Vec::with_capacity(tasks.len());
 
@@ -437,35 +407,39 @@ async fn spawn_agents(
         };
 
         let skill = select_skill_for_task(task);
-        let output_file = if runtime == AgentRuntime::Claude {
-            output_dir.map(|dir| dir.join(format!("{}.jsonl", task.identifier)))
+        let output_file = if context.runtime == AgentRuntime::Claude {
+            context
+                .output_dir
+                .map(|dir| dir.join(format!("{}.jsonl", task.identifier)))
         } else {
             None
         };
-        let output_file_str = output_file.as_ref().map(|p| p.to_string_lossy().to_string());
-        let command = if runtime == AgentRuntime::Claude {
-            let default_model = config.model.parse::<Model>().unwrap_or_default();
+        let output_file_str = output_file
+            .as_ref()
+            .map(|p| p.to_string_lossy().to_string());
+        let command = if context.runtime == AgentRuntime::Claude {
+            let default_model = context.config.model.parse::<Model>().unwrap_or_default();
             let model = select_model_for_task(task, default_model);
             build_claude_command(
                 &task.identifier,
                 skill,
-                worktree_path,
-                config,
-                context_file_path,
+                context.worktree_path,
+                context.config,
+                context.context_file_path,
                 model,
                 output_file_str.as_deref(),
             )
         } else {
-            build_runtime_command(
-                runtime,
-                &task.identifier,
+            let options = runtime_adapter::ExecutionCommand {
+                subtask_identifier: &task.identifier,
                 skill,
-                worktree_path,
-                config,
-                context_file_path,
-                model_override,
-                thinking_level_override,
-            )
+                worktree_path: context.worktree_path,
+                config: context.config,
+                context_file_path: context.context_file_path,
+                model_override: context.model_override,
+                thinking_level_override: context.thinking_level_override,
+            };
+            build_runtime_command(context.runtime, &options)
         };
 
         run_in_pane(&pane.id, &command, true).await;
@@ -532,9 +506,14 @@ async fn wait_for_agent(handle: AgentHandle, timeout_ms: u64) -> ExecutionResult
 
         let content = capture_pane_content(&handle.pane.id, 200).await;
 
-        if let Some(mut result) =
-            parse_agent_output(&content, &handle.task, handle.start_time, &handle.pane.id, &patterns, &error_summary_re)
-        {
+        if let Some(mut result) = parse_agent_output(
+            &content,
+            &handle.task,
+            handle.start_time,
+            &handle.pane.id,
+            &patterns,
+            &error_summary_re,
+        ) {
             // Extract final token usage from output file
             if let Some(ref output_file) = handle.output_file {
                 let tokens = stream_json::parse_final_tokens(output_file)
@@ -751,7 +730,15 @@ mod tests {
     #[test]
     fn test_build_claude_command_basic() {
         let config = ExecutionConfig::default();
-        let cmd = build_claude_command("MOB-101", "/execute", "/path/to/worktree", &config, None, Model::Opus, None);
+        let cmd = build_claude_command(
+            "MOB-101",
+            "/execute",
+            "/path/to/worktree",
+            &config,
+            None,
+            Model::Opus,
+            None,
+        );
 
         assert!(cmd.contains("cd \"/path/to/worktree\""));
         assert!(cmd.contains("echo '/execute MOB-101'"));
@@ -767,7 +754,12 @@ mod tests {
     fn test_build_claude_command_with_output_file() {
         let config = ExecutionConfig::default();
         let cmd = build_claude_command(
-            "MOB-101", "/execute", "/path/to/worktree", &config, None, Model::Opus,
+            "MOB-101",
+            "/execute",
+            "/path/to/worktree",
+            &config,
+            None,
+            Model::Opus,
             Some("/tmp/output/MOB-101.jsonl"),
         );
 
@@ -796,16 +788,16 @@ mod tests {
     #[test]
     fn test_build_runtime_command_opencode_uses_raw_model_override() {
         let config = ExecutionConfig::default();
-        let cmd = build_runtime_command(
-            AgentRuntime::Opencode,
-            "MOB-101",
-            "/execute",
-            "/path/to/worktree",
-            &config,
-            None,
-            Some("gpt-5.3-codex"),
-            Some("xhigh"),
-        );
+        let options = runtime_adapter::ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/path/to/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: Some("gpt-5.3-codex"),
+            thinking_level_override: Some("xhigh"),
+        };
+        let cmd = build_runtime_command(AgentRuntime::Opencode, &options);
 
         assert!(cmd.contains("Use the execute skill for sub-task MOB-101"));
         assert!(cmd.contains("--model openai/gpt-5.3-codex"));
@@ -817,16 +809,16 @@ mod tests {
     #[test]
     fn test_build_runtime_command_claude_ignores_raw_model_override() {
         let config = ExecutionConfig::default();
-        let cmd = build_runtime_command(
-            AgentRuntime::Claude,
-            "MOB-101",
-            "/execute",
-            "/path/to/worktree",
-            &config,
-            None,
-            Some("custom-model"),
-            Some("xhigh"),
-        );
+        let options = runtime_adapter::ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/path/to/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: Some("custom-model"),
+            thinking_level_override: Some("xhigh"),
+        };
+        let cmd = build_runtime_command(AgentRuntime::Claude, &options);
 
         assert!(cmd.contains("claude -p"));
         assert!(cmd.contains("--model opus"));
@@ -838,8 +830,15 @@ mod tests {
         let mut config = ExecutionConfig::default();
         config.disallowed_tools = Some(vec!["Bash".to_string(), "Write".to_string()]);
 
-        let cmd =
-            build_claude_command("MOB-101", "/execute", "/path/to/worktree", &config, None, Model::Opus, None);
+        let cmd = build_claude_command(
+            "MOB-101",
+            "/execute",
+            "/path/to/worktree",
+            &config,
+            None,
+            Model::Opus,
+            None,
+        );
 
         assert!(cmd.contains("--disallowedTools 'Bash,Write'"));
     }
@@ -849,8 +848,15 @@ mod tests {
         let mut config = ExecutionConfig::default();
         config.disallowed_tools = None;
 
-        let cmd =
-            build_claude_command("MOB-101", "/execute", "/path/to/worktree", &config, None, Model::Opus, None);
+        let cmd = build_claude_command(
+            "MOB-101",
+            "/execute",
+            "/path/to/worktree",
+            &config,
+            None,
+            Model::Opus,
+            None,
+        );
 
         assert!(!cmd.contains("--disallowedTools"));
     }
@@ -1235,7 +1241,15 @@ mod tests {
         let mut config = ExecutionConfig::default();
         config.disallowed_tools = Some(vec![]);
 
-        let cmd = build_claude_command("MOB-101", "/execute", "/path", &config, None, Model::Opus, None);
+        let cmd = build_claude_command(
+            "MOB-101",
+            "/execute",
+            "/path",
+            &config,
+            None,
+            Model::Opus,
+            None,
+        );
         // Empty vec should be filtered out, no --disallowedTools flag
         assert!(!cmd.contains("--disallowedTools"));
     }

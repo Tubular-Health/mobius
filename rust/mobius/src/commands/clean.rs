@@ -8,7 +8,9 @@ use crate::config::paths::resolve_paths;
 use crate::context::cleanup_context;
 use crate::local_state::{get_project_mobius_path, read_parent_spec};
 use crate::types::enums::Backend;
-use crate::worktree::{is_issue_merged_into_base, MergeDetectionResult, remove_worktree, WorktreeConfig};
+use crate::worktree::{
+    is_issue_merged_into_base, remove_worktree, MergeDetectionResult, WorktreeConfig,
+};
 
 struct CleanupCandidate {
     identifier: String,
@@ -110,12 +112,8 @@ pub fn run(dry_run: bool, backend_override: Option<&str>) -> anyhow::Result<()> 
         } else if !spec.git_branch_name.is_empty() {
             // Issue has a git branch — use git-based merge detection
             let merge_result = rt.block_on(async {
-                is_issue_merged_into_base(
-                    &spec.git_branch_name,
-                    &spec.identifier,
-                    &base_branch,
-                )
-                .await
+                is_issue_merged_into_base(&spec.git_branch_name, &spec.identifier, &base_branch)
+                    .await
             })?;
 
             if merge_result.is_merged() {

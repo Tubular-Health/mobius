@@ -101,8 +101,16 @@ mod tests {
     #[test]
     fn test_parse_final_tokens_result_event() {
         let mut file = tempfile::NamedTempFile::new().unwrap();
-        writeln!(file, r#"{{"type":"message_start","message":{{"id":"msg_01"}}}}"#).unwrap();
-        writeln!(file, r#"{{"type":"content_block_delta","delta":{{"text":"hello"}}}}"#).unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"message_start","message":{{"id":"msg_01"}}}}"#
+        )
+        .unwrap();
+        writeln!(
+            file,
+            r#"{{"type":"content_block_delta","delta":{{"text":"hello"}}}}"#
+        )
+        .unwrap();
         writeln!(
             file,
             r#"{{"type":"result","subtype":"success","usage":{{"input_tokens":1500,"output_tokens":350}}}}"#
@@ -151,7 +159,9 @@ mod tests {
 
     #[test]
     fn test_parse_current_tokens_nonexistent_file() {
-        assert!(parse_current_tokens(Path::new("/tmp/nonexistent_mobius_test_file.jsonl")).is_none());
+        assert!(
+            parse_current_tokens(Path::new("/tmp/nonexistent_mobius_test_file.jsonl")).is_none()
+        );
     }
 
     #[test]
