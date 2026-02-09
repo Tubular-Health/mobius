@@ -229,6 +229,10 @@ fn validate_verification_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Tests that mutate process-wide env vars must not run in parallel.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_read_config_missing_file_returns_defaults() {
@@ -307,6 +311,7 @@ execution:
 
     #[test]
     fn test_read_config_with_env_overrides() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let config_path = tmp.path().join("config.yaml");
         std::fs::write(&config_path, "backend: linear\n").unwrap();
@@ -326,6 +331,7 @@ execution:
 
     #[test]
     fn test_read_config_with_env_runtime_model_override() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let config_path = tmp.path().join("config.yaml");
         std::fs::write(&config_path, "runtime: opencode\nbackend: linear\n").unwrap();
@@ -338,6 +344,7 @@ execution:
 
     #[test]
     fn test_read_config_with_env_backend_override() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let config_path = tmp.path().join("config.yaml");
         std::fs::write(&config_path, "backend: linear\n").unwrap();
@@ -350,6 +357,7 @@ execution:
 
     #[test]
     fn test_read_config_with_runtime_override() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let config_path = tmp.path().join("config.yaml");
         std::fs::write(&config_path, "backend: linear\n").unwrap();
@@ -372,6 +380,7 @@ execution:
 
     #[test]
     fn test_read_config_with_env_sandbox_override() {
+        let _lock = ENV_MUTEX.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let config_path = tmp.path().join("config.yaml");
         std::fs::write(&config_path, "backend: linear\n").unwrap();
