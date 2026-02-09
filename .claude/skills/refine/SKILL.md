@@ -5,14 +5,14 @@ invocation: /refine
 ---
 
 <objective>
-Transform an issue into a set of focused, executable sub-tasks through deep codebase exploration. Each sub-task targets a single file or tightly-coupled file pair, sized to fit within one Claude context window. Sub-tasks are created with blocking relationships to enable parallel work where dependencies allow.
+Transform an issue into a set of focused, executable sub-tasks through deep codebase exploration. Each sub-task targets one logical unit of work (one coherent change that may span 1-4 closely related files), sized to fit within one Claude context window. Sub-tasks are created with blocking relationships to enable parallel work where dependencies allow.
 </objective>
 
 <context>
 This skill bridges high-level issues and actionable implementation work. It:
 
 1. **Deeply researches** the codebase to understand existing patterns, dependencies, and affected areas
-2. **Decomposes** work into single-file-focused tasks that Claude can complete in one session
+2. **Decomposes** work into logical-unit tasks that Claude can complete in one session
 3. **Identifies dependencies** between tasks to establish blocking relationships
 4. **Writes sub-tasks locally** as JSON files in `.mobius/issues/{id}/tasks/` with proper blocking order
 
@@ -181,7 +181,7 @@ Write tool:
 {
   "id": "task-VG",
   "title": "[{parent-id}] Verification Gate",
-  "description": "Runs verify to validate implementation meets acceptance criteria.\n\n**Blocked by**: ALL implementation sub-tasks\n**Action**: Run `/verify {parent-id}` after all implementation tasks complete\n\n### Aggregated Verify Commands\n1. task-001: Define types\n   ```bash\n   cd /path && bun run typecheck\n   ```\n2. task-002: Implement service\n   ```bash\n   cd /path && bun test service.test.ts\n   ```\n3. task-003: Add hook\n   ```bash\n   cd /path && bun run typecheck\n   ```",
+  "description": "Runs verify to validate implementation meets acceptance criteria. This is the ONLY task that runs the full test suite.\n\n**Blocked by**: ALL implementation sub-tasks\n**Action**: Run `/verify {parent-id}` after all implementation tasks complete\n\n### Aggregated Verify Commands\n1. task-001: Define types\n   ```bash\n   cd /path && bun run typecheck\n   ```\n2. task-002: Implement service\n   ```bash\n   cd /path && bun test service.test.ts\n   ```\n3. task-003: Add hook\n   ```bash\n   cd /path && bun run typecheck\n   ```",
   "status": "pending",
   "blockedBy": ["task-001", "task-002", "task-003"],
   "blocks": [],
@@ -364,9 +364,10 @@ From the exploration, extract:
 
 **Process**:
 1. Review the Explore agent's file list and dependency graph
-2. Group files into work units following the single-file principle (one file or tightly-coupled pair per unit)
-3. For each work unit, note:
-   - **Target file(s)**: The primary file (and optional test pair)
+2. Group files into work units following the logical-unit principle (1-4 related files per unit)
+3. **Grouping heuristic**: Files that serve the same concern, are meaningless in isolation, always change together, or share all the same blockers/enablers should be combined into one work unit. A work unit producing fewer than ~30 lines is too small — merge it with a related unit.
+4. For each work unit, note:
+   - **Target file(s)**: The files in this logical unit (1-4 files)
    - **Rough scope**: Create / Modify / Delete, approximate change size
    - **Related areas**: Nearby files the subagent should examine for patterns and context
    - **Dependency hints**: Which other work units this one likely depends on or enables
@@ -375,12 +376,12 @@ From the exploration, extract:
 
 **Example work unit brief**:
 ```
-Work Unit 3: Create useTheme hook
-  Target: src/hooks/useTheme.ts (Create)
-  Related: src/hooks/useAuth.ts (pattern reference), src/contexts/ThemeContext.tsx (dependency)
-  Scope: ~40 lines, new hook consuming ThemeContext
-  Depends on: Work Unit 2 (ThemeContext)
-  Enables: Work Units 4, 5, 6 (components consuming the hook)
+Work Unit 1: Theme infrastructure (types + context + hook)
+  Target: src/types/theme.ts (Create), src/contexts/ThemeContext.tsx (Create), src/hooks/useTheme.ts (Create)
+  Related: src/types/auth.ts (type patterns), src/contexts/AuthContext.tsx (context patterns), src/hooks/useAuth.ts (hook patterns)
+  Scope: ~120 lines, new theme types + context provider + consuming hook
+  Depends on: None (foundation)
+  Enables: Work Units 2, 3 (components consuming the hook)
 ```
 </work_unit_identification>
 </research_phase>
@@ -456,6 +457,8 @@ Task tool:
     {executable verification command}
     ```
 
+    IMPORTANT: The verify command must use targeted tests only — specific test files or filtered test names. Do NOT use full test suite commands like `just test`, `npm test`, `bun test`, or unfiltered `cargo test`. Full test suite runs happen exclusively in the Verification Gate.
+
     ## Dependencies
     - **Blocked by**: {work unit numbers this depends on, or "None"}
     - **Enables**: {work unit numbers this unblocks}
@@ -485,21 +488,30 @@ For subagent pattern details, batching strategy, and rationale, see `.claude/ski
 </per_task_subagent_phase>
 
 <decomposition_phase>
-<single_file_principle>
-Each sub-task should focus on ONE file (or tightly-coupled pair like component + test). This ensures:
+<logical_unit_principle>
+Each sub-task should target one **logical unit of work**: a coherent change that may span 1-4 closely related files. A logical unit groups files that serve the same concern and are meaningless in isolation.
 
-- Task fits within one context window
-- Clear scope prevents scope creep
+**Examples of logical units**:
+- Types + context + hook for a single feature (theme infrastructure)
+- A component and its co-located test file
+- Multiple components undergoing the same mechanical change (adopting a new hook)
+- A service, its types, and its test file
+
+**Minimum size**: A sub-task should produce at least ~30 lines of changes. If it would be smaller, combine it with a related unit.
+
+This ensures:
+- Task fits within one context window (1-4 files is well within limits)
+- Clear scope prevents scope creep while avoiding wasteful micro-tasks
 - Easy to verify completion
-- Enables parallel work on unrelated files
-</single_file_principle>
+- Enables parallel work on unrelated logical units
+</logical_unit_principle>
 
 <task_structure>
 **Note**: In the standard flow, `feature-dev:code-architect` subagents (Phase 3) produce these sub-task descriptions. The main agent validates completeness and consistency during Phase 4 aggregation.
 
 <task_structure_quick>
 Each sub-task must include:
-- **Target file(s)**: Single file or source + test pair
+- **Target file(s)**: 1-4 files forming one logical unit
 - **Action**: 2-4 sentences of specific implementation guidance
 - **Verify**: Executable command that proves completion
 - **Done**: 2-4 measurable outcomes as checklist
@@ -529,6 +541,7 @@ Full template for detailed sub-tasks:
 ```bash
 {executable command that proves completion}
 ```
+**Note**: Verify commands must use targeted tests only (specific files or filters). Never run the full test suite — that belongs exclusively in the Verification Gate.
 
 ### Done
 - [ ] {Measurable outcome 1}
@@ -573,10 +586,12 @@ Determine blocking order based on functional requirements:
 6. **Identify parallel groups** — Group tasks that share no mutual dependencies for concurrent execution
 7. **Add verification gate** — Append the verification gate sub-task blocked by ALL implementation tasks, with the aggregated verify commands from step 5 included in its description
 8. **Quality checks**:
-   - Each sub-task targets a single file (or tightly-coupled pair)
+   - Each sub-task targets one logical unit of work (1-4 related files)
+   - No sub-task produces fewer than ~30 lines of changes
    - No duplicate target files across sub-tasks
    - All template sections are complete (Summary, Context, Target Files, Action, Avoid, Acceptance Criteria, Verify Command)
    - Verify commands are executable (not pseudocode)
+   - Verify commands use targeted tests only (no `just test`, `npm test`, `bun test` without file pattern, `cargo test` without filter)
    - Acceptance criteria are measurable
    - Verification Gate description includes aggregated verify commands from all sub-tasks
 </aggregation_phase>
@@ -589,6 +604,7 @@ The verification gate:
 - Is blocked by ALL implementation sub-tasks
 - When executed by mobius, routes to `/verify` instead of `/execute`
 - Validates all acceptance criteria are met before the parent can be completed
+- This is the ONLY place where the full test suite is run
 
 **Template**:
 ```markdown
@@ -605,7 +621,7 @@ This task triggers the verify skill to validate all implementation sub-tasks mee
 
 ### Done
 - [ ] All sub-task verify commands pass
-- [ ] All tests pass
+- [ ] Full test suite passes (this is the exclusive place for full test runs)
 - [ ] All acceptance criteria verified
 - [ ] No critical issues found by code review agents
 
@@ -618,22 +634,26 @@ This task triggers the verify skill to validate all implementation sub-tasks mee
 <sizing_guidelines>
 A well-sized sub-task:
 
-- Targets 1 file (or source + test pair)
+- Targets 1-4 files forming one logical unit of work
 - Has 2-4 acceptance criteria
 - Can be described in 2-3 sentences
 - Takes roughly 50-200 lines of changes
 - Doesn't require reading many other files to understand
 
+**Minimum size**: Tasks producing fewer than ~30 lines of changes are too small. Combine them with related work.
+
 **Split if**:
-- File needs multiple unrelated changes
+- Logical unit exceeds 4 files or ~200 lines of changes
 - Description exceeds 5 sentences
 - More than 5 acceptance criteria
-- Changes span unrelated concerns in the file
+- Changes span unrelated concerns (e.g., auth + UI styling)
 
 **Combine if**:
-- Two files are always modified together
-- Changes are trivially small (< 10 lines each)
-- One file is just re-exporting from another
+- Files serve the same logical concern (types + context + hook for one feature)
+- A file is meaningless without another (a context without its consuming hook)
+- Task would produce fewer than ~30 lines of changes
+- Files always change together (they have never been modified independently)
+- Tasks share all the same blockers and enablers
 </sizing_guidelines>
 
 <context_sizing>
@@ -955,128 +975,140 @@ Options:
 **Breakdown**:
 
 ```markdown
-## Sub-task: 1 - Define theme types
+## Sub-task: 1 - Theme infrastructure (types + context + hook)
 
-**Target file(s)**: `src/types/theme.ts`
+**Target file(s)**:
+- `src/types/theme.ts` (Create)
+- `src/contexts/ThemeContext.tsx` (Create)
+- `src/hooks/useTheme.ts` (Create)
 **Change type**: Create
+**Logical unit**: These three files form the theme infrastructure — types define the shape, context manages state, hook provides consumption API. They are meaningless in isolation.
 
 ### Action
-Create TypeScript type definitions for the theme system. Define `Theme` type with light/dark/system modes, `ThemeContextValue` interface with current theme and toggle function.
-- Follow existing type patterns in `src/types/` directory
-- Export all types for use by ThemeProvider and useTheme hook
+Create the full theme infrastructure as one coherent unit:
+1. Define `Theme` type (light/dark/system) and `ThemeContextValue` interface in types file
+2. Create ThemeProvider context with localStorage persistence and system preference detection
+3. Implement useTheme hook that consumes ThemeContext
+- Follow existing type patterns in `src/types/`, context patterns in `src/contexts/`, hook patterns in `src/hooks/`
 
 ### Avoid
 - Do NOT include implementation logic in types file because types should be pure declarations
-- Do NOT use `any` type because it defeats type safety
+- Do NOT call hooks conditionally because it violates React rules
+- Do NOT forget SSR safety check for localStorage because window may not exist
 
 ### Verify
 ```bash
-grep -q "export type Theme" src/types/theme.ts && \
-grep -q "export interface ThemeContextValue" src/types/theme.ts && \
-echo "PASS"
+npx tsc --noEmit src/types/theme.ts src/contexts/ThemeContext.tsx src/hooks/useTheme.ts
 ```
 
 ### Done
 - [ ] `Theme` type exported with 'light' | 'dark' | 'system' values
 - [ ] `ThemeContextValue` interface exported with theme and setTheme properties
-- [ ] File compiles without TypeScript errors
+- [ ] ThemeProvider component exports and wraps children with localStorage persistence
+- [ ] useTheme hook consumes ThemeContext and returns typed value
+- [ ] All three files compile without TypeScript errors
 
 **Blocked by**: None
 **Enables**: 2, 3
 
 ---
 
-## Sub-task: 2 - Create ThemeProvider context
+## Sub-task: 2 - ThemeToggle component
 
-**Target file(s)**: `src/contexts/ThemeContext.tsx`
+**Target file(s)**: `src/components/settings/ThemeToggle.tsx` (Create)
 **Change type**: Create
 
 ### Action
-Create React context provider for theme state management. Import types from sub-task 1, implement localStorage persistence, and detect system preference.
-- Follow existing context patterns in `src/contexts/` directory
-- Use `useEffect` for system preference detection via `matchMedia`
+Create the ThemeToggle settings component. Import useTheme hook from sub-task 1 and render a toggle control for switching between light/dark/system modes.
+- Follow existing component patterns in `src/components/settings/`
 
 ### Avoid
-- Do NOT call hooks conditionally because it violates React rules
-- Do NOT forget SSR safety check for localStorage because window may not exist
+- Do NOT duplicate theme logic already in useTheme hook
+- Do NOT hardcode color values — use theme context
 
 ### Verify
 ```bash
-grep -q "createContext" src/contexts/ThemeContext.tsx && \
-grep -q "ThemeProvider" src/contexts/ThemeContext.tsx && \
-echo "PASS"
+npx tsc --noEmit src/components/settings/ThemeToggle.tsx
 ```
 
 ### Done
-- [ ] ThemeContext created with proper default value
-- [ ] ThemeProvider component exports and wraps children
-- [ ] Theme persisted to localStorage on change
-- [ ] System preference detected on mount
+- [ ] ThemeToggle component renders mode selector
+- [ ] Consumes useTheme hook for state management
+- [ ] File compiles without TypeScript errors
 
 **Blocked by**: 1
-**Enables**: 3
+**Enables**: None (parallel with 3)
 
 ---
 
-## Sub-task: 3 - Implement useTheme hook
+## Sub-task: 3 - Update existing components for theme support
 
-**Target file(s)**: `src/hooks/useTheme.ts`
-**Change type**: Create
-**Blocked by**: 2
-**Enables**: 4, 5, 6, 7
+**Target file(s)**:
+- `src/components/Header.tsx` (Modify)
+- `src/components/Sidebar.tsx` (Modify)
+- `src/components/Card.tsx` (Modify)
+**Change type**: Modify
+**Logical unit**: All three files undergo the same concern — replacing hardcoded colors with theme-aware values using the useTheme hook.
+
+### Action
+Update Header, Sidebar, and Card components to consume the useTheme hook and replace hardcoded color values with theme-aware equivalents.
+- Import useTheme hook and apply theme values consistently across all three components
+- Follow existing patterns for how components consume hooks
+
+### Avoid
+- Do NOT change component APIs or props — only internal color handling
+- Do NOT add theme logic that belongs in the hook or context
+
+### Verify
+```bash
+npx tsc --noEmit src/components/Header.tsx src/components/Sidebar.tsx src/components/Card.tsx
+```
+
+### Done
+- [ ] Header.tsx uses theme context for colors
+- [ ] Sidebar.tsx uses theme context for colors
+- [ ] Card.tsx uses theme context for colors
+- [ ] All three files compile without TypeScript errors
+
+**Blocked by**: 1
+**Enables**: None (parallel with 2)
 
 ---
 
-## Sub-task: 4 - Add ThemeToggle component
-
-**Target file(s)**: `src/components/settings/ThemeToggle.tsx`
-**Change type**: Create
-**Blocked by**: 3
-
----
-
-## Sub-task: 5-7 - Update existing components
-
-Files: Header.tsx, Sidebar.tsx, Card.tsx (modify)
-**Blocked by**: 3
-
----
-
-## Sub-task: 8 - Verification Gate
+## Sub-task: VG - Verification Gate
 
 **Target**: Validate implementation against acceptance criteria
 **Change type**: Verification (no code changes)
 
 ### Action
-This task triggers the verify skill to validate all implementation sub-tasks meet the parent issue's acceptance criteria.
+This task triggers the verify skill to validate all implementation sub-tasks meet the parent issue's acceptance criteria. This is the ONLY task that runs the full test suite.
 
 ### Done
-- [ ] All tests pass
+- [ ] Full test suite passes (this is the exclusive place for full test runs)
 - [ ] All acceptance criteria verified
 - [ ] No critical issues found by code review agents
 
-**Blocked by**: 1, 2, 3, 4, 5, 6, 7
+**Blocked by**: 1, 2, 3
 **Enables**: Parent issue completion
 ```
 
 **Dependency graph**:
 ```
-[1] Types ─► [2] ThemeProvider ─► [3] useTheme hook
-                                      │
-                   ┌──────────────────┼──────────────────┐
-                   ▼                  ▼                  ▼
-                 [4]                [5]                [6]
-             ThemeToggle         Header.tsx        Sidebar.tsx
-                   │                  │                  │
-                   └──────────────────┼──────────────────┘
-                                      ▼
-                              [8] Verification Gate
+[1] Theme infrastructure (types + context + hook)
+     │
+     ├─► [2] ThemeToggle component
+     │
+     └─► [3] Update existing components (Header, Sidebar, Card)
+              │
+     ┌────────┘
+     ▼
+[VG] Verification Gate (blocked by 1, 2, 3)
 ```
 
 **Parallel groups**:
-- [1] → [2] → [3] (sequential foundation)
-- [4], [5], [6], [7] can all run in parallel after [3]
-- [8] runs after ALL other tasks complete
+- [1] (foundation — must complete first)
+- [2], [3] can run in parallel after [1]
+- [VG] runs after ALL other tasks complete
 
 **After user approval, write local task files**:
 
@@ -1086,33 +1118,44 @@ mkdir -p .mobius/issues/MOB-100/tasks
 ```
 
 ```
-# Step 1: Write leaf task (no blockers)
+# Step 1: Write leaf task (no blockers) — theme infrastructure
 Write tool:
   file_path: .mobius/issues/MOB-100/tasks/task-001.json
   content: {
     "id": "task-001",
-    "title": "[MOB-100] Define theme types",
-    "description": "## Summary\nCreate TypeScript type definitions...\n[full description]",
+    "title": "[MOB-100] Theme infrastructure (types + context + hook)",
+    "description": "## Summary\nCreate theme types, ThemeProvider context, and useTheme hook as one logical unit...\n[full description]",
     "status": "pending",
     "blockedBy": [],
     "blocks": ["task-002", "task-003"],
     "parentId": "MOB-100"
   }
 
-# Step 2: Write task blocked by task-001
+# Step 2: Write ThemeToggle task blocked by task-001
 Write tool:
   file_path: .mobius/issues/MOB-100/tasks/task-002.json
   content: {
     "id": "task-002",
-    "title": "[MOB-100] Create ThemeProvider context",
-    "description": "## Summary\nCreate React context provider...",
+    "title": "[MOB-100] ThemeToggle component",
+    "description": "## Summary\nCreate ThemeToggle settings component...",
     "status": "pending",
     "blockedBy": ["task-001"],
-    "blocks": ["task-003"],
+    "blocks": [],
     "parentId": "MOB-100"
   }
 
-# Continue for all sub-tasks...
+# Step 3: Write component updates task blocked by task-001
+Write tool:
+  file_path: .mobius/issues/MOB-100/tasks/task-003.json
+  content: {
+    "id": "task-003",
+    "title": "[MOB-100] Update existing components for theme support",
+    "description": "## Summary\nUpdate Header, Sidebar, Card to use theme context...",
+    "status": "pending",
+    "blockedBy": ["task-001"],
+    "blocks": [],
+    "parentId": "MOB-100"
+  }
 
 # Final: Write Verification Gate blocked by ALL
 Write tool:
@@ -1120,9 +1163,9 @@ Write tool:
   content: {
     "id": "task-VG",
     "title": "[MOB-100] Verification Gate",
-    "description": "Runs verify to validate implementation meets acceptance criteria.",
+    "description": "Runs verify to validate implementation meets acceptance criteria. This is the ONLY task that runs the full test suite.",
     "status": "pending",
-    "blockedBy": ["task-001", "task-002", "task-003", "task-004", "task-005", "task-006", "task-007"],
+    "blockedBy": ["task-001", "task-002", "task-003"],
     "blocks": [],
     "parentId": "MOB-100"
   }
@@ -1137,17 +1180,18 @@ Write tool:
 
 "## Breakdown Complete: MOB-100
 
-**Sub-tasks created**: 8
+**Sub-tasks created**: 4
 **Location**: `.mobius/issues/MOB-100/tasks/`
 
-| ID | Title | Blocked By | File |
-|----|-------|------------|------|
-| task-001 | Define theme types | - | `tasks/task-001.json` |
-| task-002 | Create ThemeProvider | task-001 | `tasks/task-002.json` |
-| ... | ... | ... | ... |
-| task-VG | Verification Gate | task-001 through task-007 | `tasks/task-VG.json` |
+| ID | Title | Files | Blocked By | File |
+|----|-------|-------|------------|------|
+| task-001 | Theme infrastructure | types + context + hook (3) | - | `tasks/task-001.json` |
+| task-002 | ThemeToggle component | ThemeToggle.tsx (1) | task-001 | `tasks/task-002.json` |
+| task-003 | Update existing components | Header, Sidebar, Card (3) | task-001 | `tasks/task-003.json` |
+| task-VG | Verification Gate | - | task-001, task-002, task-003 | `tasks/task-VG.json` |
 
 **Ready to start**: task-001
+**Parallel opportunities**: After task-001, task-002 and task-003 can run simultaneously
 
 Run `mobius loop MOB-100` to begin execution."
 </example_breakdown>
@@ -1163,12 +1207,14 @@ Run `mobius loop MOB-100` to begin execution."
 - GOOD: Deep exploration to understand actual codebase patterns
 
 **Don't over-split**:
+- BAD: Separate tasks for types, context, and hook that form one logical concern (theme infrastructure)
+- BAD: A task that produces fewer than ~30 lines of changes
 - BAD: Separate task for each function in a file
-- GOOD: One task per file with all related changes
+- GOOD: One task per logical unit — group tightly related files (types + context + hook) into a single task
 
 **Don't under-split**:
-- BAD: "Implement entire feature" as one task
-- GOOD: One task per file, each independently completable
+- BAD: "Implement entire feature" as one task spanning 8+ files
+- GOOD: One task per logical unit (1-4 related files), each independently completable
 
 **Don't ignore existing patterns**:
 - BAD: Create tasks that introduce new patterns
@@ -1177,6 +1223,13 @@ Run `mobius loop MOB-100` to begin execution."
 **Don't create circular dependencies**:
 - BAD: Task A blocks B, B blocks C, C blocks A
 - GOOD: Clear hierarchical dependency flow
+
+**Don't run full test suites in sub-task verify commands**:
+- BAD: `just test`, `npm test`, `bun test` (runs everything)
+- BAD: `cargo test` (runs entire crate's tests)
+- GOOD: `bun test src/hooks/useTheme.test.ts` (targeted file)
+- GOOD: `cargo test theme` (filtered by name)
+- Full test suite runs belong exclusively in the Verification Gate.
 </anti_patterns>
 
 <success_criteria>
@@ -1185,7 +1238,8 @@ A successful refinement produces:
 - [ ] Backend detected from issue ID format or user input
 - [ ] Parent issue fetched via CLI command (linear/jira) or local file (local mode)
 - [ ] All affected files identified through deep exploration
-- [ ] Each sub-task targets exactly one file (or source + test pair)
+- [ ] Each sub-task targets one logical unit of work (1-4 related files)
+- [ ] No sub-task produces fewer than ~30 lines of changes
 - [ ] Every sub-task has clear, verifiable acceptance criteria
 - [ ] Each sub-task validated with user via AskUserQuestion (for complex breakdowns)
 - [ ] Blocking relationships are logically sound
