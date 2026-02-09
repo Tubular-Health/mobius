@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.11.0](https://github.com/Tubular-Health/mobius/compare/v1.10.0...v1.11.0) (2026-02-09)
+
+
+### Features
+
+* **clean:** replace backend API with git-based merge detection ([#78](https://github.com/Tubular-Health/mobius/issues/78)) ([8af2224](https://github.com/Tubular-Health/mobius/commit/8af222448a3968251d6d36d3d5f7e1bf3e006c2c))
+* per-task model routing and live token tracking ([#79](https://github.com/Tubular-Health/mobius/issues/79)) ([becb2a8](https://github.com/Tubular-Health/mobius/commit/becb2a8ad91659bc14c2b7e5310d134cf43eedc1))
+* **refine:** logical-unit granularity + targeted testing ([#84](https://github.com/Tubular-Health/mobius/issues/84)) ([a4ae686](https://github.com/Tubular-Health/mobius/commit/a4ae6866188b00d1dedebc1b82e0c2a2f58d5253))
+* **runtime:** add opencode adapter and richer TUI telemetry ([#81](https://github.com/Tubular-Health/mobius/issues/81)) ([810d79a](https://github.com/Tubular-Health/mobius/commit/810d79afb2da8bc5e784df9d2d7313a57475038b))
+* **runtime:** surface token usage and model metadata across loop orchestration ([#80](https://github.com/Tubular-Health/mobius/issues/80)) ([df7de0b](https://github.com/Tubular-Health/mobius/commit/df7de0b7a51f2b9e2b3e2ee9ce9e7818e17e0a5b))
+* **skills:** add agent-gen skill for generating repo-tailored AGENTS.md ([#76](https://github.com/Tubular-Health/mobius/issues/76)) ([ad58615](https://github.com/Tubular-Health/mobius/commit/ad586155bccfbbdb3a5b804b06f60a7bfac52fea))
+* **skills:** add scoring normalization and model routing to refine skill ([#75](https://github.com/Tubular-Health/mobius/issues/75)) ([49033bd](https://github.com/Tubular-Health/mobius/commit/49033bd7054b2f28eb9925653e48cdbbf63ad1f1))
+* **tui:** add token metrics, model badges, and bordered dashboard panels ([#77](https://github.com/Tubular-Health/mobius/issues/77)) ([b3e9b19](https://github.com/Tubular-Health/mobius/commit/b3e9b195d30a9f30fed8caa6481af9f7de5f99a7))
+
+
+### Bug Fixes
+
+* **clean:** remove worktree before deleting branch ([#83](https://github.com/Tubular-Health/mobius/issues/83)) ([6fcece4](https://github.com/Tubular-Health/mobius/commit/6fcece4d0d67b826644707198badce6b4c4f27d2))
+
+
+### Code Refactoring
+
+* **skills:** reduce skill pipeline token cost by 70% ([#73](https://github.com/Tubular-Health/mobius/issues/73)) ([b40f427](https://github.com/Tubular-Health/mobius/commit/b40f427e0b1ae4c2c92842773c06b54006f0e193))
+
 ## [1.10.0](https://github.com/Tubular-Health/mobius/compare/v1.9.0...v1.10.0) (2026-02-03)
 
 
