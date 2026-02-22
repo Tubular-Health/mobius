@@ -40,10 +40,12 @@ fn classify_branch_delete_failure(stderr: &str) -> BranchDeleteFailure {
 }
 
 fn is_completed_status(status: &str, backend: &Backend) -> bool {
+    let normalized = status.trim().to_ascii_lowercase();
+
     match backend {
-        Backend::Linear => matches!(status, "Done" | "Canceled" | "Cancelled"),
-        Backend::Jira => matches!(status, "Done" | "Closed"),
-        Backend::Local => status == "done",
+        Backend::Linear => matches!(normalized.as_str(), "done" | "canceled" | "cancelled"),
+        Backend::Jira => matches!(normalized.as_str(), "done" | "closed"),
+        Backend::Local => matches!(normalized.as_str(), "done" | "closed"),
     }
 }
 
