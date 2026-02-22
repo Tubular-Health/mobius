@@ -265,9 +265,27 @@ pub fn write_parent_spec(issue_id: &str, spec: &ParentIssueContext) -> Result<()
 ///
 /// Returns None if the file doesn't exist or is corrupted.
 pub fn read_parent_spec(issue_id: &str) -> Option<ParentIssueContext> {
-    let file_path = get_issue_path(issue_id).join("parent.json");
-    let content = fs::read_to_string(&file_path).ok()?;
-    serde_json::from_str(&content).ok()
+    let issue_path = get_issue_path(issue_id);
+
+    // Preferred source: parent.json
+    let parent_path = issue_path.join("parent.json");
+    if let Ok(content) = fs::read_to_string(&parent_path) {
+        if let Ok(spec) = serde_json::from_str::<ParentIssueContext>(&content) {
+            return Some(spec);
+        }
+    }
+
+    // Backward-compatible fallback: context.json wrapper
+    #[derive(Deserialize)]
+    struct ParentWrapper {
+        parent: ParentIssueContext,
+    }
+
+    let context_path = issue_path.join("context.json");
+    let content = fs::read_to_string(&context_path).ok()?;
+    serde_json::from_str::<ParentWrapper>(&content)
+        .ok()
+        .map(|wrapper| wrapper.parent)
 }
 
 /// Write a sub-task spec to .mobius/issues/{issueId}/tasks/{identifier}.json

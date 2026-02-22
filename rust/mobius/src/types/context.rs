@@ -13,11 +13,15 @@ pub struct ParentIssueContext {
     pub title: String,
     #[serde(default)]
     pub description: String,
-    #[serde(default)]
+    #[serde(default, alias = "branchName")]
     pub git_branch_name: String,
-    #[serde(alias = "state", deserialize_with = "deserialize_status_field")]
+    #[serde(
+        default,
+        alias = "state",
+        deserialize_with = "deserialize_status_field"
+    )]
     pub status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_labels_field")]
     pub labels: Vec<String>,
     #[serde(default)]
     pub url: String,
@@ -45,6 +49,36 @@ where
         StringOrObject::Str(s) => Ok(s),
         StringOrObject::Obj(obj) => Ok(obj.name),
     }
+}
+
+/// Deserialize labels that can be either an array of names
+/// (`["Bug", "Feature"]`) or Linear-style objects
+/// (`[{"id":"...","name":"Bug"}]`).
+fn deserialize_labels_field<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    struct LabelObject {
+        name: String,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrObject {
+        Str(String),
+        Obj(LabelObject),
+    }
+
+    let labels = Option::<Vec<StringOrObject>>::deserialize(deserializer)?.unwrap_or_default();
+
+    Ok(labels
+        .into_iter()
+        .map(|label| match label {
+            StringOrObject::Str(name) => name,
+            StringOrObject::Obj(obj) => obj.name,
+        })
+        .collect())
 }
 
 /// Reference to a related issue (blocker or blocked)
@@ -561,6 +595,38 @@ mod tests {
         assert_eq!(parsed.identifier, "TUB-292");
         assert_eq!(parsed.status, "In Progress");
         assert_eq!(parsed.labels, vec!["Bug"]);
+    }
+
+    #[test]
+    fn test_parent_issue_context_legacy_linear_shape_with_label_objects() {
+        let json = serde_json::json!({
+            "id": "200a68aa-ae0f-4436-a76e-95f621a4af52",
+            "identifier": "TUB-311",
+            "title": "Refactor CarePlansScreen and ScheduleConfigurationCard",
+            "description": "desc",
+            "branchName": "feature/tub-311",
+            "state": {
+                "id": "f62b2bb3-80f7-4164-bd83-9410fdbcafe9",
+                "name": "Backlog"
+            },
+            "labels": [
+                {
+                    "id": "a1b39030-4233-4286-981f-7a2ca99ded0b",
+                    "name": "Improvement"
+                },
+                {
+                    "id": "2",
+                    "name": "Frontend"
+                }
+            ],
+            "url": "https://linear.app/tubular/issue/TUB-311"
+        });
+
+        let parsed: ParentIssueContext = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.identifier, "TUB-311");
+        assert_eq!(parsed.git_branch_name, "feature/tub-311");
+        assert_eq!(parsed.status, "Backlog");
+        assert_eq!(parsed.labels, vec!["Improvement", "Frontend"]);
     }
 
     #[test]

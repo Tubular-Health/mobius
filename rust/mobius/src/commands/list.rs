@@ -55,9 +55,10 @@ pub fn run(backend_override: Option<&str>) -> anyhow::Result<()> {
 
     for issue_id in &dirs {
         if let Some(spec) = read_parent_spec(issue_id) {
-            let status_color = match spec.status.as_str() {
-                "Done" => spec.status.green().to_string(),
-                "In Progress" => spec.status.cyan().to_string(),
+            let normalized = spec.status.trim().to_ascii_lowercase();
+            let status_color = match normalized.as_str() {
+                "done" => spec.status.green().to_string(),
+                "in progress" | "in_progress" => spec.status.cyan().to_string(),
                 _ => spec.status.dimmed().to_string(),
             };
 
