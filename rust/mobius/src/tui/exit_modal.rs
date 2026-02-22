@@ -8,6 +8,7 @@ use super::header::format_duration;
 use super::theme::{MUTED_COLOR, NORD0, NORD13, TEXT_COLOR};
 
 pub struct ExitModal {
+    pub loop_running: bool,
     pub active_agent_count: usize,
     pub completed: usize,
     pub total: usize,
@@ -18,8 +19,8 @@ pub struct ExitModal {
 impl Widget for ExitModal {
     fn render(self, area: Rect, buf: &mut Buffer) {
         // Calculate centered modal dimensions
-        let modal_width = 44u16;
-        let modal_height = 11u16;
+        let modal_width = 56u16;
+        let modal_height = 12u16;
 
         let x = area.x + area.width.saturating_sub(modal_width) / 2;
         let y = area.y + area.height.saturating_sub(modal_height) / 2;
@@ -42,17 +43,26 @@ impl Widget for ExitModal {
         let inner = block.inner(modal_area);
         block.render(modal_area, buf);
 
+        let action_text = if self.loop_running {
+            "  Close dashboard and stop loop execution?"
+        } else {
+            "  Close dashboard?"
+        };
+        let detail_text = if self.loop_running {
+            format!("  Running agents: {}", self.active_agent_count)
+        } else {
+            "  Loop execution is already complete.".to_string()
+        };
+
         let lines = vec![
             Line::raw(""),
             Line::from(Span::styled(
-                "⚠ Confirm Exit",
+                "Confirm Exit",
                 Style::default().fg(NORD13).add_modifier(Modifier::BOLD),
             )),
             Line::raw(""),
-            Line::from(Span::styled(
-                format!("  Stop {} running agent(s)?", self.active_agent_count),
-                Style::default().fg(TEXT_COLOR),
-            )),
+            Line::from(Span::styled(action_text, Style::default().fg(TEXT_COLOR))),
+            Line::from(Span::styled(detail_text, Style::default().fg(MUTED_COLOR))),
             Line::raw(""),
             Line::from(Span::styled(
                 format!(
@@ -67,9 +77,9 @@ impl Widget for ExitModal {
             )),
             Line::raw(""),
             Line::from(vec![
-                Span::styled("        [Y]es", Style::default().fg(NORD13)),
+                Span::styled("      [Y] Confirm", Style::default().fg(NORD13)),
                 Span::styled("    ", Style::default()),
-                Span::styled("[N]o", Style::default().fg(TEXT_COLOR)),
+                Span::styled("[N] Cancel", Style::default().fg(TEXT_COLOR)),
             ]),
         ];
 

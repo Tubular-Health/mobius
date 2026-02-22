@@ -610,13 +610,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
 
     // Clear active tasks
     clear_all_runtime_active_tasks(task_id);
-
-    // End session
-    if all_complete {
-        end_session(task_id, SessionStatus::Completed);
-    } else if any_failed {
-        end_session(task_id, SessionStatus::Failed);
-    }
+    runtime_state.active_tasks.clear();
 
     // Auto-submit PR on success
     if all_complete && !no_submit {
@@ -634,8 +628,19 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         ) {
             Ok(()) => println!("{}", "Pull request created successfully.".green()),
             Err(e) => {
-                println!("{}", format!("⚠ PR submission failed: {}", e).yellow());
+                let submit_error = e.to_string();
+                println!("{}", format!("⚠ PR submission failed: {}", submit_error).yellow());
                 all_complete = false;
+                any_failed = true;
+
+                runtime_state.failed_tasks.push(serde_json::json!({
+                    "id": "__pr_submit__",
+                    "stage": "pr_submit",
+                    "error": submit_error,
+                    "failedAt": chrono::Utc::now().to_rfc3339(),
+                }));
+                runtime_state.updated_at = chrono::Utc::now().to_rfc3339();
+                write_runtime_state(&runtime_state)?;
             }
         }
 
@@ -662,6 +667,13 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         println!("  {}", worktree_info.path.display().to_string().dimmed());
         println!("{}", "tmux session:".yellow());
         println!("  {}", format!("tmux attach -t {}", session_name).dimmed());
+    }
+
+    // End session after all post-processing (submit/cleanup) has finished.
+    if all_complete {
+        end_session(task_id, SessionStatus::Completed);
+    } else if any_failed {
+        end_session(task_id, SessionStatus::Failed);
     }
 
     Ok(())

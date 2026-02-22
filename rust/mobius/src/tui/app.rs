@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use crate::context::is_process_running;
 use crate::types::context::{
     AgentTodoFile, RuntimeActiveTask, RuntimeCompletedTask, RuntimeState, SessionInfo,
 };
@@ -24,7 +25,6 @@ pub struct App {
     pub pending_count: usize,
     pub runtime_state_path: PathBuf,
     pub should_quit: bool,
-    pub auto_exit_tick: Option<u8>,
     pub agent_todos: HashMap<String, AgentTodoFile>,
     pub max_parallel_agents: usize,
     pub token_history: Vec<u64>,
@@ -53,7 +53,6 @@ impl App {
             pending_count: 0,
             runtime_state_path,
             should_quit: false,
-            auto_exit_tick: None,
             agent_todos: HashMap::new(),
             max_parallel_agents,
             token_history: Vec::new(),
@@ -97,20 +96,10 @@ impl App {
         }
     }
 
-    /// Check if execution is complete (all tasks in terminal state).
+    /// Check if execution is complete (session reached terminal status).
     fn check_completion(&mut self) {
-        let total = self.graph.tasks.len();
-        let (completed, failed) = self
-            .runtime_state
-            .as_ref()
-            .map(|state| (state.completed_tasks.len(), state.failed_tasks.len()))
-            .unwrap_or((0, 0));
-
-        let session_terminal = self.has_terminal_session_status();
-
-        if ((completed + failed >= total && total > 0) || session_terminal) && !self.is_complete {
+        if self.has_terminal_session_status() && !self.is_complete {
             self.is_complete = true;
-            self.auto_exit_tick = Some(2);
         }
     }
 
@@ -118,14 +107,6 @@ impl App {
     pub fn on_tick(&mut self) {
         // Catch completion transitions even if file watchers miss an event.
         self.check_completion();
-
-        if let Some(ref mut ticks) = self.auto_exit_tick {
-            if *ticks == 0 {
-                self.should_quit = true;
-            } else {
-                *ticks -= 1;
-            }
-        }
 
         // Sample token usage for sparkline history
         let current = self.current_total_tokens();
@@ -153,18 +134,15 @@ impl App {
 
     /// Handle 'q' key press.
     pub fn on_quit_key(&mut self) {
-        if self.is_complete {
-            self.should_quit = true;
-        } else if self.has_active_tasks() {
-            self.show_exit_modal = true;
-        } else {
-            self.should_quit = true;
-        }
+        self.show_exit_modal = true;
     }
 
     /// Handle exit confirmation from modal.
     pub fn confirm_exit(&mut self) {
-        self.kill_loop_process();
+        if self.is_loop_process_running() {
+            self.kill_loop_process();
+        }
+        self.show_exit_modal = false;
         self.should_quit = true;
     }
 
@@ -183,6 +161,15 @@ impl App {
         self.runtime_state
             .as_ref()
             .map(|s| !s.active_tasks.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Check if the loop subprocess appears to still be running.
+    pub fn is_loop_process_running(&self) -> bool {
+        self.runtime_state
+            .as_ref()
+            .and_then(|s| s.loop_pid)
+            .map(is_process_running)
             .unwrap_or(false)
     }
 
@@ -273,6 +260,9 @@ impl App {
     fn kill_loop_process(&self) {
         if let Some(state) = &self.runtime_state {
             if let Some(pid) = state.loop_pid {
+                if !is_process_running(pid) {
+                    return;
+                }
                 unsafe {
                     libc::kill(pid as i32, libc::SIGTERM);
                 }
@@ -380,7 +370,7 @@ mod tests {
     }
 
     #[test]
-    fn check_completion_marks_complete_when_all_tasks_terminal() {
+    fn check_completion_waits_for_terminal_session() {
         let exec_dir = unique_execution_dir("all-terminal");
         let runtime_path = exec_dir.join("runtime.json");
 
@@ -401,8 +391,50 @@ mod tests {
 
         app.reload_runtime_state();
 
+        assert!(!app.is_complete);
+        assert!(!app.should_quit);
+
+        let _ = std::fs::remove_dir_all(exec_dir);
+    }
+
+    #[test]
+    fn check_completion_marks_complete_when_session_completed() {
+        let exec_dir = unique_execution_dir("session-completed");
+        let runtime_path = exec_dir.join("runtime.json");
+        let session_path = exec_dir.join("session.json");
+
+        let runtime = make_runtime_state(2, 1, 1);
+        std::fs::write(
+            &runtime_path,
+            serde_json::to_string_pretty(&runtime).unwrap(),
+        )
+        .unwrap();
+
+        let session = serde_json::json!({
+            "parentId": "MOB-1",
+            "backend": "linear",
+            "startedAt": "2026-02-07T00:00:00Z",
+            "worktreePath": null,
+            "status": "completed"
+        });
+        std::fs::write(
+            &session_path,
+            serde_json::to_string_pretty(&session).unwrap(),
+        )
+        .unwrap();
+
+        let mut app = App::new(
+            "MOB-1".to_string(),
+            "Parent".to_string(),
+            make_graph(2),
+            runtime_path,
+            3,
+        );
+
+        app.reload_runtime_state();
+
         assert!(app.is_complete);
-        assert_eq!(app.auto_exit_tick, Some(2));
+        assert!(!app.should_quit);
 
         let _ = std::fs::remove_dir_all(exec_dir);
     }
@@ -444,7 +476,69 @@ mod tests {
         app.reload_runtime_state();
 
         assert!(app.is_complete);
-        assert_eq!(app.auto_exit_tick, Some(2));
+        assert!(!app.should_quit);
+
+        let _ = std::fs::remove_dir_all(exec_dir);
+    }
+
+    #[test]
+    fn on_quit_key_opens_exit_modal() {
+        let exec_dir = unique_execution_dir("quit-opens-modal");
+        let runtime_path = exec_dir.join("runtime.json");
+        let mut app = App::new(
+            "MOB-1".to_string(),
+            "Parent".to_string(),
+            make_graph(1),
+            runtime_path,
+            3,
+        );
+
+        app.on_quit_key();
+
+        assert!(app.show_exit_modal);
+        assert!(!app.should_quit);
+
+        let _ = std::fs::remove_dir_all(exec_dir);
+    }
+
+    #[test]
+    fn confirm_exit_sets_should_quit() {
+        let exec_dir = unique_execution_dir("confirm-exit");
+        let runtime_path = exec_dir.join("runtime.json");
+        let mut app = App::new(
+            "MOB-1".to_string(),
+            "Parent".to_string(),
+            make_graph(1),
+            runtime_path,
+            3,
+        );
+        app.show_exit_modal = true;
+
+        app.confirm_exit();
+
+        assert!(app.should_quit);
+        assert!(!app.show_exit_modal);
+
+        let _ = std::fs::remove_dir_all(exec_dir);
+    }
+
+    #[test]
+    fn cancel_exit_hides_modal_without_quitting() {
+        let exec_dir = unique_execution_dir("cancel-exit");
+        let runtime_path = exec_dir.join("runtime.json");
+        let mut app = App::new(
+            "MOB-1".to_string(),
+            "Parent".to_string(),
+            make_graph(1),
+            runtime_path,
+            3,
+        );
+        app.show_exit_modal = true;
+
+        app.cancel_exit();
+
+        assert!(!app.show_exit_modal);
+        assert!(!app.should_quit);
 
         let _ = std::fs::remove_dir_all(exec_dir);
     }
