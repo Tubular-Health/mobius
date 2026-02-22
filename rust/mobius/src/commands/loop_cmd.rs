@@ -611,13 +611,6 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     // Clear active tasks
     clear_all_runtime_active_tasks(task_id);
 
-    // End session
-    if all_complete {
-        end_session(task_id, SessionStatus::Completed);
-    } else if any_failed {
-        end_session(task_id, SessionStatus::Failed);
-    }
-
     // Auto-submit PR on success
     if all_complete && !no_submit {
         println!("{}", "\nCreating pull request...".dimmed());
@@ -636,6 +629,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
             Err(e) => {
                 println!("{}", format!("⚠ PR submission failed: {}", e).yellow());
                 all_complete = false;
+                any_failed = true;
             }
         }
 
@@ -662,6 +656,13 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         println!("  {}", worktree_info.path.display().to_string().dimmed());
         println!("{}", "tmux session:".yellow());
         println!("  {}", format!("tmux attach -t {}", session_name).dimmed());
+    }
+
+    // End session after all post-processing (submit/cleanup) has finished.
+    if all_complete {
+        end_session(task_id, SessionStatus::Completed);
+    } else if any_failed {
+        end_session(task_id, SessionStatus::Failed);
     }
 
     Ok(())

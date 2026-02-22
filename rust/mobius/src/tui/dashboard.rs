@@ -109,21 +109,11 @@ fn handle_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
         return;
     }
 
-    // Handle completion state (any key exits)
-    if app.is_complete {
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Enter | KeyCode::Char(' ') => {
-                app.should_quit = true;
-            }
-            _ => {}
-        }
-        return;
-    }
-
     // Normal mode key handling
     match key.code {
         KeyCode::Char('q') => app.on_quit_key(),
         KeyCode::Char('d') => app.toggle_debug(),
+        KeyCode::Enter | KeyCode::Char(' ') if app.is_complete => app.on_quit_key(),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             app.on_quit_key();
         }
@@ -362,7 +352,6 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
             total,
             failed,
             app.elapsed_ms(),
-            app.auto_exit_tick,
         );
     }
 
@@ -376,6 +365,7 @@ fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
             .unwrap_or(0);
 
         let modal = ExitModal {
+            loop_running: app.is_loop_process_running(),
             active_agent_count: active_count,
             completed,
             total,
@@ -393,7 +383,6 @@ fn render_completion_bar(
     total: usize,
     failed: usize,
     elapsed_ms: u64,
-    auto_exit_tick: Option<u8>,
 ) {
     use super::header::format_duration;
 
@@ -404,10 +393,7 @@ fn render_completion_bar(
         "Execution completed successfully"
     };
 
-    let exit_text = match auto_exit_tick {
-        Some(n) => format!("Exiting in {}s... (press any key to exit now)", n),
-        None => "Press any key to exit".to_string(),
-    };
+    let exit_text = "Press q to close dashboard";
 
     let line1 = Line::from(vec![
         Span::styled(
@@ -427,12 +413,117 @@ fn render_completion_bar(
     ]);
 
     let line2 = Line::from(Span::styled(
-        format!("  {}", exit_text),
+        format!("  {exit_text}"),
         Style::default().fg(MUTED_COLOR),
     ));
 
     frame.render_widget(line1, Rect::new(area.x, area.y, area.width, 1));
     if area.height > 1 {
         frame.render_widget(line2, Rect::new(area.x, area.y + 1, area.width, 1));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::*;
+
+    fn make_app(test_name: &str) -> App {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "mobius-dashboard-tests-{}-{}-{}",
+            test_name,
+            std::process::id(),
+            nanos
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let graph = TaskGraph {
+            parent_id: "MOB-1".to_string(),
+            parent_identifier: "MOB-1".to_string(),
+            tasks: HashMap::new(),
+            edges: HashMap::new(),
+        };
+
+        App::new(
+            "MOB-1".to_string(),
+            "Parent".to_string(),
+            graph,
+            dir.join("runtime.json"),
+            3,
+        )
+    }
+
+    #[test]
+    fn modal_blocks_non_confirmation_keys() {
+        let mut app = make_app("modal-blocks-keys");
+        app.show_exit_modal = true;
+
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE),
+        );
+
+        assert!(app.show_exit_modal);
+        assert!(!app.show_debug);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn modal_cancel_key_closes_modal_without_quit() {
+        let mut app = make_app("modal-cancel");
+        app.show_exit_modal = true;
+
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+        );
+
+        assert!(!app.show_exit_modal);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn modal_confirm_key_quits() {
+        let mut app = make_app("modal-confirm");
+        app.show_exit_modal = true;
+
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+        );
+
+        assert!(!app.show_exit_modal);
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_opens_exit_modal() {
+        let mut app = make_app("ctrl-c");
+
+        handle_key_event(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        );
+
+        assert!(app.show_exit_modal);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn completion_enter_opens_exit_modal() {
+        let mut app = make_app("complete-enter");
+        app.is_complete = true;
+
+        handle_key_event(&mut app, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(app.show_exit_modal);
+        assert!(!app.should_quit);
     }
 }
