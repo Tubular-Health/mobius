@@ -610,6 +610,7 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
 
     // Clear active tasks
     clear_all_runtime_active_tasks(task_id);
+    runtime_state.active_tasks.clear();
 
     // Auto-submit PR on success
     if all_complete && !no_submit {
@@ -627,9 +628,19 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
         ) {
             Ok(()) => println!("{}", "Pull request created successfully.".green()),
             Err(e) => {
-                println!("{}", format!("⚠ PR submission failed: {}", e).yellow());
+                let submit_error = e.to_string();
+                println!("{}", format!("⚠ PR submission failed: {}", submit_error).yellow());
                 all_complete = false;
                 any_failed = true;
+
+                runtime_state.failed_tasks.push(serde_json::json!({
+                    "id": "__pr_submit__",
+                    "stage": "pr_submit",
+                    "error": submit_error,
+                    "failedAt": chrono::Utc::now().to_rfc3339(),
+                }));
+                runtime_state.updated_at = chrono::Utc::now().to_rfc3339();
+                write_runtime_state(&runtime_state)?;
             }
         }
 
