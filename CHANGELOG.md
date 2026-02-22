@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.1](https://github.com/Tubular-Health/mobius/compare/v1.11.0...v1.11.1) (2026-02-22)
+
+
+### Bug Fixes
+
+* **local-state:** support legacy issue metadata parsing ([#87](https://github.com/Tubular-Health/mobius/issues/87)) ([8ab3a71](https://github.com/Tubular-Health/mobius/commit/8ab3a71a5227f38745d8c77bbef9a595ffcbb846))
+* **loop:** finalize session state before dashboard exit ([#85](https://github.com/Tubular-Health/mobius/issues/85)) ([e356d92](https://github.com/Tubular-Health/mobius/commit/e356d925480743a3d0d344dfd2662714e1418d80))
+
 ## [1.11.0](https://github.com/Tubular-Health/mobius/compare/v1.10.0...v1.11.0) (2026-02-09)
 
 
