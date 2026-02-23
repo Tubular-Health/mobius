@@ -20,7 +20,7 @@ Sleep 100ms
 Show
 
 # Step 1: Run mobius
-Type "mobius -n 4 MOB-1"
+Type "mobius -n 4 DEMO-1 --no-submit"
 Sleep 1s
 Enter
 Sleep 10s

@@ -59,4 +59,5 @@ clean:
 
 # Generate workflow demo recording from VHS tape file
 tape:
-    cd assets/terminal/tapes && vhs workflow-demo.tape
+    ./scripts/scaffold-demo-issue.sh
+    cd assets/terminal/tapes && MOBIUS_SANDBOX_ENABLED=false vhs workflow-demo.tape
