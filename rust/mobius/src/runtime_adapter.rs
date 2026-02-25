@@ -75,7 +75,17 @@ pub fn resolve_runtime_for_model(
 }
 
 fn shell_escape_double_quoted(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '$' => escaped.push_str("\\$"),
+            '`' => escaped.push_str("\\`"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
 }
 
 fn normalize_opencode_model(raw_model: &str) -> String {
@@ -479,6 +489,24 @@ mod tests {
     }
 
     #[test]
+    fn test_build_execution_command_escapes_shell_substitutions_in_error_path() {
+        let mut config = ExecutionConfig::default();
+        config.model = "openai/gpt-5.3-codex$(touch /tmp/pwn)`whoami`".to_string();
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: None,
+            thinking_level_override: None,
+        };
+
+        let cmd = build_execution_command(AgentRuntime::Claude, &options);
+        assert!(cmd.contains("openai/gpt-5.3-codex\\$(touch /tmp/pwn)\\`whoami\\`"));
+    }
+
+    #[test]
     fn test_build_submit_command_both_routes_by_model_family() {
         let claude_cmd = build_submit_command(
             AgentRuntime::Both,
@@ -503,6 +531,17 @@ mod tests {
             error,
             "Model 'llama3' is not recognized for runtime 'both'. Use Claude-family (opus/sonnet/haiku or anthropic/claude-*) or GPT-family (openai/gpt-* or gpt-*)."
         );
+    }
+
+    #[test]
+    fn test_build_submit_command_escapes_shell_substitutions_in_error_path() {
+        let cmd = build_submit_command(
+            AgentRuntime::Both,
+            "llama$(touch /tmp/pwn)`whoami`",
+            false,
+            None,
+        );
+        assert!(cmd.contains("llama\\$(touch /tmp/pwn)\\`whoami\\`"));
     }
 
     #[test]
