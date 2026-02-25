@@ -9,6 +9,8 @@ use crossterm::event::{self, Event, KeyEvent};
 pub enum TuiEvent {
     /// Keyboard input event
     Key(KeyEvent),
+    /// Terminal resized
+    Resize,
     /// The runtime state file changed on disk
     StateFileChanged,
     /// A todo file was created or modified in the todos directory
@@ -36,9 +38,19 @@ impl EventHandler {
         let tx_key = tx.clone();
         let keyboard_handle = std::thread::spawn(move || loop {
             if event::poll(Duration::from_millis(100)).unwrap_or(false) {
-                if let Ok(Event::Key(key)) = event::read() {
-                    if tx_key.send(TuiEvent::Key(key)).is_err() {
-                        break;
+                if let Ok(event) = event::read() {
+                    match event {
+                        Event::Key(key) => {
+                            if tx_key.send(TuiEvent::Key(key)).is_err() {
+                                break;
+                            }
+                        }
+                        Event::Resize(_, _) => {
+                            if tx_key.send(TuiEvent::Resize).is_err() {
+                                break;
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
