@@ -12,7 +12,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders};
+use ratatui::widgets::{Block, BorderType, Borders, Clear};
 use ratatui::Terminal;
 
 use crate::types::task_graph::TaskGraph;
@@ -73,6 +73,9 @@ pub fn run_dashboard(
         if let Some(event) = events.next(Duration::from_millis(100)) {
             match event {
                 TuiEvent::Key(key) => handle_key_event(&mut app, key),
+                TuiEvent::Resize => {
+                    terminal.clear()?;
+                }
                 TuiEvent::StateFileChanged => {
                     app.reload_runtime_state();
                 }
@@ -123,6 +126,9 @@ fn handle_key_event(app: &mut App, key: crossterm::event::KeyEvent) {
 
 fn render_dashboard(frame: &mut ratatui::Frame, app: &App) {
     let size = frame.area();
+
+    // Ensure stale glyphs from previous frames are removed after resize/reflow.
+    frame.render_widget(Clear, size);
 
     // Clear background
     let bg_block = ratatui::widgets::Block::default().style(Style::default().bg(NORD0));

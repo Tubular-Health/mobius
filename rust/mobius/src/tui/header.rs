@@ -3,6 +3,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
+use unicode_width::UnicodeWidthStr;
 
 use super::theme::{HEADER_COLOR, MUTED_COLOR, TEXT_COLOR};
 
@@ -32,12 +33,8 @@ impl Widget for Header<'_> {
                 break;
             }
             let y = area.y + i as u16;
-            // Center the logo
-            let x_offset = if area.width > line.len() as u16 {
-                (area.width - line.len() as u16) / 2
-            } else {
-                0
-            };
+            // Center the logo using display width (not UTF-8 byte length).
+            let x_offset = centered_x(area.width, display_width(line));
             buf.set_string(area.x + x_offset, y, line, logo_style);
         }
 
@@ -63,15 +60,29 @@ impl Widget for Header<'_> {
             ]);
 
             // Center the info line
-            let info_width: usize = info_line.spans.iter().map(|s| s.content.len()).sum();
-            let x_offset = if area.width as usize > info_width {
-                (area.width as usize - info_width) / 2
-            } else {
-                0
-            };
+            let x_offset = centered_x(area.width, line_display_width(&info_line));
 
             buf.set_line(area.x + x_offset as u16, info_y, &info_line, area.width);
         }
+    }
+}
+
+fn display_width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
+fn line_display_width(line: &Line<'_>) -> usize {
+    line.spans
+        .iter()
+        .map(|span| display_width(span.content.as_ref()))
+        .sum()
+}
+
+fn centered_x(area_width: u16, content_width: usize) -> u16 {
+    if area_width as usize > content_width {
+        ((area_width as usize - content_width) / 2) as u16
+    } else {
+        0
     }
 }
 
@@ -114,5 +125,55 @@ mod tests {
     fn test_format_duration_hours() {
         assert_eq!(format_duration(3_900_000), "1h 5m");
         assert_eq!(format_duration(7_200_000), "2h 0m");
+    }
+
+    #[test]
+    fn test_display_width_uses_terminal_cells_not_bytes() {
+        let logo_line = LOGO[0];
+        assert!(logo_line.len() > display_width(logo_line));
+    }
+
+    #[test]
+    fn test_centered_x_uses_display_width_for_logo() {
+        let area_width = 80;
+        let logo_width = display_width(LOGO[0]);
+
+        let display_offset = centered_x(area_width, logo_width);
+        let byte_offset = centered_x(area_width, LOGO[0].len());
+
+        assert_eq!(
+            display_offset,
+            ((area_width as usize - logo_width) / 2) as u16
+        );
+        assert_ne!(display_offset, byte_offset);
+    }
+
+    #[test]
+    fn test_centered_x_clamps_to_zero_when_content_wider_than_area() {
+        assert_eq!(centered_x(10, 20), 0);
+    }
+
+    #[test]
+    fn test_centered_x_recalculates_across_width_changes() {
+        let content_width = display_width(LOGO[0]);
+
+        let wide_offset = centered_x(120, content_width);
+        let narrow_offset = centered_x(70, content_width);
+
+        assert!(wide_offset > narrow_offset);
+        assert_eq!(
+            narrow_offset,
+            ((70usize.saturating_sub(content_width)) / 2) as u16
+        );
+    }
+
+    #[test]
+    fn test_line_display_width_counts_span_display_width() {
+        let line = Line::from(vec![
+            Span::raw("Task Tree for "),
+            Span::raw("MOB-123"),
+            Span::raw(" | Runtime: 12s"),
+        ]);
+        assert_eq!(line_display_width(&line), 36);
     }
 }
