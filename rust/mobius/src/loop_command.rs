@@ -454,11 +454,8 @@ pub async fn run_loop(options: LoopOptions) -> Result<()> {
                         started_at: now.clone(),
                         worktree: Some(worktree_path.clone()),
                         model: Some(if loop_config.runtime == AgentRuntime::Claude {
-                            executor::select_model_for_task(
-                                task,
-                                exec_config.model.parse::<Model>().unwrap_or_default(),
-                            )
-                            .to_string()
+                            executor::select_model_for_task(task, &exec_config)
+                                .unwrap_or_else(|_| exec_config.model.clone())
                         } else {
                             runtime_model_label.clone()
                         }),

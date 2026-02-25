@@ -407,11 +407,8 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     started_at: chrono::Utc::now().to_rfc3339(),
                     worktree: Some(worktree_info.path.display().to_string()),
                     model: Some(if config.runtime == AgentRuntime::Claude {
-                        select_model_for_task(
-                            task,
-                            execution_config.model.parse::<Model>().unwrap_or_default(),
-                        )
-                        .to_string()
+                        select_model_for_task(task, &execution_config)
+                            .unwrap_or_else(|_| execution_config.model.clone())
                     } else {
                         runtime_model_label.clone()
                     }),
