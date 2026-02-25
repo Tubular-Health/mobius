@@ -432,6 +432,7 @@ pub fn read_local_subtasks_as_linear_issues(issue_id: &str) -> Vec<LinearIssue> 
                 title: task.title,
                 status: task.status,
                 git_branch_name: task.git_branch_name,
+                task_type: task.task_type,
                 relations: Some(Relations { blocked_by, blocks }),
                 scoring: task.scoring,
             }
@@ -551,6 +552,7 @@ pub fn write_pending_updates(issue_id: &str, updates: &[LocalPendingUpdate]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::enums::TaskType;
     use std::fs;
     use tempfile::TempDir;
 
@@ -801,6 +803,7 @@ mod tests {
                 title: task.title,
                 status: task.status.clone(),
                 git_branch_name: task.git_branch_name,
+                task_type: TaskType::General,
                 relations: None,
                 scoring: None,
             };
@@ -1193,6 +1196,7 @@ mod tests {
             title: "First".to_string(),
             status: "done".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1203,6 +1207,7 @@ mod tests {
             title: "Second".to_string(),
             status: "done".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1233,6 +1238,7 @@ mod tests {
             title: "Task".to_string(),
             status: "ready".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1243,6 +1249,7 @@ mod tests {
             title: "Task".to_string(),
             status: "in_progress".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1276,6 +1283,7 @@ mod tests {
             title: "Task".to_string(),
             status: "done".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1286,6 +1294,7 @@ mod tests {
             title: "Task".to_string(),
             status: "pending".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };

@@ -10,6 +10,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
+use crate::types::enums::TaskType;
 use crate::types::task_graph::{LinearIssue, ParentIssue, Relation, Relations};
 
 // ---------------------------------------------------------------------------
@@ -420,6 +421,7 @@ impl LinearClient {
                     title: node.title,
                     status,
                     git_branch_name: branch_name,
+                    task_type: TaskType::General,
                     relations: Some(Relations {
                         blocked_by,
                         blocks: Vec::new(),

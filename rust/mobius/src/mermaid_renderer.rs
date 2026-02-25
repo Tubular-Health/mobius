@@ -140,6 +140,7 @@ pub fn get_all_status_colors() -> Vec<(TaskStatus, &'static str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::enums::TaskType;
     use crate::types::task_graph::{build_task_graph, LinearIssue, Relation, Relations};
 
     fn make_sample_issues() -> Vec<LinearIssue> {
@@ -150,6 +151,7 @@ mod tests {
                 title: "Initialize project".to_string(),
                 status: "Done".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![],
                     blocks: vec![Relation {
@@ -165,6 +167,7 @@ mod tests {
                 title: "Define types".to_string(),
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![Relation {
                         id: "a".to_string(),
@@ -183,6 +186,7 @@ mod tests {
                 title: "Implement feature".to_string(),
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![Relation {
                         id: "b".to_string(),
@@ -339,6 +343,7 @@ mod tests {
             title: "[MOB-401] Fix \"bug\" in <Component> & deploy".to_string(),
             status: "Backlog".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         }];

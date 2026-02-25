@@ -11,6 +11,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
+use crate::types::enums::TaskType;
 use crate::types::task_graph::{LinearIssue, ParentIssue, Relation, Relations};
 
 /// Options for creating a Jira issue.
@@ -384,6 +385,7 @@ impl JiraClient {
                         .and_then(|s| s.name.clone())
                         .unwrap_or_else(|| "To Do".to_string()),
                     git_branch_name: branch_name,
+                    task_type: TaskType::General,
                     relations: Some(Relations {
                         blocked_by,
                         blocks: Vec::new(),

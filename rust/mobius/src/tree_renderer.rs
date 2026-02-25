@@ -317,6 +317,7 @@ pub fn render_full_tree_output(graph: &TaskGraph) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::enums::TaskType;
     use crate::types::task_graph::{build_task_graph, LinearIssue, Relation, Relations};
 
     fn make_sample_issues() -> Vec<LinearIssue> {
@@ -327,6 +328,7 @@ mod tests {
                 title: "Initialize project".to_string(),
                 status: "Done".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![],
                     blocks: vec![
@@ -348,6 +350,7 @@ mod tests {
                 title: "Define types".to_string(),
                 status: "Done".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![Relation {
                         id: "a".to_string(),
@@ -366,6 +369,7 @@ mod tests {
                 title: "Config system".to_string(),
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![Relation {
                         id: "a".to_string(),
@@ -381,6 +385,7 @@ mod tests {
                 title: "Task graph engine".to_string(),
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![Relation {
                         id: "b".to_string(),
@@ -400,6 +405,7 @@ mod tests {
                     .to_string(),
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![Relation {
                         id: "d".to_string(),
@@ -482,6 +488,7 @@ mod tests {
                 title: "Task A".to_string(),
                 status: "Done".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![],
                     blocks: vec![Relation {
@@ -497,6 +504,7 @@ mod tests {
                 title: "Task B".to_string(),
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![Relation {
                         id: "a".to_string(),
@@ -541,6 +549,7 @@ mod tests {
                 title: "Task A".to_string(),
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![Relation {
                         id: "b".to_string(),
@@ -556,6 +565,7 @@ mod tests {
                 title: "Task B".to_string(),
                 status: "Backlog".to_string(),
                 git_branch_name: String::new(),
+                task_type: TaskType::General,
                 relations: Some(Relations {
                     blocked_by: vec![Relation {
                         id: "a".to_string(),

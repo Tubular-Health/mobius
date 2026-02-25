@@ -687,6 +687,7 @@ fn parse_token_usage(content: &str) -> Option<TokenUsage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::enums::TaskType;
     use crate::types::TaskStatus;
 
     fn make_task(id: &str, identifier: &str, title: &str) -> SubTask {
@@ -698,6 +699,7 @@ mod tests {
             blocked_by: vec![],
             blocks: vec![],
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             scoring: None,
         }
     }
