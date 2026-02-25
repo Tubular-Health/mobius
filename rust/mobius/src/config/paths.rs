@@ -6,6 +6,9 @@ use crate::types::config::PathConfigType;
 use crate::types::enums::AgentRuntime;
 use crate::types::PathConfig;
 
+/// Primary runtime directory used for shared assets when runtime is `both`.
+const BOTH_RUNTIME_PRIMARY_DIR: &str = ".claude";
+
 /// Get the global config directory (~/.config/mobius or $XDG_CONFIG_HOME/mobius)
 pub fn get_global_config_dir() -> PathBuf {
     let base = if let Ok(xdg) = env::var("XDG_CONFIG_HOME") {
@@ -32,7 +35,7 @@ fn runtime_dir_name(runtime: AgentRuntime) -> &'static str {
     match runtime {
         AgentRuntime::Claude => ".claude",
         AgentRuntime::Opencode => ".opencode",
-        AgentRuntime::Both => ".claude",
+        AgentRuntime::Both => BOTH_RUNTIME_PRIMARY_DIR,
     }
 }
 
@@ -248,8 +251,31 @@ mod tests {
     fn test_get_global_dirs_for_runtime() {
         let claude_skills = get_global_skills_dir_for_runtime(AgentRuntime::Claude);
         let opencode_skills = get_global_skills_dir_for_runtime(AgentRuntime::Opencode);
+        let both_skills = get_global_skills_dir_for_runtime(AgentRuntime::Both);
         assert!(claude_skills.to_string_lossy().contains(".claude"));
         assert!(opencode_skills.to_string_lossy().contains(".opencode"));
+        assert!(both_skills
+            .to_string_lossy()
+            .contains(BOTH_RUNTIME_PRIMARY_DIR));
+    }
+
+    #[test]
+    fn test_runtime_both_uses_deterministic_primary_runtime_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let local_skills = get_skills_dir_for_runtime(tmp.path(), AgentRuntime::Both);
+        let local_commands = get_commands_dir_for_runtime(tmp.path(), AgentRuntime::Both);
+        let local_settings = get_settings_path_for_runtime(tmp.path(), AgentRuntime::Both);
+
+        assert!(local_skills
+            .to_string_lossy()
+            .contains(BOTH_RUNTIME_PRIMARY_DIR));
+        assert!(local_commands
+            .to_string_lossy()
+            .contains(BOTH_RUNTIME_PRIMARY_DIR));
+        assert!(local_settings
+            .to_string_lossy()
+            .contains(BOTH_RUNTIME_PRIMARY_DIR));
     }
 
     #[test]
