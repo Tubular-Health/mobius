@@ -86,6 +86,11 @@ fn runtime_cli_spec(runtime: AgentRuntime) -> RuntimeCliSpec {
             display_name: "OpenCode CLI",
             install_hint: "Install opencode and ensure it is available in PATH",
         },
+        AgentRuntime::Both => RuntimeCliSpec {
+            command: "claude",
+            display_name: "Claude CLI",
+            install_hint: "Install: npm install -g @anthropic-ai/claude-code",
+        },
     }
 }
 

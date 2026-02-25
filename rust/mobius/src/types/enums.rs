@@ -20,6 +20,7 @@ pub enum AgentRuntime {
     #[default]
     Claude,
     Opencode,
+    Both,
 }
 
 impl fmt::Display for AgentRuntime {
@@ -27,6 +28,7 @@ impl fmt::Display for AgentRuntime {
         match self {
             AgentRuntime::Claude => write!(f, "claude"),
             AgentRuntime::Opencode => write!(f, "opencode"),
+            AgentRuntime::Both => write!(f, "both"),
         }
     }
 }
@@ -38,8 +40,44 @@ impl FromStr for AgentRuntime {
         match s.to_lowercase().as_str() {
             "claude" => Ok(AgentRuntime::Claude),
             "opencode" => Ok(AgentRuntime::Opencode),
+            "both" => Ok(AgentRuntime::Both),
             _ => Err(format!(
-                "Unknown runtime: '{s}'. Expected: claude, opencode"
+                "Unknown runtime: '{s}'. Expected: claude, opencode, both"
+            )),
+        }
+    }
+}
+
+/// Task category used for task-type model routing
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TaskType {
+    Frontend,
+    Backend,
+    #[default]
+    General,
+}
+
+impl fmt::Display for TaskType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TaskType::Frontend => write!(f, "frontend"),
+            TaskType::Backend => write!(f, "backend"),
+            TaskType::General => write!(f, "general"),
+        }
+    }
+}
+
+impl FromStr for TaskType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "frontend" => Ok(TaskType::Frontend),
+            "backend" => Ok(TaskType::Backend),
+            "general" => Ok(TaskType::General),
+            _ => Err(format!(
+                "Unknown task type: '{s}'. Expected: frontend, backend, general"
             )),
         }
     }
@@ -325,6 +363,7 @@ mod tests {
             AgentRuntime::from_str("Opencode").unwrap(),
             AgentRuntime::Opencode
         );
+        assert_eq!(AgentRuntime::from_str("BOTH").unwrap(), AgentRuntime::Both);
         assert!(AgentRuntime::from_str("unknown").is_err());
     }
 
@@ -332,6 +371,22 @@ mod tests {
     fn test_runtime_display() {
         assert_eq!(AgentRuntime::Claude.to_string(), "claude");
         assert_eq!(AgentRuntime::Opencode.to_string(), "opencode");
+        assert_eq!(AgentRuntime::Both.to_string(), "both");
+    }
+
+    #[test]
+    fn test_task_type_from_str() {
+        assert_eq!(TaskType::from_str("frontend").unwrap(), TaskType::Frontend);
+        assert_eq!(TaskType::from_str("BACKEND").unwrap(), TaskType::Backend);
+        assert_eq!(TaskType::from_str("General").unwrap(), TaskType::General);
+        assert!(TaskType::from_str("unknown").is_err());
+    }
+
+    #[test]
+    fn test_task_type_display() {
+        assert_eq!(TaskType::Frontend.to_string(), "frontend");
+        assert_eq!(TaskType::Backend.to_string(), "backend");
+        assert_eq!(TaskType::General.to_string(), "general");
     }
 
     #[test]
@@ -362,11 +417,38 @@ mod tests {
 
     #[test]
     fn test_runtime_serde_roundtrip() {
-        let runtime = AgentRuntime::Opencode;
+        let runtime = AgentRuntime::Both;
         let json = serde_json::to_string(&runtime).unwrap();
-        assert_eq!(json, "\"opencode\"");
+        assert_eq!(json, "\"both\"");
         let parsed: AgentRuntime = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, runtime);
+    }
+
+    #[test]
+    fn test_task_type_serde_roundtrip() {
+        let task_type = TaskType::Frontend;
+        let json = serde_json::to_string(&task_type).unwrap();
+        assert_eq!(json, "\"frontend\"");
+        let parsed: TaskType = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, task_type);
+    }
+
+    #[test]
+    fn test_runtime_parse_error_message() {
+        let error = AgentRuntime::from_str("invalid").unwrap_err();
+        assert_eq!(
+            error,
+            "Unknown runtime: 'invalid'. Expected: claude, opencode, both"
+        );
+    }
+
+    #[test]
+    fn test_task_type_parse_error_message() {
+        let error = TaskType::from_str("invalid").unwrap_err();
+        assert_eq!(
+            error,
+            "Unknown task type: 'invalid'. Expected: frontend, backend, general"
+        );
     }
 
     #[test]

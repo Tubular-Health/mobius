@@ -71,6 +71,7 @@ pub fn effective_thinking_level_for_runtime(
             .filter(|value| !value.is_empty())
             .map(normalize_opencode_variant)
             .filter(|value| !value.is_empty()),
+        AgentRuntime::Both => None,
     }
 }
 
@@ -89,6 +90,7 @@ pub fn effective_model_for_runtime(
                 .unwrap_or_else(|| config.model.to_string());
             normalize_opencode_model(&requested_model)
         }
+        AgentRuntime::Both => config.model.to_string(),
     }
 }
 
@@ -154,6 +156,31 @@ pub fn build_execution_command(runtime: AgentRuntime, options: &ExecutionCommand
                     .unwrap_or_default(),
             )
         }
+        AgentRuntime::Both => {
+            let model_flag = format!("--model {}", model);
+            let disallowed_tools_flag = options
+                .config
+                .disallowed_tools
+                .as_ref()
+                .filter(|tools| !tools.is_empty())
+                .map(|tools| format!("--disallowedTools '{}'", tools.join(",")))
+                .unwrap_or_default();
+
+            let mut parts = vec![model_flag];
+            if !disallowed_tools_flag.is_empty() {
+                parts.push(disallowed_tools_flag);
+            }
+            let flags = parts.join(" ");
+
+            format!(
+                "cd \"{}\" && echo '{} {}' | {}claude -p --dangerously-skip-permissions --verbose --output-format stream-json {} | cclean",
+                options.worktree_path,
+                options.skill,
+                options.subtask_identifier,
+                env_prefix,
+                flags
+            )
+        }
     }
 }
 
@@ -188,6 +215,23 @@ pub fn build_submit_command(
                 .map(|level| format!(" --variant {}", level))
                 .unwrap_or_default(),
         ),
+        AgentRuntime::Both => {
+            let output_format = if use_cclean {
+                "--output-format=stream-json"
+            } else {
+                "--output-format=text"
+            };
+            let base = format!(
+                "claude -p --dangerously-skip-permissions --verbose {} --model {}",
+                output_format, model
+            );
+
+            if use_cclean {
+                format!("{} | cclean", base)
+            } else {
+                base
+            }
+        }
     }
 }
 

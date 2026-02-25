@@ -32,6 +32,7 @@ fn runtime_dir_name(runtime: AgentRuntime) -> &'static str {
     match runtime {
         AgentRuntime::Claude => ".claude",
         AgentRuntime::Opencode => ".opencode",
+        AgentRuntime::Both => ".claude",
     }
 }
 
