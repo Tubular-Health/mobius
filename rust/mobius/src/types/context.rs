@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::config::{ProjectDetectionResult, SubTaskVerifyCommand};
-use super::enums::{Backend, PendingUpdateType, SessionStatus, TaskStatus, VerificationResult};
+use super::enums::{
+    Backend, PendingUpdateType, SessionStatus, TaskStatus, TaskType, VerificationResult,
+};
 use super::task_graph::TaskScoring;
 
 /// Parent issue details stored in local context
@@ -101,6 +103,8 @@ pub struct SubTaskContext {
     pub status: String,
     #[serde(default)]
     pub git_branch_name: String,
+    #[serde(default, alias = "task_type")]
+    pub task_type: TaskType,
     #[serde(default, deserialize_with = "deserialize_issue_refs")]
     pub blocked_by: Vec<IssueRef>,
     #[serde(default, deserialize_with = "deserialize_issue_refs")]
@@ -638,12 +642,14 @@ mod tests {
             "description": "Do the thing",
             "status": "ready",
             "gitBranchName": "feature/mob-101",
+            "taskType": "backend",
             "blockedBy": [{"id": "task-000", "identifier": "MOB-100"}],
             "blocks": []
         });
 
         let parsed: SubTaskContext = serde_json::from_value(json).unwrap();
         assert_eq!(parsed.status, "ready");
+        assert_eq!(parsed.task_type, TaskType::Backend);
         assert_eq!(parsed.blocked_by.len(), 1);
         assert_eq!(parsed.blocked_by[0].identifier, "MOB-100");
     }
@@ -664,6 +670,39 @@ mod tests {
         assert_eq!(parsed.blocked_by[0].id, "task-001");
         assert_eq!(parsed.blocked_by[0].identifier, "task-001");
         assert_eq!(parsed.blocks.len(), 1);
+        assert_eq!(parsed.task_type, TaskType::General);
+    }
+
+    #[test]
+    fn test_subtask_context_supports_legacy_task_type_alias() {
+        let json = serde_json::json!({
+            "id": "task-003",
+            "title": "Legacy task",
+            "status": "pending",
+            "task_type": "frontend"
+        });
+
+        let parsed: SubTaskContext = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed.task_type, TaskType::Frontend);
+    }
+
+    #[test]
+    fn test_subtask_context_rejects_invalid_task_type() {
+        let json = serde_json::json!({
+            "id": "task-004",
+            "title": "Bad task",
+            "status": "pending",
+            "taskType": "mobile"
+        });
+
+        let err = serde_json::from_value::<SubTaskContext>(json).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown variant `mobile`")
+                && err.to_string().contains("frontend")
+                && err.to_string().contains("backend")
+                && err.to_string().contains("general"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
