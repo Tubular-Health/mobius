@@ -273,45 +273,96 @@ pub async fn is_issue_merged_into_base(
     })
 }
 
-fn runtime_config_dir(runtime: AgentRuntime) -> &'static str {
+fn runtime_config_dirs(runtime: AgentRuntime) -> &'static [&'static str] {
     match runtime {
-        AgentRuntime::Claude => ".claude",
-        AgentRuntime::Opencode => ".opencode",
-        AgentRuntime::Both => ".claude",
+        AgentRuntime::Claude => &[".claude"],
+        AgentRuntime::Opencode => &[".opencode"],
+        AgentRuntime::Both => &[".claude", ".opencode"],
     }
 }
 
-/// Symlink active runtime config directory from source repo to worktree.
-fn symlink_runtime_config_dir(source_repo: &Path, worktree_path: &Path, runtime: AgentRuntime) {
-    let runtime_dir = runtime_config_dir(runtime);
-    let source_path = source_repo.join(runtime_dir);
-    let target_path = worktree_path.join(runtime_dir);
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct RuntimeSymlinkStats {
+    created: usize,
+    missing_source: usize,
+    skipped_existing: usize,
+    non_directory: usize,
+    failed: usize,
+}
 
-    // Only symlink if source exists and target doesn't
-    if source_path.exists() && !target_path.exists() {
-        if let Ok(metadata) = std::fs::symlink_metadata(&source_path) {
-            if metadata.is_dir() {
-                #[cfg(unix)]
-                {
-                    if let Err(e) = std::os::unix::fs::symlink(&source_path, &target_path) {
-                        tracing::warn!(
-                            "Failed to symlink {} -> {}: {}",
-                            source_path.display(),
-                            target_path.display(),
-                            e
-                        );
-                    }
-                }
-                #[cfg(not(unix))]
-                {
-                    tracing::warn!(
-                        "Symlink not supported on this platform for {}",
-                        source_path.display()
-                    );
-                }
+/// Symlink runtime config directories from source repo to worktree.
+fn symlink_runtime_config_dirs(
+    source_repo: &Path,
+    worktree_path: &Path,
+    runtime: AgentRuntime,
+) -> RuntimeSymlinkStats {
+    let mut stats = RuntimeSymlinkStats::default();
+
+    for runtime_dir in runtime_config_dirs(runtime) {
+        let source_path = source_repo.join(runtime_dir);
+        let target_path = worktree_path.join(runtime_dir);
+
+        if !source_path.exists() {
+            stats.missing_source += 1;
+            tracing::warn!(
+                "Runtime config directory is missing, skipping symlink: {}",
+                source_path.display()
+            );
+            continue;
+        }
+
+        if target_path.exists() {
+            stats.skipped_existing += 1;
+            continue;
+        }
+
+        let metadata = match std::fs::symlink_metadata(&source_path) {
+            Ok(metadata) => metadata,
+            Err(e) => {
+                stats.failed += 1;
+                tracing::warn!(
+                    "Failed to inspect runtime config directory {}: {}",
+                    source_path.display(),
+                    e
+                );
+                continue;
+            }
+        };
+
+        if !metadata.is_dir() {
+            stats.non_directory += 1;
+            tracing::warn!(
+                "Runtime config path is not a directory, skipping symlink: {}",
+                source_path.display()
+            );
+            continue;
+        }
+
+        #[cfg(unix)]
+        {
+            if let Err(e) = std::os::unix::fs::symlink(&source_path, &target_path) {
+                stats.failed += 1;
+                tracing::warn!(
+                    "Failed to symlink {} -> {}: {}",
+                    source_path.display(),
+                    target_path.display(),
+                    e
+                );
+            } else {
+                stats.created += 1;
             }
         }
+        #[cfg(not(unix))]
+        {
+            stats.failed += 1;
+            tracing::warn!(
+                "Symlink not supported on this platform for {}",
+                source_path.display()
+            );
+        }
     }
+
+    stats
 }
 
 /// Get the actual default branch name from the repo.
@@ -357,7 +408,7 @@ pub async fn create_worktree(
     // Check if worktree already exists (resume scenario)
     if worktree_path.exists() {
         if let Ok(cwd) = std::env::current_dir() {
-            symlink_runtime_config_dir(&cwd, &worktree_path, config.runtime);
+            symlink_runtime_config_dirs(&cwd, &worktree_path, config.runtime);
         }
         return Ok(WorktreeInfo {
             path: worktree_path,
@@ -450,7 +501,7 @@ pub async fn create_worktree(
 
     // Symlink active runtime config directory from source repo
     let cwd = std::env::current_dir().context("failed to get current directory")?;
-    symlink_runtime_config_dir(&cwd, &worktree_path, config.runtime);
+    symlink_runtime_config_dirs(&cwd, &worktree_path, config.runtime);
 
     Ok(WorktreeInfo {
         path: worktree_path,
@@ -690,25 +741,40 @@ mod tests {
     }
 
     #[test]
-    fn test_runtime_config_dir_claude() {
-        assert_eq!(runtime_config_dir(AgentRuntime::Claude), ".claude");
+    fn test_runtime_config_dirs_claude() {
+        assert_eq!(runtime_config_dirs(AgentRuntime::Claude), [".claude"]);
     }
 
     #[test]
-    fn test_runtime_config_dir_opencode() {
-        assert_eq!(runtime_config_dir(AgentRuntime::Opencode), ".opencode");
+    fn test_runtime_config_dirs_opencode() {
+        assert_eq!(runtime_config_dirs(AgentRuntime::Opencode), [".opencode"]);
+    }
+
+    #[test]
+    fn test_runtime_config_dirs_both() {
+        assert_eq!(
+            runtime_config_dirs(AgentRuntime::Both),
+            [".claude", ".opencode"]
+        );
     }
 
     #[test]
     #[cfg(unix)]
-    fn test_symlink_runtime_config_dir_claude() {
+    fn test_symlink_runtime_config_dirs_claude() {
         let tmp = tempfile::tempdir().unwrap();
         let source_repo = tmp.path().join("source");
         let worktree = tmp.path().join("worktree");
         std::fs::create_dir_all(source_repo.join(".claude")).unwrap();
         std::fs::create_dir_all(&worktree).unwrap();
 
-        symlink_runtime_config_dir(&source_repo, &worktree, AgentRuntime::Claude);
+        let stats = symlink_runtime_config_dirs(&source_repo, &worktree, AgentRuntime::Claude);
+        assert_eq!(
+            stats,
+            RuntimeSymlinkStats {
+                created: 1,
+                ..RuntimeSymlinkStats::default()
+            }
+        );
 
         let link_path = worktree.join(".claude");
         let meta = std::fs::symlink_metadata(&link_path).unwrap();
@@ -721,14 +787,21 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn test_symlink_runtime_config_dir_opencode() {
+    fn test_symlink_runtime_config_dirs_opencode() {
         let tmp = tempfile::tempdir().unwrap();
         let source_repo = tmp.path().join("source");
         let worktree = tmp.path().join("worktree");
         std::fs::create_dir_all(source_repo.join(".opencode")).unwrap();
         std::fs::create_dir_all(&worktree).unwrap();
 
-        symlink_runtime_config_dir(&source_repo, &worktree, AgentRuntime::Opencode);
+        let stats = symlink_runtime_config_dirs(&source_repo, &worktree, AgentRuntime::Opencode);
+        assert_eq!(
+            stats,
+            RuntimeSymlinkStats {
+                created: 1,
+                ..RuntimeSymlinkStats::default()
+            }
+        );
 
         let link_path = worktree.join(".opencode");
         let meta = std::fs::symlink_metadata(&link_path).unwrap();
@@ -737,5 +810,53 @@ mod tests {
             std::fs::read_link(&link_path).unwrap(),
             source_repo.join(".opencode")
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_symlink_runtime_config_dirs_both() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source_repo = tmp.path().join("source");
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(source_repo.join(".claude")).unwrap();
+        std::fs::create_dir_all(source_repo.join(".opencode")).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let stats = symlink_runtime_config_dirs(&source_repo, &worktree, AgentRuntime::Both);
+        assert_eq!(
+            stats,
+            RuntimeSymlinkStats {
+                created: 2,
+                ..RuntimeSymlinkStats::default()
+            }
+        );
+
+        for dir in [".claude", ".opencode"] {
+            let link_path = worktree.join(dir);
+            let meta = std::fs::symlink_metadata(&link_path).unwrap();
+            assert!(meta.file_type().is_symlink());
+            assert_eq!(std::fs::read_link(&link_path).unwrap(), source_repo.join(dir));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_symlink_runtime_config_dirs_both_missing_runtime_dir_is_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source_repo = tmp.path().join("source");
+        let worktree = tmp.path().join("worktree");
+        std::fs::create_dir_all(source_repo.join(".claude")).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+
+        let stats = symlink_runtime_config_dirs(&source_repo, &worktree, AgentRuntime::Both);
+        assert_eq!(stats.created, 1);
+        assert_eq!(stats.missing_source, 1);
+
+        let claude_link = worktree.join(".claude");
+        assert!(std::fs::symlink_metadata(claude_link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!worktree.join(".opencode").exists());
     }
 }
