@@ -222,7 +222,9 @@ fn validate_model_runtime_compatibility(
     let family = detect_model_family(model);
     let is_compatible = match runtime {
         AgentRuntime::Claude => family == ModelFamily::Claude,
-        AgentRuntime::Opencode => family == ModelFamily::Gpt,
+        AgentRuntime::Opencode => {
+            crate::runtime_adapter::resolve_runtime_for_model(AgentRuntime::Opencode, model).is_ok()
+        }
         AgentRuntime::Both => family == ModelFamily::Claude || family == ModelFamily::Gpt,
     };
 
@@ -710,6 +712,20 @@ execution:
                 && error.contains("runtime 'opencode'")
                 && error.contains("runtime to 'claude'/'both'")
         }));
+    }
+
+    #[test]
+    fn test_validate_config_accepts_legacy_profile_alias_for_opencode_runtime() {
+        let mut config = LoopConfig::default();
+        config.runtime = AgentRuntime::Opencode;
+        config.execution.model = "sonnet".to_string();
+
+        let result = validate_config(&config);
+        assert!(
+            result.valid,
+            "runtime opencode should accept legacy model aliases: {:?}",
+            result.errors
+        );
     }
 
     #[test]

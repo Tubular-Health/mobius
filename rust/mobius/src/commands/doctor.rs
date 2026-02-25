@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::config::loader::{read_config, read_config_with_env};
-use crate::config::paths::resolve_paths;
+use crate::config::paths::{resolve_paths, resolve_skills_paths_for_runtime};
 use crate::types::enums::{AgentRuntime, Backend};
 
 struct CheckResult {
@@ -203,23 +203,33 @@ fn check_config(config_path: &str) -> CheckResult {
     }
 }
 
-fn check_path(skills_path: &str) -> CheckResult {
-    if Path::new(skills_path).exists() {
-        CheckResult {
+fn check_skills_paths(skills_paths: &[std::path::PathBuf]) -> CheckResult {
+    let missing: Vec<String> = skills_paths
+        .iter()
+        .filter(|path| !path.exists())
+        .map(|path| path.display().to_string())
+        .collect();
+
+    if missing.is_empty() {
+        let found: Vec<String> = skills_paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        return CheckResult {
             name: "Skills path".into(),
             status: CheckStatus::Pass,
-            message: format!("Found at {}", skills_path),
+            message: format!("Found at {}", found.join(", ")),
             required: true,
             details: None,
-        }
-    } else {
-        CheckResult {
-            name: "Skills path".into(),
-            status: CheckStatus::Fail,
-            message: format!("Not found at {}", skills_path),
-            required: true,
-            details: Some("Run 'mobius setup' to install skills".into()),
-        }
+        };
+    }
+
+    CheckResult {
+        name: "Skills path".into(),
+        status: CheckStatus::Fail,
+        message: format!("Missing: {}", missing.join(", ")),
+        required: true,
+        details: Some("Run 'mobius setup --update-skills' to install runtime skills".into()),
     }
 }
 
@@ -431,7 +441,8 @@ pub fn run() -> anyhow::Result<()> {
     println!("{}", format_result(&config_result));
     results.push(config_result);
 
-    let path_result = check_path(&paths.skills_path);
+    let runtime_skills_paths = resolve_skills_paths_for_runtime(&paths, runtime);
+    let path_result = check_skills_paths(&runtime_skills_paths);
     println!("{}", format_result(&path_result));
     results.push(path_result);
 
@@ -596,5 +607,31 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("opencode"));
+    }
+
+    #[test]
+    fn check_skills_paths_passes_when_all_paths_exist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude").join("skills");
+        let opencode = tmp.path().join(".opencode").join("skills");
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::create_dir_all(&opencode).unwrap();
+
+        let result = check_skills_paths(&[claude, opencode]);
+        assert!(matches!(result.status, CheckStatus::Pass));
+        assert!(result.message.contains(".claude"));
+        assert!(result.message.contains(".opencode"));
+    }
+
+    #[test]
+    fn check_skills_paths_fails_when_any_runtime_path_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude").join("skills");
+        let opencode = tmp.path().join(".opencode").join("skills");
+        std::fs::create_dir_all(&claude).unwrap();
+
+        let result = check_skills_paths(&[claude, opencode.clone()]);
+        assert!(matches!(result.status, CheckStatus::Fail));
+        assert!(result.message.contains(&opencode.display().to_string()));
     }
 }
