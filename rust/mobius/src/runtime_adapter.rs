@@ -2,6 +2,82 @@ use crate::types::{AgentRuntime, ExecutionConfig};
 
 const OPENCODE_DEFAULT_MODEL: &str = "openai/gpt-5.3-codex";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelFamily {
+    Claude,
+    Gpt,
+    Unknown,
+}
+
+pub fn detect_model_family(raw_model: &str) -> ModelFamily {
+    let normalized = raw_model.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return ModelFamily::Unknown;
+    }
+
+    if matches!(normalized.as_str(), "opus" | "sonnet" | "haiku")
+        || normalized.starts_with("claude")
+        || normalized.starts_with("anthropic/")
+        || normalized.contains("claude-")
+    {
+        return ModelFamily::Claude;
+    }
+
+    if normalized.starts_with("openai/")
+        || normalized.starts_with("gpt-")
+        || normalized.contains("/gpt-")
+    {
+        return ModelFamily::Gpt;
+    }
+
+    ModelFamily::Unknown
+}
+
+pub fn resolve_runtime_for_model(
+    configured_runtime: AgentRuntime,
+    raw_model: &str,
+) -> Result<AgentRuntime, String> {
+    let model = raw_model.trim();
+    if model.is_empty() {
+        return Err("Model must not be empty".to_string());
+    }
+
+    match configured_runtime {
+        AgentRuntime::Claude => {
+            let family = detect_model_family(model);
+            if family == ModelFamily::Claude {
+                Ok(AgentRuntime::Claude)
+            } else {
+                Err(format!(
+                    "Model '{model}' is incompatible with runtime 'claude'. Use a Claude-family model (opus/sonnet/haiku or anthropic/claude-*), or set runtime to 'opencode'/'both'."
+                ))
+            }
+        }
+        AgentRuntime::Opencode => {
+            let normalized = normalize_opencode_model(model);
+            let family = detect_model_family(&normalized);
+            if family == ModelFamily::Gpt {
+                Ok(AgentRuntime::Opencode)
+            } else {
+                Err(format!(
+                    "Model '{model}' is incompatible with runtime 'opencode'. Use a GPT-family model (openai/gpt-* or gpt-*), or set runtime to 'claude'/'both'."
+                ))
+            }
+        }
+        AgentRuntime::Both => match detect_model_family(model) {
+            ModelFamily::Claude => Ok(AgentRuntime::Claude),
+            ModelFamily::Gpt => Ok(AgentRuntime::Opencode),
+            ModelFamily::Unknown => Err(format!(
+                "Model '{model}' is not recognized for runtime 'both'. Use Claude-family (opus/sonnet/haiku or anthropic/claude-*) or GPT-family (openai/gpt-* or gpt-*)."
+            )),
+        },
+    }
+}
+
+fn shell_escape_double_quoted(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn normalize_opencode_model(raw_model: &str) -> String {
     let trimmed = raw_model.trim();
     if trimmed.is_empty() {
@@ -80,18 +156,42 @@ pub fn effective_model_for_runtime(
     config: &ExecutionConfig,
     model_override: Option<&str>,
 ) -> String {
-    match runtime {
-        AgentRuntime::Claude => config.model.to_string(),
-        AgentRuntime::Opencode => {
-            let requested_model = model_override
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| config.model.to_string());
-            normalize_opencode_model(&requested_model)
-        }
-        AgentRuntime::Both => config.model.to_string(),
-    }
+    resolve_model_and_runtime(runtime, config, model_override)
+        .map(|(_, model)| model)
+        .unwrap_or_else(|_| config.model.to_string())
+}
+
+pub fn effective_runtime_for_model(
+    runtime: AgentRuntime,
+    config: &ExecutionConfig,
+    model_override: Option<&str>,
+) -> Result<AgentRuntime, String> {
+    resolve_model_and_runtime(runtime, config, model_override)
+        .map(|(resolved_runtime, _)| resolved_runtime)
+}
+
+fn resolve_model_and_runtime(
+    runtime: AgentRuntime,
+    config: &ExecutionConfig,
+    model_override: Option<&str>,
+) -> Result<(AgentRuntime, String), String> {
+    let requested_model = match runtime {
+        AgentRuntime::Claude => config.model.trim().to_string(),
+        AgentRuntime::Opencode | AgentRuntime::Both => model_override
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| config.model.trim().to_string()),
+    };
+
+    let resolved_runtime = resolve_runtime_for_model(runtime, &requested_model)?;
+    let normalized_model = match resolved_runtime {
+        AgentRuntime::Claude => requested_model,
+        AgentRuntime::Opencode => normalize_opencode_model(&requested_model),
+        AgentRuntime::Both => requested_model,
+    };
+
+    Ok((resolved_runtime, normalized_model))
 }
 
 pub struct ExecutionCommand<'a> {
@@ -115,9 +215,19 @@ pub fn build_execution_command(runtime: AgentRuntime, options: &ExecutionCommand
         })
         .unwrap_or_default();
 
-    let model = effective_model_for_runtime(runtime, options.config, options.model_override);
+    let (resolved_runtime, model) =
+        match resolve_model_and_runtime(runtime, options.config, options.model_override) {
+            Ok(result) => result,
+            Err(error) => {
+                return format!(
+                    "cd \"{}\" && printf \"%s\\n\" \"Error: {}\" && exit 1",
+                    options.worktree_path,
+                    shell_escape_double_quoted(&error)
+                )
+            }
+        };
 
-    match runtime {
+    match resolved_runtime {
         AgentRuntime::Claude => {
             let model_flag = format!("--model {}", model);
             let disallowed_tools_flag = options
@@ -151,36 +261,15 @@ pub fn build_execution_command(runtime: AgentRuntime, options: &ExecutionCommand
                 env_prefix,
                 prompt,
                 model,
-                effective_thinking_level_for_runtime(runtime, options.thinking_level_override)
-                    .map(|level| format!(" --variant {}", level))
-                    .unwrap_or_default(),
+                effective_thinking_level_for_runtime(
+                    AgentRuntime::Opencode,
+                    options.thinking_level_override,
+                )
+                .map(|level| format!(" --variant {}", level))
+                .unwrap_or_default(),
             )
         }
-        AgentRuntime::Both => {
-            let model_flag = format!("--model {}", model);
-            let disallowed_tools_flag = options
-                .config
-                .disallowed_tools
-                .as_ref()
-                .filter(|tools| !tools.is_empty())
-                .map(|tools| format!("--disallowedTools '{}'", tools.join(",")))
-                .unwrap_or_default();
-
-            let mut parts = vec![model_flag];
-            if !disallowed_tools_flag.is_empty() {
-                parts.push(disallowed_tools_flag);
-            }
-            let flags = parts.join(" ");
-
-            format!(
-                "cd \"{}\" && echo '{} {}' | {}claude -p --dangerously-skip-permissions --verbose --output-format stream-json {} | cclean",
-                options.worktree_path,
-                options.skill,
-                options.subtask_identifier,
-                env_prefix,
-                flags
-            )
-        }
+        AgentRuntime::Both => unreachable!("runtime resolution returns concrete runtime"),
     }
 }
 
@@ -190,7 +279,17 @@ pub fn build_submit_command(
     use_cclean: bool,
     thinking_level_override: Option<&str>,
 ) -> String {
-    match runtime {
+    let resolved_runtime = match resolve_runtime_for_model(runtime, model) {
+        Ok(resolved_runtime) => resolved_runtime,
+        Err(error) => {
+            return format!(
+                "printf \"%s\\n\" \"Error: {}\" && exit 1",
+                shell_escape_double_quoted(&error)
+            )
+        }
+    };
+
+    match resolved_runtime {
         AgentRuntime::Claude => {
             let output_format = if use_cclean {
                 "--output-format=stream-json"
@@ -211,27 +310,11 @@ pub fn build_submit_command(
         AgentRuntime::Opencode => format!(
             "opencode run --model {}{}",
             normalize_opencode_model(model),
-            effective_thinking_level_for_runtime(runtime, thinking_level_override)
+            effective_thinking_level_for_runtime(AgentRuntime::Opencode, thinking_level_override)
                 .map(|level| format!(" --variant {}", level))
                 .unwrap_or_default(),
         ),
-        AgentRuntime::Both => {
-            let output_format = if use_cclean {
-                "--output-format=stream-json"
-            } else {
-                "--output-format=text"
-            };
-            let base = format!(
-                "claude -p --dangerously-skip-permissions --verbose {} --model {}",
-                output_format, model
-            );
-
-            if use_cclean {
-                format!("{} | cclean", base)
-            } else {
-                base
-            }
-        }
+        AgentRuntime::Both => unreachable!("runtime resolution returns concrete runtime"),
     }
 }
 
@@ -337,6 +420,92 @@ mod tests {
     }
 
     #[test]
+    fn test_build_execution_command_both_routes_claude_family_to_claude() {
+        let config = ExecutionConfig::default();
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: Some("claude-sonnet-4-5"),
+            thinking_level_override: Some("xhigh"),
+        };
+
+        let cmd = build_execution_command(AgentRuntime::Both, &options);
+        assert!(cmd.contains("claude -p"));
+        assert!(!cmd.contains("opencode run"));
+        assert!(!cmd.contains("--variant"));
+    }
+
+    #[test]
+    fn test_build_execution_command_both_routes_gpt_family_to_opencode() {
+        let config = ExecutionConfig::default();
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: Some("gpt-5.3-codex"),
+            thinking_level_override: Some("xhigh"),
+        };
+
+        let cmd = build_execution_command(AgentRuntime::Both, &options);
+        assert!(cmd.contains("opencode run"));
+        assert!(cmd.contains("--model openai/gpt-5.3-codex"));
+        assert!(cmd.contains("--variant max"));
+        assert!(!cmd.contains("claude -p"));
+    }
+
+    #[test]
+    fn test_build_execution_command_returns_actionable_error_for_incompatible_runtime() {
+        let mut config = ExecutionConfig::default();
+        config.model = "openai/gpt-5.3-codex".to_string();
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: None,
+            thinking_level_override: None,
+        };
+
+        let cmd = build_execution_command(AgentRuntime::Claude, &options);
+        assert!(cmd
+            .contains("Error: Model 'openai/gpt-5.3-codex' is incompatible with runtime 'claude'"));
+        assert!(cmd.contains("runtime to 'opencode'/'both'"));
+    }
+
+    #[test]
+    fn test_build_submit_command_both_routes_by_model_family() {
+        let claude_cmd = build_submit_command(
+            AgentRuntime::Both,
+            "anthropic/claude-3-7-sonnet-latest",
+            true,
+            Some("xhigh"),
+        );
+        assert!(claude_cmd.contains("claude -p"));
+        assert!(!claude_cmd.contains("opencode run"));
+
+        let opencode_cmd = build_submit_command(AgentRuntime::Both, "gpt-5.2", false, Some("med"));
+        assert!(opencode_cmd.contains("opencode run"));
+        assert!(opencode_cmd.contains("--model openai/gpt-5.2"));
+        assert!(opencode_cmd.contains("--variant medium"));
+        assert!(!opencode_cmd.contains("claude -p"));
+    }
+
+    #[test]
+    fn test_resolve_runtime_for_model_both_rejects_unknown_family() {
+        let error = resolve_runtime_for_model(AgentRuntime::Both, "llama3").unwrap_err();
+        assert_eq!(
+            error,
+            "Model 'llama3' is not recognized for runtime 'both'. Use Claude-family (opus/sonnet/haiku or anthropic/claude-*) or GPT-family (openai/gpt-* or gpt-*)."
+        );
+    }
+
+    #[test]
     fn test_effective_model_for_runtime_claude_ignores_raw_override() {
         let config = ExecutionConfig::default();
         let model = effective_model_for_runtime(AgentRuntime::Claude, &config, Some("custom-op"));
@@ -367,6 +536,25 @@ mod tests {
             Some("openai/gpt-5.2-codex"),
         );
         assert_eq!(model, "openai/gpt-5.2-codex");
+    }
+
+    #[test]
+    fn test_effective_model_for_runtime_both_normalizes_gpt_override() {
+        let config = ExecutionConfig::default();
+        let model = effective_model_for_runtime(AgentRuntime::Both, &config, Some("gpt-5.1-codex"));
+        assert_eq!(model, "openai/gpt-5.1-codex");
+    }
+
+    #[test]
+    fn test_effective_runtime_for_model_both_routes_from_model_family() {
+        let config = ExecutionConfig::default();
+        let runtime = effective_runtime_for_model(
+            AgentRuntime::Both,
+            &config,
+            Some("anthropic/claude-3-7-sonnet-latest"),
+        )
+        .unwrap();
+        assert_eq!(runtime, AgentRuntime::Claude);
     }
 
     #[test]
