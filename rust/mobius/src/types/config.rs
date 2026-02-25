@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use super::enums::{AgentRuntime, Backend, BuildSystem, JiraAuthMethod, Platform, ProjectType};
+use super::enums::{
+    AgentRuntime, Backend, BuildSystem, JiraAuthMethod, Platform, ProjectType, TaskType,
+};
 
 /// TUI dashboard configuration options
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -54,6 +56,36 @@ impl Default for VerificationConfig {
 }
 
 /// Execution configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskTypeModelRoutingConfig {
+    #[serde(default)]
+    pub frontend: Option<String>,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub general: String,
+}
+
+impl TaskTypeModelRoutingConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.general.trim().is_empty() {
+            return Err(
+                "execution.task_type_models.general is required and must not be empty".to_string(),
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn model_for(&self, task_type: TaskType) -> &str {
+        match task_type {
+            TaskType::Frontend => self.frontend.as_deref().unwrap_or(&self.general),
+            TaskType::Backend => self.backend.as_deref().unwrap_or(&self.general),
+            TaskType::General => &self.general,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionConfig {
     #[serde(default = "default_delay_seconds")]
@@ -83,6 +115,8 @@ pub struct ExecutionConfig {
     #[serde(default)]
     pub verification: Option<VerificationConfig>,
     #[serde(default)]
+    pub task_type_models: Option<TaskTypeModelRoutingConfig>,
+    #[serde(default)]
     pub disallowed_tools: Option<Vec<String>>,
 }
 
@@ -102,6 +136,7 @@ impl Default for ExecutionConfig {
             verification_timeout: Some(5000),
             tui: None,
             verification: Some(VerificationConfig::default()),
+            task_type_models: None,
             disallowed_tools: None,
         }
     }
@@ -349,6 +384,7 @@ mod tests {
         assert_eq!(config.execution.base_branch, Some("main".to_string()));
         assert_eq!(config.execution.max_retries, Some(2));
         assert_eq!(config.execution.verification_timeout, Some(5000));
+        assert!(config.execution.task_type_models.is_none());
 
         let verification = config.execution.verification.unwrap();
         assert_eq!(verification.coverage_threshold, 80);
@@ -379,6 +415,91 @@ mod tests {
         assert_eq!(parsed.runtime, config.runtime);
         assert_eq!(parsed.backend, config.backend);
         assert_eq!(parsed.execution.model, config.execution.model);
+    }
+
+    #[test]
+    fn test_task_type_model_routing_serde_roundtrip() {
+        let config = LoopConfig {
+            execution: ExecutionConfig {
+                task_type_models: Some(TaskTypeModelRoutingConfig {
+                    frontend: Some("sonnet".to_string()),
+                    backend: Some("gpt-4.1".to_string()),
+                    general: "opus".to_string(),
+                }),
+                ..ExecutionConfig::default()
+            },
+            ..LoopConfig::default()
+        };
+
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        let parsed: LoopConfig = serde_yaml::from_str(&yaml).unwrap();
+
+        let routing = parsed.execution.task_type_models.unwrap();
+        assert_eq!(routing.frontend.as_deref(), Some("sonnet"));
+        assert_eq!(routing.backend.as_deref(), Some("gpt-4.1"));
+        assert_eq!(routing.general, "opus");
+        assert_eq!(routing.model_for(TaskType::Frontend), "sonnet");
+        assert_eq!(routing.model_for(TaskType::Backend), "gpt-4.1");
+        assert_eq!(routing.model_for(TaskType::General), "opus");
+    }
+
+    #[test]
+    fn test_legacy_config_deserializes_without_task_type_models() {
+        let yaml = r#"
+runtime: claude
+backend: linear
+execution:
+  model: opus
+"#;
+
+        let parsed: LoopConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(parsed.execution.task_type_models.is_none());
+    }
+
+    #[test]
+    fn test_task_type_models_general_required_when_validating() {
+        let missing_general_yaml = r#"
+runtime: claude
+backend: linear
+execution:
+  model: opus
+  task_type_models:
+    frontend: sonnet
+    backend: gpt-4.1
+"#;
+
+        let parsed_missing: LoopConfig = serde_yaml::from_str(missing_general_yaml).unwrap();
+        let missing_general_err = parsed_missing
+            .execution
+            .task_type_models
+            .unwrap()
+            .validate()
+            .unwrap_err();
+        assert_eq!(
+            missing_general_err,
+            "execution.task_type_models.general is required and must not be empty"
+        );
+
+        let empty_general_yaml = r#"
+runtime: claude
+backend: linear
+execution:
+  model: opus
+  task_type_models:
+    general: ""
+"#;
+
+        let parsed_empty: LoopConfig = serde_yaml::from_str(empty_general_yaml).unwrap();
+        let empty_general_err = parsed_empty
+            .execution
+            .task_type_models
+            .unwrap()
+            .validate()
+            .unwrap_err();
+        assert_eq!(
+            empty_general_err,
+            "execution.task_type_models.general is required and must not be empty"
+        );
     }
 
     #[test]
