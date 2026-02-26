@@ -169,13 +169,14 @@ fn resolve_execution_target_for_task(
     config: &ExecutionConfig,
 ) -> Result<(AgentRuntime, String), String> {
     let model = select_model_for_task(task, config)?;
-    let runtime = runtime_adapter::resolve_runtime_for_model(configured_runtime, &model)
-        .map_err(|error| {
+    let runtime = runtime_adapter::resolve_runtime_for_model(configured_runtime, &model).map_err(
+        |error| {
             format!(
                 "Task '{}' (taskType: {}) failed runtime/model routing for model '{}': {}",
                 task.identifier, task.task_type, model, error
             )
-        })?;
+        },
+    )?;
 
     Ok((runtime, model))
 }
@@ -201,13 +202,13 @@ pub fn build_claude_command(
     model: &str,
     output_file_path: Option<&str>,
 ) -> String {
-    let model_flag = format!("--model {}", model);
+    let model_flag = format!("--model {}", shell_quote_single(model));
 
     let disallowed_tools_flag = config
         .disallowed_tools
         .as_ref()
         .filter(|tools| !tools.is_empty())
-        .map(|tools| format!("--disallowedTools '{}'", tools.join(",")))
+        .map(|tools| format!("--disallowedTools {}", shell_quote_single(&tools.join(","))))
         .unwrap_or_default();
 
     let env_prefix = context_file_path
@@ -235,6 +236,10 @@ pub fn build_claude_command(
         "cd \"{}\" && echo '{} {}' | {}claude -p --dangerously-skip-permissions --verbose --output-format stream-json {} | {}cclean",
         worktree_path, skill, subtask_identifier, env_prefix, flags, tee_segment
     )
+}
+
+fn shell_quote_single(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 /// Calculate the actual parallelism level given ready tasks and config.
@@ -316,24 +321,25 @@ pub async fn spawn_agent_in_pane(
 ) -> ExecutionResult {
     let start_time = Instant::now();
     let skill = select_skill_for_task(task);
-    let (resolved_runtime, model) = match resolve_execution_target_for_task(task, context.runtime, context.config) {
-        Ok(target) => target,
-        Err(error) => {
-            return ExecutionResult {
-                task_id: task.id.clone(),
-                identifier: task.identifier.clone(),
-                success: false,
-                status: ExecutionStatus::Error,
-                token_usage: None,
-                duration_ms: start_time.elapsed().as_millis() as u64,
-                error: Some(error),
-                pane_id: Some(pane.id.clone()),
-                raw_output: None,
-                input_tokens: None,
-                output_tokens: None,
-            };
-        }
-    };
+    let (resolved_runtime, model) =
+        match resolve_execution_target_for_task(task, context.runtime, context.config) {
+            Ok(target) => target,
+            Err(error) => {
+                return ExecutionResult {
+                    task_id: task.id.clone(),
+                    identifier: task.identifier.clone(),
+                    success: false,
+                    status: ExecutionStatus::Error,
+                    token_usage: None,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    error: Some(error),
+                    pane_id: Some(pane.id.clone()),
+                    raw_output: None,
+                    input_tokens: None,
+                    output_tokens: None,
+                };
+            }
+        };
 
     let output_file = if resolved_runtime == AgentRuntime::Claude {
         context
@@ -468,8 +474,9 @@ async fn spawn_agents(
         };
 
         let skill = select_skill_for_task(task);
-        let (resolved_runtime, model) = resolve_execution_target_for_task(task, context.runtime, context.config)
-            .map_err(anyhow::Error::msg)?;
+        let (resolved_runtime, model) =
+            resolve_execution_target_for_task(task, context.runtime, context.config)
+                .map_err(anyhow::Error::msg)?;
 
         let output_file = if resolved_runtime == AgentRuntime::Claude {
             context
@@ -808,7 +815,7 @@ mod tests {
         assert!(cmd.contains("echo '/execute MOB-101'"));
         assert!(cmd.contains("claude -p --dangerously-skip-permissions"));
         assert!(cmd.contains("--output-format stream-json"));
-        assert!(cmd.contains("--model opus"));
+        assert!(cmd.contains("--model 'opus'"));
         assert!(cmd.contains("| cclean"));
         // No tee when output_file_path is None
         assert!(!cmd.contains("tee"));
@@ -864,8 +871,8 @@ mod tests {
         let cmd = build_runtime_command(AgentRuntime::Opencode, &options);
 
         assert!(cmd.contains("Use the execute skill for sub-task MOB-101"));
-        assert!(cmd.contains("--model openai/gpt-5.3-codex"));
-        assert!(cmd.contains("--variant max"));
+        assert!(cmd.contains("--model 'openai/gpt-5.3-codex'"));
+        assert!(cmd.contains("--variant 'max'"));
         assert!(!cmd.contains("| cclean"));
         assert!(!cmd.contains("echo '/execute MOB-101'"));
     }
@@ -885,8 +892,24 @@ mod tests {
         let cmd = build_runtime_command(AgentRuntime::Claude, &options);
 
         assert!(cmd.contains("claude -p"));
-        assert!(cmd.contains("--model opus"));
+        assert!(cmd.contains("--model 'opus'"));
         assert!(!cmd.contains("--model custom-model"));
+    }
+
+    #[test]
+    fn test_build_claude_command_quotes_model_argument() {
+        let config = ExecutionConfig::default();
+        let cmd = build_claude_command(
+            "MOB-101",
+            "/execute",
+            "/path/to/worktree",
+            &config,
+            None,
+            "claude-sonnet-4-5; touch /tmp/pwn",
+            None,
+        );
+
+        assert!(cmd.contains("--model 'claude-sonnet-4-5; touch /tmp/pwn'"));
     }
 
     #[test]
@@ -1305,15 +1328,7 @@ mod tests {
         let mut config = ExecutionConfig::default();
         config.disallowed_tools = Some(vec![]);
 
-        let cmd = build_claude_command(
-            "MOB-101",
-            "/execute",
-            "/path",
-            &config,
-            None,
-            "opus",
-            None,
-        );
+        let cmd = build_claude_command("MOB-101", "/execute", "/path", &config, None, "opus", None);
         // Empty vec should be filtered out, no --disallowedTools flag
         assert!(!cmd.contains("--disallowedTools"));
     }

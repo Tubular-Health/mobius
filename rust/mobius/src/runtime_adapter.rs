@@ -88,6 +88,10 @@ fn shell_escape_double_quoted(value: &str) -> String {
     escaped
 }
 
+fn shell_quote_single(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
 fn normalize_opencode_model(raw_model: &str) -> String {
     let trimmed = raw_model.trim();
     if trimmed.is_empty() {
@@ -239,13 +243,13 @@ pub fn build_execution_command(runtime: AgentRuntime, options: &ExecutionCommand
 
     match resolved_runtime {
         AgentRuntime::Claude => {
-            let model_flag = format!("--model {}", model);
+            let model_flag = format!("--model {}", shell_quote_single(&model));
             let disallowed_tools_flag = options
                 .config
                 .disallowed_tools
                 .as_ref()
                 .filter(|tools| !tools.is_empty())
-                .map(|tools| format!("--disallowedTools '{}'", tools.join(",")))
+                .map(|tools| format!("--disallowedTools {}", shell_quote_single(&tools.join(","))))
                 .unwrap_or_default();
 
             let mut parts = vec![model_flag];
@@ -266,16 +270,16 @@ pub fn build_execution_command(runtime: AgentRuntime, options: &ExecutionCommand
         AgentRuntime::Opencode => {
             let prompt = build_opencode_skill_prompt(options.skill, options.subtask_identifier);
             format!(
-                "cd \"{}\" && {}opencode run '{}' --model {}{}",
+                "cd \"{}\" && {}opencode run {} --model {}{}",
                 options.worktree_path,
                 env_prefix,
-                prompt,
-                model,
+                shell_quote_single(&prompt),
+                shell_quote_single(&model),
                 effective_thinking_level_for_runtime(
                     AgentRuntime::Opencode,
                     options.thinking_level_override,
                 )
-                .map(|level| format!(" --variant {}", level))
+                .map(|level| format!(" --variant {}", shell_quote_single(&level)))
                 .unwrap_or_default(),
             )
         }
@@ -308,7 +312,8 @@ pub fn build_submit_command(
             };
             let base = format!(
                 "claude -p --dangerously-skip-permissions --verbose {} --model {}",
-                output_format, model
+                output_format,
+                shell_quote_single(model)
             );
 
             if use_cclean {
@@ -319,9 +324,9 @@ pub fn build_submit_command(
         }
         AgentRuntime::Opencode => format!(
             "opencode run --model {}{}",
-            normalize_opencode_model(model),
+            shell_quote_single(&normalize_opencode_model(model)),
             effective_thinking_level_for_runtime(AgentRuntime::Opencode, thinking_level_override)
-                .map(|level| format!(" --variant {}", level))
+                .map(|level| format!(" --variant {}", shell_quote_single(&level)))
                 .unwrap_or_default(),
         ),
         AgentRuntime::Both => unreachable!("runtime resolution returns concrete runtime"),
@@ -368,7 +373,7 @@ mod tests {
         assert!(cmd.contains(
             "opencode run 'Use the execute skill for sub-task MOB-101. First call the skill tool with name execute.'"
         ));
-        assert!(cmd.contains("--model openai/gpt-5.3-codex"));
+        assert!(cmd.contains("--model 'openai/gpt-5.3-codex'"));
         assert!(!cmd.contains("claude -p"));
         assert!(!cmd.contains("| cclean"));
         assert!(!cmd.contains("echo '/execute MOB-101'"));
@@ -414,7 +419,7 @@ mod tests {
     fn test_build_submit_command_claude() {
         let cmd = build_submit_command(AgentRuntime::Claude, "opus", true, Some("xhigh"));
         assert!(cmd.contains("claude -p"));
-        assert!(cmd.contains("--model opus"));
+        assert!(cmd.contains("--model 'opus'"));
         assert!(cmd.contains("| cclean"));
         assert!(!cmd.contains("--variant"));
     }
@@ -423,8 +428,8 @@ mod tests {
     fn test_build_submit_command_opencode() {
         let cmd = build_submit_command(AgentRuntime::Opencode, "opus", true, Some("xhigh"));
         assert!(cmd.contains("opencode run"));
-        assert!(cmd.contains("--model openai/gpt-5.3-codex"));
-        assert!(cmd.contains("--variant max"));
+        assert!(cmd.contains("--model 'openai/gpt-5.3-codex'"));
+        assert!(cmd.contains("--variant 'max'"));
         assert!(!cmd.contains("claude -p"));
         assert!(!cmd.contains("| cclean"));
     }
@@ -463,9 +468,44 @@ mod tests {
 
         let cmd = build_execution_command(AgentRuntime::Both, &options);
         assert!(cmd.contains("opencode run"));
-        assert!(cmd.contains("--model openai/gpt-5.3-codex"));
-        assert!(cmd.contains("--variant max"));
+        assert!(cmd.contains("--model 'openai/gpt-5.3-codex'"));
+        assert!(cmd.contains("--variant 'max'"));
         assert!(!cmd.contains("claude -p"));
+    }
+
+    #[test]
+    fn test_build_execution_command_claude_quotes_model_argument() {
+        let config = ExecutionConfig {
+            model: "claude-sonnet-4-5; touch /tmp/pwn".to_string(),
+            ..ExecutionConfig::default()
+        };
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: None,
+            thinking_level_override: None,
+        };
+        let cmd = build_execution_command(AgentRuntime::Claude, &options);
+        assert!(cmd.contains("--model 'claude-sonnet-4-5; touch /tmp/pwn'"));
+    }
+
+    #[test]
+    fn test_build_execution_command_opencode_quotes_model_argument() {
+        let config = ExecutionConfig::default();
+        let options = ExecutionCommand {
+            subtask_identifier: "MOB-101",
+            skill: "/execute",
+            worktree_path: "/tmp/worktree",
+            config: &config,
+            context_file_path: None,
+            model_override: Some("openai/gpt-5.3-codex; touch /tmp/pwn"),
+            thinking_level_override: None,
+        };
+        let cmd = build_execution_command(AgentRuntime::Opencode, &options);
+        assert!(cmd.contains("--model 'openai/gpt-5.3-codex; touch /tmp/pwn'"));
     }
 
     #[test]
@@ -519,8 +559,8 @@ mod tests {
 
         let opencode_cmd = build_submit_command(AgentRuntime::Both, "gpt-5.2", false, Some("med"));
         assert!(opencode_cmd.contains("opencode run"));
-        assert!(opencode_cmd.contains("--model openai/gpt-5.2"));
-        assert!(opencode_cmd.contains("--variant medium"));
+        assert!(opencode_cmd.contains("--model 'openai/gpt-5.2'"));
+        assert!(opencode_cmd.contains("--variant 'medium'"));
         assert!(!opencode_cmd.contains("claude -p"));
     }
 
