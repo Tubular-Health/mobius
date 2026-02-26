@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.2](https://github.com/Tubular-Health/mobius/compare/v1.11.1...v1.11.2) (2026-02-26)
+
+
+### Bug Fixes
+
+* **tui:** center header width and clear stale frame on resize ([#90](https://github.com/Tubular-Health/mobius/issues/90)) ([ca168bc](https://github.com/Tubular-Health/mobius/commit/ca168bc25a402d9af69ca5038762dd145f0859b8))
+
 ## [1.11.1](https://github.com/Tubular-Health/mobius/compare/v1.11.0...v1.11.1) (2026-02-22)
 
 
