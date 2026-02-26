@@ -11,7 +11,6 @@ use crate::tmux::{
     capture_pane_content, create_agent_pane, interrupt_pane, kill_pane, layout_panes, run_in_pane,
     set_pane_title, TmuxPane, TmuxSession,
 };
-use crate::types::enums::Model;
 use crate::types::AgentRuntime;
 use crate::types::{ExecutionConfig, SubTask};
 
@@ -125,15 +124,61 @@ pub fn select_skill_for_task(task: &SubTask) -> &str {
     }
 }
 
-/// Select the model for a task based on its scoring data.
+/// Select the model for a task based on task type routing.
 ///
-/// If the task has scoring with a recommended model, use that.
-/// Otherwise fall back to the global config model.
-pub fn select_model_for_task(task: &SubTask, config_model: Model) -> Model {
-    task.scoring
-        .as_ref()
-        .map(|s| s.recommended_model)
-        .unwrap_or(config_model)
+/// For non-verification tasks, prefer `execution.task_type_models` when configured.
+/// If task type routing is not configured, fall back to scoring recommendation and
+/// finally to `execution.model` for backward compatibility.
+pub fn select_model_for_task(task: &SubTask, config: &ExecutionConfig) -> Result<String, String> {
+    if select_skill_for_task(task) == VERIFICATION_SKILL {
+        let model = config.model.trim();
+        if model.is_empty() {
+            return Err(
+                "execution.model must not be empty for verification gate tasks".to_string(),
+            );
+        }
+        return Ok(model.to_string());
+    }
+
+    if let Some(task_type_models) = config.task_type_models.as_ref() {
+        let model = task_type_models.model_for(task.task_type).trim();
+        if model.is_empty() {
+            return Err(format!(
+                "Task '{}' resolved an empty model for taskType '{}' from execution.task_type_models",
+                task.identifier, task.task_type
+            ));
+        }
+        return Ok(model.to_string());
+    }
+
+    if let Some(scoring) = task.scoring.as_ref() {
+        return Ok(scoring.recommended_model.to_string());
+    }
+
+    let model = config.model.trim();
+    if model.is_empty() {
+        return Err("execution.model must not be empty".to_string());
+    }
+
+    Ok(model.to_string())
+}
+
+fn resolve_execution_target_for_task(
+    task: &SubTask,
+    configured_runtime: AgentRuntime,
+    config: &ExecutionConfig,
+) -> Result<(AgentRuntime, String), String> {
+    let model = select_model_for_task(task, config)?;
+    let runtime = runtime_adapter::resolve_runtime_for_model(configured_runtime, &model).map_err(
+        |error| {
+            format!(
+                "Task '{}' (taskType: {}) failed runtime/model routing for model '{}': {}",
+                task.identifier, task.task_type, model, error
+            )
+        },
+    )?;
+
+    Ok((runtime, model))
 }
 
 /// Build a runtime-specific command string for executing a task in a pane.
@@ -154,16 +199,16 @@ pub fn build_claude_command(
     worktree_path: &str,
     config: &ExecutionConfig,
     context_file_path: Option<&str>,
-    model: Model,
+    model: &str,
     output_file_path: Option<&str>,
 ) -> String {
-    let model_flag = format!("--model {}", model);
+    let model_flag = format!("--model {}", shell_quote_single(model));
 
     let disallowed_tools_flag = config
         .disallowed_tools
         .as_ref()
         .filter(|tools| !tools.is_empty())
-        .map(|tools| format!("--disallowedTools '{}'", tools.join(",")))
+        .map(|tools| format!("--disallowedTools {}", shell_quote_single(&tools.join(","))))
         .unwrap_or_default();
 
     let env_prefix = context_file_path
@@ -191,6 +236,10 @@ pub fn build_claude_command(
         "cd \"{}\" && echo '{} {}' | {}claude -p --dangerously-skip-permissions --verbose --output-format stream-json {} | {}cclean",
         worktree_path, skill, subtask_identifier, env_prefix, flags, tee_segment
     )
+}
+
+fn shell_quote_single(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
 
 /// Calculate the actual parallelism level given ready tasks and config.
@@ -272,7 +321,27 @@ pub async fn spawn_agent_in_pane(
 ) -> ExecutionResult {
     let start_time = Instant::now();
     let skill = select_skill_for_task(task);
-    let output_file = if context.runtime == AgentRuntime::Claude {
+    let (resolved_runtime, model) =
+        match resolve_execution_target_for_task(task, context.runtime, context.config) {
+            Ok(target) => target,
+            Err(error) => {
+                return ExecutionResult {
+                    task_id: task.id.clone(),
+                    identifier: task.identifier.clone(),
+                    success: false,
+                    status: ExecutionStatus::Error,
+                    token_usage: None,
+                    duration_ms: start_time.elapsed().as_millis() as u64,
+                    error: Some(error),
+                    pane_id: Some(pane.id.clone()),
+                    raw_output: None,
+                    input_tokens: None,
+                    output_tokens: None,
+                };
+            }
+        };
+
+    let output_file = if resolved_runtime == AgentRuntime::Claude {
         context
             .output_dir
             .map(|dir| dir.join(format!("{}.jsonl", task.identifier)))
@@ -283,16 +352,14 @@ pub async fn spawn_agent_in_pane(
         .as_ref()
         .map(|p| p.to_string_lossy().to_string());
 
-    let command = if context.runtime == AgentRuntime::Claude {
-        let default_model = context.config.model.parse::<Model>().unwrap_or_default();
-        let model = select_model_for_task(task, default_model);
+    let command = if resolved_runtime == AgentRuntime::Claude {
         build_claude_command(
             &task.identifier,
             skill,
             context.worktree_path,
             context.config,
             context.context_file_path,
-            model,
+            &model,
             output_file_str.as_deref(),
         )
     } else {
@@ -302,10 +369,10 @@ pub async fn spawn_agent_in_pane(
             worktree_path: context.worktree_path,
             config: context.config,
             context_file_path: context.context_file_path,
-            model_override: context.model_override,
+            model_override: Some(model.as_str()),
             thinking_level_override: context.thinking_level_override,
         };
-        build_runtime_command(context.runtime, &options)
+        build_runtime_command(resolved_runtime, &options)
     };
 
     run_in_pane(&pane.id, &command, true).await;
@@ -407,7 +474,11 @@ async fn spawn_agents(
         };
 
         let skill = select_skill_for_task(task);
-        let output_file = if context.runtime == AgentRuntime::Claude {
+        let (resolved_runtime, model) =
+            resolve_execution_target_for_task(task, context.runtime, context.config)
+                .map_err(anyhow::Error::msg)?;
+
+        let output_file = if resolved_runtime == AgentRuntime::Claude {
             context
                 .output_dir
                 .map(|dir| dir.join(format!("{}.jsonl", task.identifier)))
@@ -417,16 +488,14 @@ async fn spawn_agents(
         let output_file_str = output_file
             .as_ref()
             .map(|p| p.to_string_lossy().to_string());
-        let command = if context.runtime == AgentRuntime::Claude {
-            let default_model = context.config.model.parse::<Model>().unwrap_or_default();
-            let model = select_model_for_task(task, default_model);
+        let command = if resolved_runtime == AgentRuntime::Claude {
             build_claude_command(
                 &task.identifier,
                 skill,
                 context.worktree_path,
                 context.config,
                 context.context_file_path,
-                model,
+                &model,
                 output_file_str.as_deref(),
             )
         } else {
@@ -436,10 +505,10 @@ async fn spawn_agents(
                 worktree_path: context.worktree_path,
                 config: context.config,
                 context_file_path: context.context_file_path,
-                model_override: context.model_override,
+                model_override: Some(model.as_str()),
                 thinking_level_override: context.thinking_level_override,
             };
-            build_runtime_command(context.runtime, &options)
+            build_runtime_command(resolved_runtime, &options)
         };
 
         run_in_pane(&pane.id, &command, true).await;
@@ -687,6 +756,7 @@ fn parse_token_usage(content: &str) -> Option<TokenUsage> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::enums::TaskType;
     use crate::types::TaskStatus;
 
     fn make_task(id: &str, identifier: &str, title: &str) -> SubTask {
@@ -698,6 +768,7 @@ mod tests {
             blocked_by: vec![],
             blocks: vec![],
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             scoring: None,
         }
     }
@@ -736,7 +807,7 @@ mod tests {
             "/path/to/worktree",
             &config,
             None,
-            Model::Opus,
+            "opus",
             None,
         );
 
@@ -744,7 +815,7 @@ mod tests {
         assert!(cmd.contains("echo '/execute MOB-101'"));
         assert!(cmd.contains("claude -p --dangerously-skip-permissions"));
         assert!(cmd.contains("--output-format stream-json"));
-        assert!(cmd.contains("--model opus"));
+        assert!(cmd.contains("--model 'opus'"));
         assert!(cmd.contains("| cclean"));
         // No tee when output_file_path is None
         assert!(!cmd.contains("tee"));
@@ -759,7 +830,7 @@ mod tests {
             "/path/to/worktree",
             &config,
             None,
-            Model::Opus,
+            "opus",
             Some("/tmp/output/MOB-101.jsonl"),
         );
 
@@ -777,7 +848,7 @@ mod tests {
             "/path/to/worktree",
             &config,
             Some("/tmp/context.json"),
-            Model::Opus,
+            "opus",
             None,
         );
 
@@ -800,8 +871,8 @@ mod tests {
         let cmd = build_runtime_command(AgentRuntime::Opencode, &options);
 
         assert!(cmd.contains("Use the execute skill for sub-task MOB-101"));
-        assert!(cmd.contains("--model openai/gpt-5.3-codex"));
-        assert!(cmd.contains("--variant max"));
+        assert!(cmd.contains("--model 'openai/gpt-5.3-codex'"));
+        assert!(cmd.contains("--variant 'max'"));
         assert!(!cmd.contains("| cclean"));
         assert!(!cmd.contains("echo '/execute MOB-101'"));
     }
@@ -821,8 +892,24 @@ mod tests {
         let cmd = build_runtime_command(AgentRuntime::Claude, &options);
 
         assert!(cmd.contains("claude -p"));
-        assert!(cmd.contains("--model opus"));
+        assert!(cmd.contains("--model 'opus'"));
         assert!(!cmd.contains("--model custom-model"));
+    }
+
+    #[test]
+    fn test_build_claude_command_quotes_model_argument() {
+        let config = ExecutionConfig::default();
+        let cmd = build_claude_command(
+            "MOB-101",
+            "/execute",
+            "/path/to/worktree",
+            &config,
+            None,
+            "claude-sonnet-4-5; touch /tmp/pwn",
+            None,
+        );
+
+        assert!(cmd.contains("--model 'claude-sonnet-4-5; touch /tmp/pwn'"));
     }
 
     #[test]
@@ -836,7 +923,7 @@ mod tests {
             "/path/to/worktree",
             &config,
             None,
-            Model::Opus,
+            "opus",
             None,
         );
 
@@ -854,7 +941,7 @@ mod tests {
             "/path/to/worktree",
             &config,
             None,
-            Model::Opus,
+            "opus",
             None,
         );
 
@@ -1212,7 +1299,7 @@ mod tests {
             "/path/to/my worktree/project",
             &config,
             None,
-            Model::Opus,
+            "opus",
             None,
         );
         // Path with spaces should be properly quoted in the cd command
@@ -1229,7 +1316,7 @@ mod tests {
             "/path/to/project-v2.0_(beta)",
             &config,
             None,
-            Model::Opus,
+            "opus",
             None,
         );
         assert!(cmd.contains("cd \"/path/to/project-v2.0_(beta)\""));
@@ -1241,15 +1328,7 @@ mod tests {
         let mut config = ExecutionConfig::default();
         config.disallowed_tools = Some(vec![]);
 
-        let cmd = build_claude_command(
-            "MOB-101",
-            "/execute",
-            "/path",
-            &config,
-            None,
-            Model::Opus,
-            None,
-        );
+        let cmd = build_claude_command("MOB-101", "/execute", "/path", &config, None, "opus", None);
         // Empty vec should be filtered out, no --disallowedTools flag
         assert!(!cmd.contains("--disallowedTools"));
     }
@@ -1263,7 +1342,7 @@ mod tests {
             "/path",
             &config,
             Some("/tmp/my context/file.json"),
-            Model::Opus,
+            "opus",
             None,
         );
         // Context file path should be in quotes
@@ -1574,47 +1653,100 @@ mod tests {
         assert!(agg.failed_tasks[1].contains("Agent timed out"));
     }
 
-    // --- select_model_for_task Tests ---
+    // --- task model + runtime routing tests ---
 
     #[test]
-    fn test_select_model_uses_scoring_when_present() {
+    fn test_select_model_uses_task_type_routing_for_non_vg_tasks() {
+        let mut config = ExecutionConfig::default();
+        config.model = "opus".to_string();
+        config.task_type_models = Some(crate::types::config::TaskTypeModelRoutingConfig {
+            frontend: Some("sonnet".to_string()),
+            backend: Some("openai/gpt-5.3-codex".to_string()),
+            general: "opus".to_string(),
+        });
+
+        let mut frontend = make_task("1", "task-frontend", "Frontend task");
+        frontend.task_type = TaskType::Frontend;
+        let mut backend = make_task("2", "task-backend", "Backend task");
+        backend.task_type = TaskType::Backend;
+        let general = make_task("3", "task-general", "General task");
+
+        assert_eq!(select_model_for_task(&frontend, &config).unwrap(), "sonnet");
+        assert_eq!(
+            select_model_for_task(&backend, &config).unwrap(),
+            "openai/gpt-5.3-codex"
+        );
+        assert_eq!(select_model_for_task(&general, &config).unwrap(), "opus");
+    }
+
+    #[test]
+    fn test_select_model_task_type_routing_takes_precedence_over_scoring() {
         use crate::types::task_graph::TaskScoring;
 
+        let mut config = ExecutionConfig::default();
+        config.task_type_models = Some(crate::types::config::TaskTypeModelRoutingConfig {
+            frontend: Some("sonnet".to_string()),
+            backend: None,
+            general: "opus".to_string(),
+        });
+
         let mut task = make_task("1", "MOB-101", "Task with scoring");
+        task.task_type = TaskType::Frontend;
         task.scoring = Some(TaskScoring {
             complexity: 3,
             risk: 1,
-            recommended_model: Model::Haiku,
+            recommended_model: crate::types::enums::Model::Haiku,
             rationale: "Simple task".to_string(),
         });
 
-        let model = select_model_for_task(&task, Model::Opus);
-        assert_eq!(model, Model::Haiku);
+        // When task type routing is configured, scoring is no longer the primary source.
+        let model = select_model_for_task(&task, &config).unwrap();
+        assert_eq!(model, "sonnet");
     }
 
     #[test]
-    fn test_select_model_falls_back_to_config_when_no_scoring() {
-        let task = make_task("1", "MOB-101", "Task without scoring");
-        assert!(task.scoring.is_none());
+    fn test_resolve_execution_target_for_task_supports_mixed_runtime_batches() {
+        let mut config = ExecutionConfig::default();
+        config.task_type_models = Some(crate::types::config::TaskTypeModelRoutingConfig {
+            frontend: Some("sonnet".to_string()),
+            backend: Some("gpt-5.3-codex".to_string()),
+            general: "opus".to_string(),
+        });
 
-        let model = select_model_for_task(&task, Model::Sonnet);
-        assert_eq!(model, Model::Sonnet);
+        let mut frontend = make_task("1", "task-frontend", "Frontend task");
+        frontend.task_type = TaskType::Frontend;
+        let mut backend = make_task("2", "task-backend", "Backend task");
+        backend.task_type = TaskType::Backend;
+
+        let frontend_target =
+            resolve_execution_target_for_task(&frontend, AgentRuntime::Both, &config).unwrap();
+        assert_eq!(frontend_target.0, AgentRuntime::Claude);
+        assert_eq!(frontend_target.1, "sonnet");
+
+        let backend_target =
+            resolve_execution_target_for_task(&backend, AgentRuntime::Both, &config).unwrap();
+        assert_eq!(backend_target.0, AgentRuntime::Opencode);
+        assert_eq!(backend_target.1, "gpt-5.3-codex");
     }
 
     #[test]
-    fn test_select_model_different_scoring_models() {
-        use crate::types::task_graph::TaskScoring;
+    fn test_resolve_execution_target_for_task_returns_actionable_routing_error() {
+        let mut config = ExecutionConfig::default();
+        config.task_type_models = Some(crate::types::config::TaskTypeModelRoutingConfig {
+            frontend: Some("llama3".to_string()),
+            backend: None,
+            general: "opus".to_string(),
+        });
 
-        let models = [Model::Haiku, Model::Sonnet, Model::Opus];
-        for expected_model in models {
-            let mut task = make_task("1", "MOB-101", "Task");
-            task.scoring = Some(TaskScoring {
-                complexity: 5,
-                risk: 3,
-                recommended_model: expected_model,
-                rationale: "Test".to_string(),
-            });
-            assert_eq!(select_model_for_task(&task, Model::Opus), expected_model);
-        }
+        let mut task = make_task("1", "task-frontend", "Frontend task");
+        task.task_type = TaskType::Frontend;
+
+        let error = resolve_execution_target_for_task(&task, AgentRuntime::Both, &config)
+            .expect_err("should fail for unknown model family");
+
+        assert!(error.contains("task-frontend"));
+        assert!(error.contains("taskType: frontend"));
+        assert!(error.contains("model 'llama3'"));
+        assert!(error.contains("runtime 'both'"));
     }
 }

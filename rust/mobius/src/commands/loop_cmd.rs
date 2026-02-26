@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::Context as AnyhowContext;
 
-use crate::config::loader::read_config_with_env;
+use crate::config::loader::{read_config_with_env, validate_config};
 use crate::config::paths::resolve_paths;
 use crate::context::{
     add_runtime_active_task, clear_all_runtime_active_tasks, complete_runtime_task,
@@ -35,6 +35,7 @@ use crate::tracker::{
 };
 use crate::tree_renderer::render_full_tree_output;
 use crate::types::context::RuntimeActiveTask;
+use crate::types::config::{ExecutionConfig, LoopConfig};
 use crate::types::enums::{AgentRuntime, Backend, Model, SessionStatus, TaskStatus};
 use crate::types::task_graph::ParentIssue;
 use crate::types::task_graph::{
@@ -55,6 +56,30 @@ pub struct LoopOptions<'a> {
     pub fresh: bool,
     pub no_submit: bool,
     pub no_tui: bool,
+}
+
+fn validate_loop_preflight_config(config: &LoopConfig) -> Result<(), Vec<String>> {
+    let validation = validate_config(config);
+    if validation.valid {
+        Ok(())
+    } else {
+        Err(validation.errors)
+    }
+}
+
+fn runtime_state_model_label(
+    task: &SubTask,
+    configured_runtime: AgentRuntime,
+    execution_config: &ExecutionConfig,
+) -> Result<String, String> {
+    let model = select_model_for_task(task, execution_config)?;
+    let resolved_runtime = runtime_adapter::resolve_runtime_for_model(configured_runtime, &model)?;
+
+    if configured_runtime == AgentRuntime::Both {
+        Ok(format!("{} ({})", model, resolved_runtime))
+    } else {
+        Ok(model)
+    }
 }
 
 pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
@@ -140,11 +165,24 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
     } else {
         None
     };
-    let runtime_model_label = runtime_adapter::effective_model_for_runtime(
-        config.runtime,
-        &execution_config,
-        execution_model_override,
-    );
+
+    let mut preflight_config = config.clone();
+    preflight_config.execution = execution_config.clone();
+    if let Err(errors) = validate_loop_preflight_config(&preflight_config) {
+        eprintln!(
+            "{}",
+            "Error: Loop preflight failed due to invalid runtime/model routing configuration."
+                .red()
+        );
+        for error in errors {
+            eprintln!("  - {}", error.red());
+        }
+        eprintln!(
+            "{}",
+            "Fix your config (or CLI overrides) and rerun `mobius loop`.".dimmed()
+        );
+        std::process::exit(1);
+    }
 
     let max_iterations = max_iterations_override.unwrap_or(config.execution.max_iterations);
 
@@ -406,15 +444,10 @@ pub fn run(task_id: &str, opts: &LoopOptions<'_>) -> anyhow::Result<()> {
                     pane: String::new(),
                     started_at: chrono::Utc::now().to_rfc3339(),
                     worktree: Some(worktree_info.path.display().to_string()),
-                    model: Some(if config.runtime == AgentRuntime::Claude {
-                        select_model_for_task(
-                            task,
-                            execution_config.model.parse::<Model>().unwrap_or_default(),
-                        )
-                        .to_string()
-                    } else {
-                        runtime_model_label.clone()
-                    }),
+                    model: Some(
+                        runtime_state_model_label(task, config.runtime, &execution_config)
+                            .unwrap_or_else(|_| execution_config.model.clone()),
+                    ),
                     input_tokens: None,
                     output_tokens: None,
                 },
@@ -917,4 +950,61 @@ fn validate_task_id(task_id: &str, backend: &Backend) -> bool {
         Backend::Local => regex::Regex::new(r"^(LOC-\d+|task-\d+)$").unwrap(),
     };
     pattern.is_match(task_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::config::TaskTypeModelRoutingConfig;
+    use crate::types::enums::TaskType;
+
+    fn make_task(identifier: &str, task_type: TaskType) -> SubTask {
+        SubTask {
+            id: identifier.to_string(),
+            identifier: identifier.to_string(),
+            title: format!("Task {identifier}"),
+            status: TaskStatus::Ready,
+            blocked_by: vec![],
+            blocks: vec![],
+            git_branch_name: String::new(),
+            task_type,
+            scoring: None,
+        }
+    }
+
+    #[test]
+    fn validate_loop_preflight_config_rejects_incompatible_runtime_model() {
+        let mut config = LoopConfig::default();
+        config.runtime = AgentRuntime::Claude;
+        config.execution.model = "openai/gpt-5.3-codex".to_string();
+
+        let result = validate_loop_preflight_config(&config);
+
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|error| {
+            error.contains("execution.model") && error.contains("incompatible with runtime 'claude'")
+        }));
+    }
+
+    #[test]
+    fn runtime_state_model_label_reflects_task_level_mixed_runtime_routing() {
+        let mut config = ExecutionConfig::default();
+        config.task_type_models = Some(TaskTypeModelRoutingConfig {
+            frontend: Some("sonnet".to_string()),
+            backend: Some("openai/gpt-5.3-codex".to_string()),
+            general: "haiku".to_string(),
+        });
+
+        let frontend_task = make_task("task-frontend", TaskType::Frontend);
+        let backend_task = make_task("task-backend", TaskType::Backend);
+
+        let frontend_label =
+            runtime_state_model_label(&frontend_task, AgentRuntime::Both, &config).unwrap();
+        let backend_label =
+            runtime_state_model_label(&backend_task, AgentRuntime::Both, &config).unwrap();
+
+        assert_eq!(frontend_label, "sonnet (claude)");
+        assert_eq!(backend_label, "openai/gpt-5.3-codex (opencode)");
+    }
 }

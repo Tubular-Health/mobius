@@ -303,6 +303,7 @@ fn extract_task_id(value: &serde_json::Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::enums::TaskType;
     use crate::types::task_graph::TaskGraph;
 
     fn make_graph(total: usize) -> TaskGraph {
@@ -319,6 +320,7 @@ mod tests {
                     blocked_by: Vec::new(),
                     blocks: Vec::new(),
                     git_branch_name: String::new(),
+                    task_type: TaskType::General,
                     scoring: None,
                 },
             );

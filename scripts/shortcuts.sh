@@ -7,6 +7,10 @@
 # Usage:
 #   source scripts/shortcuts.sh   # or add to your .bashrc/.zshrc
 #
+# Runtime overrides:
+#   MOBIUS_RUNTIME=claude|opencode|both
+#   MOBIUS_BOTH_PROMPT_RUNTIME=claude|opencode  # default prompt runtime when runtime=both
+#
 # Commands:
 #   md          - Define a new issue (launches runtime /define)
 #   mr          - Refine the current issue into sub-tasks
@@ -51,7 +55,7 @@ runtime_from_config() {
     if [[ "$line" =~ ^[[:space:]]*runtime:[[:space:]]*([[:alnum:]_-]+)[[:space:]]*$ ]]; then
       value="$(to_lower "${BASH_REMATCH[1]}")"
       case "$value" in
-        claude|opencode)
+        claude|opencode|both)
           printf '%s\n' "$value"
           return 0
           ;;
@@ -93,7 +97,7 @@ resolve_selected_runtime() {
   if [ -n "${MOBIUS_RUNTIME:-}" ]; then
     runtime="$(to_lower "$MOBIUS_RUNTIME")"
     case "$runtime" in
-      claude|opencode)
+      claude|opencode|both)
         printf '%s\n' "$runtime"
         return
         ;;
@@ -121,6 +125,20 @@ resolve_selected_runtime() {
   fi
 
   printf '%s\n' "$runtime"
+}
+
+resolve_both_prompt_runtime() {
+  local runtime
+
+  runtime="$(to_lower "${MOBIUS_BOTH_PROMPT_RUNTIME:-claude}")"
+  case "$runtime" in
+    claude|opencode)
+      printf '%s\n' "$runtime"
+      ;;
+    *)
+      printf '%s\n' "claude"
+      ;;
+  esac
 }
 
 resolve_opencode_model() {
@@ -170,6 +188,13 @@ run_runtime_prompt() {
       local model
       model="$(resolve_opencode_model)"
       opencode run "$prompt" --model "$model"
+      ;;
+    both)
+      # Interactive shortcuts run a single prompt, so choose a stable runtime
+      # when config runtime is "both". Override via MOBIUS_BOTH_PROMPT_RUNTIME.
+      local prompt_runtime
+      prompt_runtime="$(resolve_both_prompt_runtime)"
+      run_runtime_prompt "$prompt_runtime" "$prompt"
       ;;
     *)
       printf 'Unknown runtime: %s\n' "$runtime" >&2

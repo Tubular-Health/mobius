@@ -7,7 +7,10 @@
 # Issue tracker backend: linear | jira | local
 backend: linear
 
-# Agent runtime: claude | opencode
+# Agent runtime: claude | opencode | both
+# - claude: all tasks execute via Claude runtime
+# - opencode: all tasks execute via OpenCode runtime
+# - both: runtime is selected per model family (Claude-family -> claude, GPT-family -> opencode)
 runtime: opencode
 
 # Backend-specific settings
@@ -35,7 +38,26 @@ execution:
   # Model profile: opus | sonnet | haiku
   # Claude runtime uses this directly.
   # OpenCode runtime maps profiles to provider-qualified models (default: openai/gpt-5.3-codex).
+  # This is the fallback model for legacy configs and `general` tasks when
+  # `task_type_models` is not configured.
   model: openai/gpt-5.3-codex
+
+  # Optional task-category model routing.
+  # - `general` is required when this block is present.
+  # - `frontend` and `backend` are optional and fall back to `general`.
+  # - Runtime/model compatibility is validated at config load time (fail-fast).
+  # task_type_models:
+  #   general: sonnet
+  #   frontend: opus
+  #   backend: openai/gpt-5.3-codex
+
+  # Fail-fast compatibility examples:
+  # - If `runtime: claude`, GPT-family models fail with:
+  #   "... incompatible with runtime 'claude' ... set runtime to 'opencode'/'both'."
+  # - If `runtime: opencode`, Claude-family models fail with:
+  #   "... incompatible with runtime 'opencode' ... set runtime to 'claude'/'both'."
+  # - If `runtime: both`, unknown model families fail with:
+  #   "... not recognized for runtime 'both' ... Use Claude-family ... or GPT-family ..."
 
   # Run in Docker sandbox by default (safer for autonomous execution)
   # Set to false or use --no-sandbox flag to run directly

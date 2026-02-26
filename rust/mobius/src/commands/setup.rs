@@ -7,6 +7,7 @@ use crate::config::loader::{config_exists, read_config_with_env, write_config};
 use crate::config::paths::{
     find_local_config, get_global_config_dir, get_paths_for_type_with_runtime,
     get_settings_path_for_runtime, get_shortcuts_install_path, resolve_paths,
+    resolve_skills_paths_for_runtime, runtime_targets,
 };
 use crate::config::setup::{
     add_shortcuts_source_line, copy_commands, copy_shortcuts, copy_skills, ensure_runtime_settings,
@@ -40,42 +41,51 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
             .map(|c| c.runtime)
             .unwrap_or(AgentRuntime::Claude);
         let bundled_skills = get_bundled_skills_dir();
+        let resolved_skills_paths = resolve_skills_paths_for_runtime(&paths, runtime);
 
         if bundled_skills.exists() {
-            println!(
-                "{}",
-                format!("Copying skills to {}...", paths.skills_path).dimmed()
-            );
-            copy_skills(&bundled_skills, Path::new(&paths.skills_path))?;
+            for skills_path in &resolved_skills_paths {
+                println!(
+                    "{}",
+                    format!("Copying skills to {}...", skills_path.display()).dimmed()
+                );
+                copy_skills(&bundled_skills, skills_path)?;
+            }
         }
 
         let bundled_commands = get_bundled_commands_dir();
         if bundled_commands.exists() {
             println!("{}", "Copying commands...".dimmed());
-            copy_commands(&bundled_commands, &paths, runtime)?;
+            for runtime_target in runtime_targets(runtime) {
+                copy_commands(&bundled_commands, &paths, *runtime_target)?;
+            }
         }
 
         if paths.config_type == PathConfigType::Local {
             let config_parent = Path::new(&paths.config_path)
                 .parent()
                 .unwrap_or(Path::new("."));
-            let settings_path = get_settings_path_for_runtime(config_parent, runtime);
-            println!(
-                "{}",
-                format!(
-                    "Ensuring .mobius/ permissions in {}...",
-                    settings_path.display()
-                )
-                .dimmed()
-            );
-            ensure_runtime_settings(config_parent, runtime)?;
+            for runtime_target in runtime_targets(runtime) {
+                let settings_path = get_settings_path_for_runtime(config_parent, *runtime_target);
+                println!(
+                    "{}",
+                    format!(
+                        "Ensuring .mobius/ permissions in {}...",
+                        settings_path.display()
+                    )
+                    .dimmed()
+                );
+                ensure_runtime_settings(config_parent, *runtime_target)?;
+            }
         }
 
         println!("{}", "\n✓ Skills and commands updated!\n".green());
-        println!(
-            "{}",
-            format!("Skills updated at: {}", paths.skills_path).dimmed()
-        );
+        for skills_path in resolved_skills_paths {
+            println!(
+                "{}",
+                format!("Skills updated at: {}", skills_path.display()).dimmed()
+            );
+        }
         println!();
         return Ok(());
     }
@@ -270,19 +280,24 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
 
     // Copy skills
     let bundled_skills = get_bundled_skills_dir();
+    let resolved_skills_paths = resolve_skills_paths_for_runtime(&paths, runtime);
     if bundled_skills.exists() {
-        println!(
-            "{}",
-            format!("Copying skills to {}...", paths.skills_path).dimmed()
-        );
-        copy_skills(&bundled_skills, Path::new(&paths.skills_path))?;
+        for skills_path in &resolved_skills_paths {
+            println!(
+                "{}",
+                format!("Copying skills to {}...", skills_path.display()).dimmed()
+            );
+            copy_skills(&bundled_skills, skills_path)?;
+        }
     }
 
     // Copy commands
     let bundled_commands = get_bundled_commands_dir();
     if bundled_commands.exists() {
         println!("{}", "Copying commands...".dimmed());
-        copy_commands(&bundled_commands, &paths, runtime)?;
+        for runtime_target in runtime_targets(runtime) {
+            copy_commands(&bundled_commands, &paths, *runtime_target)?;
+        }
     }
 
     // Copy shortcuts
@@ -329,16 +344,18 @@ pub fn run(update_skills: bool, update_shortcuts: bool, _install: bool) -> anyho
         let project_dir = Path::new(&paths.config_path)
             .parent()
             .unwrap_or(Path::new("."));
-        let settings_path = get_settings_path_for_runtime(project_dir, runtime);
-        println!(
-            "{}",
-            format!(
-                "Ensuring .mobius/ permissions in {}...",
-                settings_path.display()
-            )
-            .dimmed()
-        );
-        ensure_runtime_settings(project_dir, runtime)?;
+        for runtime_target in runtime_targets(runtime) {
+            let settings_path = get_settings_path_for_runtime(project_dir, *runtime_target);
+            println!(
+                "{}",
+                format!(
+                    "Ensuring .mobius/ permissions in {}...",
+                    settings_path.display()
+                )
+                .dimmed()
+            );
+            ensure_runtime_settings(project_dir, *runtime_target)?;
+        }
     }
 
     println!("{}", "\n✓ Setup complete!\n".green());

@@ -40,6 +40,7 @@ curl -fsSL https://raw.githubusercontent.com/Tubular-Health/mobius/main/install.
 - [The 4 Skills](#the-4-skills)
 - [Parallel Execution](#parallel-execution)
 - [Configuration](#configuration)
+- [Breaking-Change Migration](#breaking-change-migration-task-type-routing)
 - [Jira Setup](#jira-setup)
 - [Requirements](#requirements)
 - [CLI Reference](#cli-reference)
@@ -69,7 +70,7 @@ mobius setup         # Interactive setup wizard
 mobius ABC-123       # Start working on an issue
 ```
 
-`mobius setup` prompts for runtime (`claude` or `opencode`) and issue tracker backend.
+`mobius setup` prompts for runtime (`claude`, `opencode`, or `both`) and issue tracker backend.
 
 <p align="center">
   <img src="assets/terminal/setup.svg" alt="Mobius Setup" width="700" />
@@ -84,6 +85,7 @@ The complete workflow transforms an idea into a merged PR through 5 steps:
 Use your configured runtime CLI (`claude` or `opencode`) for skill commands.
 For OpenCode, use `opencode run ...` with a provider-qualified model (default: `openai/gpt-5.3-codex`).
 Use `--thinking-level` to tune OpenCode reasoning effort (`minimal`, `low`, `medium`, `high`, `max`, `xhigh`).
+When `runtime: both` is configured, Mobius routes each task to Claude or OpenCode based on the resolved model family.
 
 ### 1. `/define` — Create the Issue
 
@@ -184,11 +186,16 @@ Edit `~/.config/mobius/config.yaml`:
 
 ```yaml
 backend: linear  # or jira
+runtime: both    # claude | opencode | both
 
 execution:
   delay_seconds: 3
   max_iterations: 50
-  model: opus
+  model: sonnet  # fallback model for legacy configs and general tasks
+  task_type_models:
+    general: sonnet                 # required when task_type_models is present
+    frontend: opus                  # optional (falls back to general)
+    backend: openai/gpt-5.3-codex   # optional (falls back to general)
   sandbox: true
   max_parallel_agents: 3
   worktree_path: "../<repo>-worktrees/"
@@ -212,6 +219,60 @@ mobius config --edit   # Open config in editor
 ```
 
 </details>
+
+---
+
+## Breaking-Change Migration (Task-Type Routing)
+
+Mobius now supports task-category model routing (`frontend`, `backend`, `general`) and `runtime: both`.
+If you are upgrading from older configs/task files, apply these migration steps before running `mobius loop`.
+
+### 1. Update `~/.config/mobius/config.yaml`
+
+- Keep `execution.model` as a fallback model.
+- Add `execution.task_type_models` and set `general` (required).
+- Optionally set `frontend` and `backend`; they fall back to `general` when omitted.
+- Set `runtime: both` only if your model targets intentionally mix Claude-family and GPT-family models.
+
+```yaml
+runtime: both
+
+execution:
+  model: sonnet
+  task_type_models:
+    general: sonnet
+    frontend: opus
+    backend: openai/gpt-5.3-codex
+```
+
+### 2. Update local sub-task context files
+
+Ensure each sub-task JSON includes `taskType` with one of:
+
+- `frontend`
+- `backend`
+- `general`
+
+If `taskType` is missing in legacy files, Mobius treats it as `general` for backward compatibility.
+
+### 3. Expect fail-fast validation for incompatible routing
+
+Mobius validates runtime/model compatibility before execution begins.
+Common migration-time errors include:
+
+- `... uses model 'openai/gpt-...' which is incompatible with runtime 'claude' ... set runtime to 'opencode'/'both'.`
+- `... uses model 'sonnet' which is incompatible with runtime 'opencode' ... set runtime to 'claude'/'both'.`
+- `... uses model 'custom-model' which is not recognized for runtime 'both'. Use Claude-family ... or GPT-family ...`
+- `execution.task_type_models.general is required and must not be empty`
+
+### 4. Verify migration before running the loop
+
+```bash
+mobius doctor
+mobius config
+```
+
+`mobius config` should show runtime routing details for `both` and resolved task model targets.
 
 ---
 

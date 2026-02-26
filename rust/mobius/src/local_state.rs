@@ -368,14 +368,12 @@ pub fn read_subtasks(issue_id: &str) -> Vec<SubTaskContext> {
             continue;
         }
 
-        let content = match fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-
-        let mut task: SubTaskContext = match serde_json::from_str(&content) {
-            Ok(t) => t,
-            Err(_) => continue,
+        let mut task = match parse_subtask_file(&path) {
+            Ok(task) => task,
+            Err(err) => {
+                eprintln!("Skipping invalid sub-task file {}: {err:#}", path.display());
+                continue;
+            }
         };
 
         // Infer identifier from filename if missing
@@ -389,6 +387,14 @@ pub fn read_subtasks(issue_id: &str) -> Vec<SubTaskContext> {
     }
 
     tasks
+}
+
+fn parse_subtask_file(path: &Path) -> Result<SubTaskContext> {
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Failed reading sub-task file {}", path.display()))?;
+
+    serde_json::from_str::<SubTaskContext>(&content)
+        .with_context(|| format!("Failed parsing sub-task file {}", path.display()))
 }
 
 /// Read local sub-tasks and convert to LinearIssue format for buildTaskGraph().
@@ -432,6 +438,7 @@ pub fn read_local_subtasks_as_linear_issues(issue_id: &str) -> Vec<LinearIssue> 
                 title: task.title,
                 status: task.status,
                 git_branch_name: task.git_branch_name,
+                task_type: task.task_type,
                 relations: Some(Relations { blocked_by, blocks }),
                 scoring: task.scoring,
             }
@@ -551,6 +558,7 @@ pub fn write_pending_updates(issue_id: &str, updates: &[LocalPendingUpdate]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::enums::TaskType;
     use std::fs;
     use tempfile::TempDir;
 
@@ -703,6 +711,7 @@ mod tests {
             description: "Do something".to_string(),
             status: "pending".to_string(),
             git_branch_name: String::new(),
+            task_type: crate::types::enums::TaskType::General,
             blocked_by: vec![],
             blocks: vec![],
             scoring: None,
@@ -745,6 +754,7 @@ mod tests {
             description: String::new(),
             status: "pending".to_string(),
             git_branch_name: String::new(),
+            task_type: crate::types::enums::TaskType::General,
             blocked_by: vec![],
             blocks: vec![],
             scoring: None,
@@ -757,6 +767,7 @@ mod tests {
             description: String::new(),
             status: "done".to_string(),
             git_branch_name: String::new(),
+            task_type: crate::types::enums::TaskType::General,
             blocked_by: vec![],
             blocks: vec![],
             scoring: None,
@@ -798,6 +809,7 @@ mod tests {
                 title: task.title,
                 status: task.status.clone(),
                 git_branch_name: task.git_branch_name,
+                task_type: TaskType::General,
                 relations: None,
                 scoring: None,
             };
@@ -940,6 +952,125 @@ mod tests {
         assert_eq!(task.blocked_by[0].id, "task-001");
         assert_eq!(task.blocked_by[0].identifier, "MOB-101");
         assert_eq!(task.blocks[0].identifier, "MOB-104");
+    }
+
+    #[test]
+    fn test_read_local_subtasks_preserves_task_type() {
+        let issue_id = format!("TEST-TASK-TYPE-{}", Uuid::new_v4());
+        let tasks_dir = get_project_mobius_path()
+            .join("issues")
+            .join(&issue_id)
+            .join("tasks");
+        fs::create_dir_all(&tasks_dir).unwrap();
+
+        let task = serde_json::json!({
+            "id": "task-frontend",
+            "identifier": "task-frontend",
+            "title": "Frontend task",
+            "description": "",
+            "status": "pending",
+            "gitBranchName": "",
+            "taskType": "frontend",
+            "blockedBy": [],
+            "blocks": []
+        });
+
+        fs::write(
+            tasks_dir.join("task-frontend.json"),
+            serde_json::to_string_pretty(&task).unwrap(),
+        )
+        .unwrap();
+
+        let issues = read_local_subtasks_as_linear_issues(&issue_id);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].task_type, TaskType::Frontend);
+
+        fs::remove_dir_all(get_project_mobius_path().join("issues").join(&issue_id)).unwrap();
+    }
+
+    #[test]
+    fn test_read_local_subtasks_defaults_legacy_task_type_to_general() {
+        let issue_id = format!("TEST-TASK-LEGACY-{}", Uuid::new_v4());
+        let tasks_dir = get_project_mobius_path()
+            .join("issues")
+            .join(&issue_id)
+            .join("tasks");
+        fs::create_dir_all(&tasks_dir).unwrap();
+
+        let legacy_task = serde_json::json!({
+            "id": "task-legacy",
+            "identifier": "task-legacy",
+            "title": "Legacy task",
+            "description": "",
+            "status": "pending",
+            "gitBranchName": "",
+            "blockedBy": [],
+            "blocks": []
+        });
+
+        fs::write(
+            tasks_dir.join("task-legacy.json"),
+            serde_json::to_string_pretty(&legacy_task).unwrap(),
+        )
+        .unwrap();
+
+        let issues = read_local_subtasks_as_linear_issues(&issue_id);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].task_type, TaskType::General);
+
+        fs::remove_dir_all(get_project_mobius_path().join("issues").join(&issue_id)).unwrap();
+    }
+
+    #[test]
+    fn test_read_local_subtasks_skips_invalid_task_type_file() {
+        let issue_id = format!("TEST-TASK-INVALID-{}", Uuid::new_v4());
+        let tasks_dir = get_project_mobius_path()
+            .join("issues")
+            .join(&issue_id)
+            .join("tasks");
+        fs::create_dir_all(&tasks_dir).unwrap();
+
+        let valid_task = serde_json::json!({
+            "id": "task-valid",
+            "identifier": "task-valid",
+            "title": "Valid task",
+            "description": "",
+            "status": "pending",
+            "gitBranchName": "",
+            "taskType": "backend",
+            "blockedBy": [],
+            "blocks": []
+        });
+
+        let invalid_task = serde_json::json!({
+            "id": "task-invalid",
+            "identifier": "task-invalid",
+            "title": "Invalid task",
+            "description": "",
+            "status": "pending",
+            "gitBranchName": "",
+            "taskType": "mobile",
+            "blockedBy": [],
+            "blocks": []
+        });
+
+        fs::write(
+            tasks_dir.join("task-valid.json"),
+            serde_json::to_string_pretty(&valid_task).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            tasks_dir.join("task-invalid.json"),
+            serde_json::to_string_pretty(&invalid_task).unwrap(),
+        )
+        .unwrap();
+
+        let issues = read_local_subtasks_as_linear_issues(&issue_id);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].id, "task-valid");
+        assert_eq!(issues[0].task_type, TaskType::Backend);
+
+        fs::remove_dir_all(get_project_mobius_path().join("issues").join(&issue_id)).unwrap();
     }
 
     #[test]
@@ -1107,6 +1238,7 @@ mod tests {
             description: String::new(),
             status: "pending".to_string(),
             git_branch_name: String::new(),
+            task_type: crate::types::enums::TaskType::General,
             blocked_by: vec![],
             blocks: vec![],
             scoring: None,
@@ -1189,6 +1321,7 @@ mod tests {
             title: "First".to_string(),
             status: "done".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1199,6 +1332,7 @@ mod tests {
             title: "Second".to_string(),
             status: "done".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1229,6 +1363,7 @@ mod tests {
             title: "Task".to_string(),
             status: "ready".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1239,6 +1374,7 @@ mod tests {
             title: "Task".to_string(),
             status: "in_progress".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1272,6 +1408,7 @@ mod tests {
             title: "Task".to_string(),
             status: "done".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };
@@ -1282,6 +1419,7 @@ mod tests {
             title: "Task".to_string(),
             status: "pending".to_string(),
             git_branch_name: String::new(),
+            task_type: TaskType::General,
             relations: None,
             scoring: None,
         };

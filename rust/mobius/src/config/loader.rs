@@ -168,10 +168,123 @@ pub fn validate_config(config: &LoopConfig) -> ValidationResult {
         validate_verification_config(verification, &mut errors);
     }
 
+    validate_task_type_model_routing(config, &mut errors);
+
     ValidationResult {
         valid: errors.is_empty(),
         errors,
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModelFamily {
+    Claude,
+    Gpt,
+    Unknown,
+}
+
+fn detect_model_family(raw_model: &str) -> ModelFamily {
+    let normalized = raw_model.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return ModelFamily::Unknown;
+    }
+
+    if matches!(normalized.as_str(), "opus" | "sonnet" | "haiku")
+        || normalized.starts_with("claude")
+        || normalized.starts_with("anthropic/")
+        || normalized.contains("claude-")
+    {
+        return ModelFamily::Claude;
+    }
+
+    if normalized.starts_with("openai/")
+        || normalized.starts_with("gpt-")
+        || normalized.contains("/gpt-")
+    {
+        return ModelFamily::Gpt;
+    }
+
+    ModelFamily::Unknown
+}
+
+fn validate_model_runtime_compatibility(
+    runtime: AgentRuntime,
+    field_name: &str,
+    model: &str,
+    errors: &mut Vec<String>,
+) {
+    let model = model.trim();
+    if model.is_empty() {
+        errors.push(format!("{field_name} must not be empty"));
+        return;
+    }
+
+    let family = detect_model_family(model);
+    let is_compatible = match runtime {
+        AgentRuntime::Claude => family == ModelFamily::Claude,
+        AgentRuntime::Opencode => {
+            crate::runtime_adapter::resolve_runtime_for_model(AgentRuntime::Opencode, model).is_ok()
+        }
+        AgentRuntime::Both => family == ModelFamily::Claude || family == ModelFamily::Gpt,
+    };
+
+    if is_compatible {
+        return;
+    }
+
+    match runtime {
+        AgentRuntime::Claude => errors.push(format!(
+            "{field_name} uses model '{model}' which is incompatible with runtime 'claude'. Use a Claude-family model (opus/sonnet/haiku or anthropic/claude-*), or set runtime to 'opencode'/'both'."
+        )),
+        AgentRuntime::Opencode => errors.push(format!(
+            "{field_name} uses model '{model}' which is incompatible with runtime 'opencode'. Use a GPT-family model (openai/gpt-* or gpt-*), or set runtime to 'claude'/'both'."
+        )),
+        AgentRuntime::Both => errors.push(format!(
+            "{field_name} uses model '{model}' which is not recognized for runtime 'both'. Use Claude-family (opus/sonnet/haiku or anthropic/claude-*) or GPT-family (openai/gpt-* or gpt-*)."
+        )),
+    }
+}
+
+fn validate_task_type_model_routing(config: &LoopConfig, errors: &mut Vec<String>) {
+    validate_model_runtime_compatibility(
+        config.runtime,
+        "execution.model",
+        &config.execution.model,
+        errors,
+    );
+
+    let Some(ref routing) = config.execution.task_type_models else {
+        return;
+    };
+
+    if let Err(error) = routing.validate() {
+        errors.push(error);
+    }
+
+    if let Some(frontend) = routing.frontend.as_deref() {
+        validate_model_runtime_compatibility(
+            config.runtime,
+            "execution.task_type_models.frontend",
+            frontend,
+            errors,
+        );
+    }
+
+    if let Some(backend) = routing.backend.as_deref() {
+        validate_model_runtime_compatibility(
+            config.runtime,
+            "execution.task_type_models.backend",
+            backend,
+            errors,
+        );
+    }
+
+    validate_model_runtime_compatibility(
+        config.runtime,
+        "execution.task_type_models.general",
+        &routing.general,
+        errors,
+    );
 }
 
 fn validate_jira_config(config: &LoopConfig, errors: &mut Vec<String>) {
@@ -547,5 +660,91 @@ execution:
             .errors
             .iter()
             .any(|e| e.contains("max_rework_iterations")));
+    }
+
+    #[test]
+    fn test_validate_config_rejects_missing_general_task_type_model() {
+        let mut config = LoopConfig::default();
+        config.execution.task_type_models =
+            Some(crate::types::config::TaskTypeModelRoutingConfig {
+                frontend: Some("sonnet".to_string()),
+                backend: Some("openai/gpt-5.3-codex".to_string()),
+                general: "   ".to_string(),
+            });
+
+        let result = validate_config(&config);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|error| {
+            error.contains("execution.task_type_models.general is required and must not be empty")
+        }));
+    }
+
+    #[test]
+    fn test_validate_config_rejects_gpt_model_for_claude_runtime() {
+        let mut config = LoopConfig::default();
+        config.runtime = AgentRuntime::Claude;
+        config.execution.model = "openai/gpt-5.3-codex".to_string();
+
+        let result = validate_config(&config);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|error| {
+            error.contains("execution.model uses model 'openai/gpt-5.3-codex'")
+                && error.contains("runtime 'claude'")
+                && error.contains("runtime to 'opencode'/'both'")
+        }));
+    }
+
+    #[test]
+    fn test_validate_config_rejects_claude_model_for_opencode_runtime() {
+        let mut config = LoopConfig::default();
+        config.runtime = AgentRuntime::Opencode;
+        config.execution.task_type_models =
+            Some(crate::types::config::TaskTypeModelRoutingConfig {
+                frontend: Some("claude-sonnet-4-5".to_string()),
+                backend: Some("openai/gpt-5.3-codex".to_string()),
+                general: "openai/gpt-5.3-codex".to_string(),
+            });
+
+        let result = validate_config(&config);
+        assert!(!result.valid);
+        assert!(result.errors.iter().any(|error| {
+            error.contains("execution.task_type_models.frontend uses model 'claude-sonnet-4-5'")
+                && error.contains("runtime 'opencode'")
+                && error.contains("runtime to 'claude'/'both'")
+        }));
+    }
+
+    #[test]
+    fn test_validate_config_accepts_legacy_profile_alias_for_opencode_runtime() {
+        let mut config = LoopConfig::default();
+        config.runtime = AgentRuntime::Opencode;
+        config.execution.model = "sonnet".to_string();
+
+        let result = validate_config(&config);
+        assert!(
+            result.valid,
+            "runtime opencode should accept legacy model aliases: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_validate_config_accepts_runtime_both_with_mixed_model_families() {
+        let mut config = LoopConfig::default();
+        config.runtime = AgentRuntime::Both;
+        config.execution.model = "sonnet".to_string();
+        config.execution.task_type_models =
+            Some(crate::types::config::TaskTypeModelRoutingConfig {
+                frontend: Some("anthropic/claude-3-7-sonnet-latest".to_string()),
+                backend: Some("openai/gpt-5.3-codex".to_string()),
+                general: "sonnet".to_string(),
+            });
+
+        let result = validate_config(&config);
+        assert!(
+            result.valid,
+            "runtime both should accept mixed model families: {:?}",
+            result.errors
+        );
     }
 }

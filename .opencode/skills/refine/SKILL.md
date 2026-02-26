@@ -174,6 +174,7 @@ mkdir -p .mobius/issues/{parent-id}/tasks
 ```json
 {
   "id": "task-001",
+  "taskType": "general",
   "title": "[{parent-id}] {sub-task title}",
   "description": "## Summary\n{Brief description}\n\n## Context\nPart of {parent-id}: {parent title}\n\n## Target File(s)\n`{file-path}` ({Create/Modify})\n\n## Action\n{Specific implementation guidance}\n\n## Avoid\n- Do NOT {anti-pattern} because {reason}\n\n## Acceptance Criteria\n- [ ] {Criterion 1}\n  * **Verification**: {how to verify}\n- [ ] {Criterion 2}\n\n## Verify Command\n```bash\n{executable verification command}\n```",
   "status": "pending",
@@ -183,6 +184,14 @@ mkdir -p .mobius/issues/{parent-id}/tasks
   "parentId": "{parent-id}"
 }
 ```
+
+**Required field**: Every implementation sub-task JSON MUST include `taskType` with one of: `frontend`, `backend`, `general`.
+
+Task-type assignment guidance:
+- Use `frontend` for UI/presentation work (components, styling, client interactions)
+- Use `backend` for server/runtime/core logic work (API, data, execution internals)
+- Use `general` for cross-cutting or neutral orchestration/docs/infra work
+- Never emit free-form values outside `frontend|backend|general`
 
 **Write each sub-task using the Write tool**:
 
@@ -234,6 +243,7 @@ Or if no context.json exists, create one:
     {
       "id": "task-001",
       "identifier": "task-001",
+      "taskType": "general",
       "title": "[{parent-id}] {sub-task title}",
       "status": "pending",
       "blockedBy": [],
@@ -454,6 +464,9 @@ Task tool:
     ## Target File(s)
     `{file-path}` ({Create/Modify})
 
+    ## Task Type
+    {Exactly one of: frontend | backend | general}
+
     ## Action
     {2-4 sentences of specific implementation guidance}
     - Use {library/pattern} following `{existing example file}`
@@ -489,6 +502,7 @@ Task tool:
 2. Target file paths are concrete (no placeholders)
 3. Verify command is executable (not pseudocode)
 4. Acceptance criteria are measurable
+5. Task type is present and valid (`frontend|backend|general`)
 
 **On failure**:
 - If a subagent returns incomplete or malformed output, retry once with a clarifying note
@@ -592,9 +606,10 @@ Determine blocking order based on functional requirements:
 6. **Identify parallel groups** — Group tasks that share no mutual dependencies for concurrent execution
 7. **Add verification gate** — Append the verification gate sub-task blocked by ALL implementation tasks, with the aggregated verify commands from step 5 included in its description
 8. **Quality checks**:
-   - Each sub-task targets a single file (or tightly-coupled pair)
-   - No duplicate target files across sub-tasks
-   - All template sections are complete (Summary, Context, Target Files, Action, Avoid, Acceptance Criteria, Verify Command)
+    - Each sub-task targets a single file (or tightly-coupled pair)
+    - No duplicate target files across sub-tasks
+    - Every implementation sub-task includes `taskType` with allowed values `frontend|backend|general`
+    - All template sections are complete (Summary, Context, Target Files, Action, Avoid, Acceptance Criteria, Verify Command)
    - Verify commands are executable (not pseudocode)
    - Acceptance criteria are measurable
    - Verification Gate description includes aggregated verify commands from all sub-tasks
@@ -1230,6 +1245,7 @@ A successful refinement produces:
 - [ ] All affected files identified through deep exploration
 - [ ] Each sub-task targets exactly one file (or source + test pair)
 - [ ] Every sub-task has clear, verifiable acceptance criteria
+- [ ] Every implementation sub-task JSON includes `taskType` set to `frontend`, `backend`, or `general`
 - [ ] Each sub-task validated with user via AskUserQuestion (for complex breakdowns)
 - [ ] Blocking relationships are logically sound
 - [ ] No circular dependencies exist
@@ -1257,9 +1273,10 @@ After running `/refine {issue-id}`, verify the results.
 
 1. **Directory exists**: `.mobius/issues/{parent-id}/tasks/` directory was created
 2. **Task files written**: Each `task-{NNN}.json` file contains valid JSON
-3. **Verification gate**: `task-VG.json` exists and is blocked by all implementation tasks
-4. **Context file**: `.mobius/issues/{parent-id}/context.json` exists with correct subTasks array
-5. **Blocking relationships**: Each task's `blockedBy` array references valid task IDs
+3. **Task types present**: Each implementation `task-{NNN}.json` includes valid `taskType` (`frontend|backend|general`)
+4. **Verification gate**: `task-VG.json` exists and is blocked by all implementation tasks
+5. **Context file**: `.mobius/issues/{parent-id}/context.json` exists with correct subTasks array
+6. **Blocking relationships**: Each task's `blockedBy` array references valid task IDs
 </local_file_verification>
 
 <parent_fetch_verification>

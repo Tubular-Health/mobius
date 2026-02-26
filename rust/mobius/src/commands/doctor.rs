@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::config::loader::{read_config, read_config_with_env};
-use crate::config::paths::resolve_paths;
+use crate::config::paths::{resolve_paths, resolve_skills_paths_for_runtime};
 use crate::types::enums::{AgentRuntime, Backend};
 
 struct CheckResult {
@@ -74,18 +74,27 @@ struct RuntimeCliSpec {
     install_hint: &'static str,
 }
 
-fn runtime_cli_spec(runtime: AgentRuntime) -> RuntimeCliSpec {
+fn runtime_cli_spec_claude() -> RuntimeCliSpec {
+    RuntimeCliSpec {
+        command: "claude",
+        display_name: "Claude CLI",
+        install_hint: "Install: npm install -g @anthropic-ai/claude-code",
+    }
+}
+
+fn runtime_cli_spec_opencode() -> RuntimeCliSpec {
+    RuntimeCliSpec {
+        command: "opencode",
+        display_name: "OpenCode CLI",
+        install_hint: "Install opencode and ensure it is available in PATH",
+    }
+}
+
+fn runtime_cli_specs(runtime: AgentRuntime) -> Vec<RuntimeCliSpec> {
     match runtime {
-        AgentRuntime::Claude => RuntimeCliSpec {
-            command: "claude",
-            display_name: "Claude CLI",
-            install_hint: "Install: npm install -g @anthropic-ai/claude-code",
-        },
-        AgentRuntime::Opencode => RuntimeCliSpec {
-            command: "opencode",
-            display_name: "OpenCode CLI",
-            install_hint: "Install opencode and ensure it is available in PATH",
-        },
+        AgentRuntime::Claude => vec![runtime_cli_spec_claude()],
+        AgentRuntime::Opencode => vec![runtime_cli_spec_opencode()],
+        AgentRuntime::Both => vec![runtime_cli_spec_claude(), runtime_cli_spec_opencode()],
     }
 }
 
@@ -98,24 +107,65 @@ where
     F: Fn(&str) -> bool,
     G: Fn(&str) -> Option<String>,
 {
-    let spec = runtime_cli_spec(runtime);
+    let specs = runtime_cli_specs(runtime);
 
-    if command_exists(spec.command) {
-        let version = command_version(spec.command).unwrap_or_else(|| "unknown version".into());
+    if specs.len() == 1 {
+        let spec = &specs[0];
+
+        return if command_exists(spec.command) {
+            let version = command_version(spec.command).unwrap_or_else(|| "unknown version".into());
+            CheckResult {
+                name: spec.display_name.into(),
+                status: CheckStatus::Pass,
+                message: format!("Installed ({})", version),
+                required: true,
+                details: None,
+            }
+        } else {
+            CheckResult {
+                name: spec.display_name.into(),
+                status: CheckStatus::Fail,
+                message: "Not found".into(),
+                required: true,
+                details: Some(spec.install_hint.into()),
+            }
+        };
+    }
+
+    let mut installed_versions = Vec::new();
+    let mut missing_specs = Vec::new();
+
+    for spec in specs {
+        if command_exists(spec.command) {
+            let version = command_version(spec.command).unwrap_or_else(|| "unknown version".into());
+            installed_versions.push(format!("{}: {}", spec.display_name, version));
+        } else {
+            missing_specs.push(spec);
+        }
+    }
+
+    if missing_specs.is_empty() {
         CheckResult {
-            name: spec.display_name.into(),
+            name: "Runtime CLIs".into(),
             status: CheckStatus::Pass,
-            message: format!("Installed ({})", version),
+            message: format!("Installed ({})", installed_versions.join("; ")),
             required: true,
             details: None,
         }
     } else {
+        let missing_names: Vec<_> = missing_specs.iter().map(|spec| spec.display_name).collect();
+        let install_hints = missing_specs
+            .iter()
+            .map(|spec| format!("{}: {}", spec.display_name, spec.install_hint))
+            .collect::<Vec<_>>()
+            .join("\n");
+
         CheckResult {
-            name: spec.display_name.into(),
+            name: "Runtime CLIs".into(),
             status: CheckStatus::Fail,
-            message: "Not found".into(),
+            message: format!("Missing: {}", missing_names.join(", ")),
             required: true,
-            details: Some(spec.install_hint.into()),
+            details: Some(install_hints),
         }
     }
 }
@@ -153,23 +203,33 @@ fn check_config(config_path: &str) -> CheckResult {
     }
 }
 
-fn check_path(skills_path: &str) -> CheckResult {
-    if Path::new(skills_path).exists() {
-        CheckResult {
+fn check_skills_paths(skills_paths: &[std::path::PathBuf]) -> CheckResult {
+    let missing: Vec<String> = skills_paths
+        .iter()
+        .filter(|path| !path.exists())
+        .map(|path| path.display().to_string())
+        .collect();
+
+    if missing.is_empty() {
+        let found: Vec<String> = skills_paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect();
+        return CheckResult {
             name: "Skills path".into(),
             status: CheckStatus::Pass,
-            message: format!("Found at {}", skills_path),
+            message: format!("Found at {}", found.join(", ")),
             required: true,
             details: None,
-        }
-    } else {
-        CheckResult {
-            name: "Skills path".into(),
-            status: CheckStatus::Fail,
-            message: format!("Not found at {}", skills_path),
-            required: true,
-            details: Some("Run 'mobius setup' to install skills".into()),
-        }
+        };
+    }
+
+    CheckResult {
+        name: "Skills path".into(),
+        status: CheckStatus::Fail,
+        message: format!("Missing: {}", missing.join(", ")),
+        required: true,
+        details: Some("Run 'mobius setup --update-skills' to install runtime skills".into()),
     }
 }
 
@@ -381,7 +441,8 @@ pub fn run() -> anyhow::Result<()> {
     println!("{}", format_result(&config_result));
     results.push(config_result);
 
-    let path_result = check_path(&paths.skills_path);
+    let runtime_skills_paths = resolve_skills_paths_for_runtime(&paths, runtime);
+    let path_result = check_skills_paths(&runtime_skills_paths);
     println!("{}", format_result(&path_result));
     results.push(path_result);
 
@@ -464,14 +525,61 @@ mod tests {
     use super::*;
 
     #[test]
-    fn runtime_cli_spec_uses_expected_command_and_label() {
-        let claude = runtime_cli_spec(AgentRuntime::Claude);
+    fn runtime_cli_specs_uses_expected_command_and_label() {
+        let claude = runtime_cli_specs(AgentRuntime::Claude);
+        assert_eq!(claude.len(), 1);
+        let claude = &claude[0];
         assert_eq!(claude.command, "claude");
         assert_eq!(claude.display_name, "Claude CLI");
 
-        let opencode = runtime_cli_spec(AgentRuntime::Opencode);
+        let opencode = runtime_cli_specs(AgentRuntime::Opencode);
+        assert_eq!(opencode.len(), 1);
+        let opencode = &opencode[0];
         assert_eq!(opencode.command, "opencode");
         assert_eq!(opencode.display_name, "OpenCode CLI");
+    }
+
+    #[test]
+    fn both_runtime_requires_both_clis() {
+        let result = check_runtime_cli_with(
+            AgentRuntime::Both,
+            |command| command == "claude",
+            |command| {
+                if command == "claude" {
+                    Some("claude 1.0.0".to_string())
+                } else {
+                    None
+                }
+            },
+        );
+
+        assert!(matches!(result.status, CheckStatus::Fail));
+        assert_eq!(result.name, "Runtime CLIs");
+        assert_eq!(result.message, "Missing: OpenCode CLI");
+        assert!(result
+            .details
+            .as_deref()
+            .unwrap_or_default()
+            .contains("OpenCode CLI"));
+        assert!(result
+            .details
+            .as_deref()
+            .unwrap_or_default()
+            .contains("Install opencode"));
+    }
+
+    #[test]
+    fn both_runtime_passes_when_both_clis_are_installed() {
+        let result = check_runtime_cli_with(
+            AgentRuntime::Both,
+            |command| command == "claude" || command == "opencode",
+            |command| Some(format!("{} 1.0.0", command)),
+        );
+
+        assert!(matches!(result.status, CheckStatus::Pass));
+        assert_eq!(result.name, "Runtime CLIs");
+        assert!(result.message.contains("Claude CLI: claude 1.0.0"));
+        assert!(result.message.contains("OpenCode CLI: opencode 1.0.0"));
     }
 
     #[test]
@@ -499,5 +607,31 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("opencode"));
+    }
+
+    #[test]
+    fn check_skills_paths_passes_when_all_paths_exist() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude").join("skills");
+        let opencode = tmp.path().join(".opencode").join("skills");
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::create_dir_all(&opencode).unwrap();
+
+        let result = check_skills_paths(&[claude, opencode]);
+        assert!(matches!(result.status, CheckStatus::Pass));
+        assert!(result.message.contains(".claude"));
+        assert!(result.message.contains(".opencode"));
+    }
+
+    #[test]
+    fn check_skills_paths_fails_when_any_runtime_path_is_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join(".claude").join("skills");
+        let opencode = tmp.path().join(".opencode").join("skills");
+        std::fs::create_dir_all(&claude).unwrap();
+
+        let result = check_skills_paths(&[claude, opencode.clone()]);
+        assert!(matches!(result.status, CheckStatus::Fail));
+        assert!(result.message.contains(&opencode.display().to_string()));
     }
 }
